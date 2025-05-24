@@ -164,7 +164,7 @@ async def cmd_start(message: Message) -> None:
     welcome_text = f"""
 {greeting}, <b>{user_name}</b>! {emoji}
 
-🎮 Вітаю в <b>MLBB Expert Chat Bot</b>!
+🎮 Вітаю в <b>MLBB IUI mini</b>!
 
 Я — твій персональний експерт із Mobile Legends: Bang Bang.
 Готовий відповісти на будь-яке твоє запитання про гру!
