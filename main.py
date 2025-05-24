@@ -1,7 +1,12 @@
 """
 main.py
-Мінімальна асинхронна робоча версія Telegram-бота для MLBB-спільноти на основі aiogram 3.19+ та Python 3.11+.
-Інтеграція GPT для обробки запитів через команду /go.
+Мінімальна асинхронна версія Telegram-бота для MLBB-спільноти на основі aiogram 3.19+ та Python 3.11+.
+Додає інтеграцію GPT-4 Vision для аналізу скріншотів по команді /vision.
+
+Рекомендації:
+- Для роботи потрібні TELEGRAM_BOT_TOKEN і OPENAI_API_KEY у конфігурації (Heroku Config Vars або .env).
+- Працює тільки з зображеннями (фото/скріншоти) до 10 МБ.
+- Відповідь GPT завжди повертається текстом без HTML.
 """
 
 import asyncio
@@ -16,15 +21,16 @@ from aiogram.types import Message
 from aiogram.client.default import DefaultBotProperties
 from aiohttp import ClientSession
 from dotenv import load_dotenv
+from io import BytesIO
 
-# --- Logging setup ---
+# --- Налаштування логування ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s]: %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# --- Load env vars ---
+# --- Завантаження змінних середовища ---
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -35,7 +41,7 @@ if not TELEGRAM_BOT_TOKEN:
     raise RuntimeError("TELEGRAM_BOT_TOKEN is required in environment variables.")
 
 if not OPENAI_API_KEY:
-    logger.error("OPENAI_API_KEY не встановлено! GPT-функціонал буде недоступний.")
+    logger.error("OPENAI_API_KEY не встановлено! Vision-функціонал буде недоступний.")
     raise RuntimeError("OPENAI_API_KEY is required in environment variables.")
 
 __all__ = ["TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY"]
@@ -47,71 +53,116 @@ bot: Bot = Bot(
 dp: Dispatcher = Dispatcher()
 
 
-@dp.message(Command("start"))
-async def cmd_start(message: Message) -> None:
+# =======================
+# Vision аналіз зображень
+# =======================
+async def analyze_image_with_vision(image_bytes: bytes) -> str:
     """
-    Відповідає на команду /start.
-    :param message: Об'єкт повідомлення від користувача.
+    Надсилає зображення до GPT-4 Vision (OpenAI API) і повертає аналіз.
+    :param image_bytes: Байт-контент зображення.
+    :return: Текст аналізу або повідомлення про помилку.
     """
-    await message.answer(
-        "Вітаю! 🤖 Бот успішно запущено.\n"
-        "Це мінімальна асинхронна версія для MLBB-спільноти.\n\n"
-        "Спробуйте команду /go <ваш запит>, щоб отримати відповідь від GPT!",
-        parse_mode=None  # Вимикаємо HTML, щоб уникнути проблем із тегами
+    # Кодуємо зображення у base64 для передачі в data_url
+    import base64
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+    data_uri = f"data:image/jpeg;base64,{image_base64}"
+
+    # Системний промпт: можна кастомізувати під MLBB
+    vision_prompt = (
+        "Це скріншот з ігрового акаунта Mobile Legends: Bang Bang.\n"
+        "Опиши, що саме на ньому зображено, які основні ігрові дані видно, "
+        "та дай коротку пораду гравцю. Відповідай українською мовою."
     )
-
-
-@dp.message(Command("go"))
-async def cmd_go(message: Message) -> None:
-    """
-    Обробляє команду /go, надсилає запит до GPT-4 і повертає відповідь.
-    :param message: Об'єкт повідомлення від користувача.
-    """
-    user_query = message.text.replace("/go", "", 1).strip()
-
-    if not user_query:
-        await message.reply("Будь ласка, введіть запит після команди /go.", parse_mode=None)
-        return
-
-    await message.reply("GPT обробляє ваш запит, зачекайте...", parse_mode=None)
-
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}"
-    }
+    messages = [
+        {
+            "role": "system",
+            "content": "Ти — аналітик ігрових скріншотів Mobile Legends."
+        },
+        {
+            "role": "user",
+            "content": f"{vision_prompt}\n\nЗображення (base64):\n{data_uri}"
+        },
+    ]
     payload = {
-        "model": "gpt-4",
-        "messages": [
-            {"role": "system", "content": "Ви — асистент для Mobile Legends Bang Bang. Відповідай лаконічно та інформативно, не використовуй HTML-теги."},
-            {"role": "user", "content": user_query}
-        ],
-        "max_tokens": 200,
-        "temperature": 0.7
+        "model": "gpt-4-vision-preview",
+        "messages": messages,
+        "max_tokens": 512,
+        "temperature": 0.4,
+    }
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
     }
 
+    # Відправляємо запит до OpenAI Vision API
     async with ClientSession() as session:
         try:
             async with session.post(
                 "https://api.openai.com/v1/chat/completions",
+                headers=headers,
                 json=payload,
-                headers=headers
+                timeout=40
             ) as response:
                 if response.status != 200:
-                    logger.error(f"Помилка API OpenAI: {response.status}")
-                    await message.reply("Не вдалося отримати відповідь від GPT.", parse_mode=None)
-                    return
-
+                    error_text = await response.text()
+                    logger.error(f"Vision API error: {response.status} - {error_text}")
+                    return "❌ Не вдалося отримати аналіз скріншота. Спробуйте ще раз."
                 result = await response.json()
-                gpt_response = result["choices"][0]["message"]["content"]
-                # Вирізаємо потенційні HTML-теги (навіть якщо GPT їх додав)
-                import re
-                clean_resp = re.sub(r"<[^>]*>", "", gpt_response)
-                await message.reply(f"GPT відповідає:\n\n{clean_resp}", parse_mode=None)
-
+                return result["choices"][0]["message"]["content"].strip()
         except Exception as e:
-            logger.exception(f"Помилка виклику OpenAI API: {e}")
-            await message.reply("Сталася помилка при спробі отримати відповідь від GPT.", parse_mode=None)
+            logger.exception(f"Помилка аналізу скріншота: {e}")
+            return "❌ Сталася помилка під час аналізу скріншота."
 
 
+# ===========================
+# Обробник команди /vision
+# ===========================
+@dp.message(Command("vision"))
+async def cmd_vision_instruct(message: Message) -> None:
+    """
+    Інструктує користувача надіслати скріншот для аналізу.
+    """
+    await message.reply(
+        "📸 Надішліть скріншот профілю, статистики або матчу MLBB як фото у відповідь на це повідомлення.\n"
+        "Бот проаналізує його за допомогою GPT-4 Vision та поверне результат.",
+        reply_to_message_id=message.message_id,
+        parse_mode=None
+    )
+
+
+# ===============================
+# Обробка отриманих скріншотів
+# ===============================
+@dp.message(lambda m: m.reply_to_message and m.reply_to_message.text and "/vision" in m.reply_to_message.text, lambda m: m.photo)
+async def handle_vision_screenshot(message: Message) -> None:
+    """
+    Приймає скріншот у відповідь на /vision, аналізує його через GPT-4 Vision і повертає результат.
+    :param message: Об'єкт повідомлення з фотографією.
+    """
+    photo = message.photo[-1]  # Найякісніше зображення
+    try:
+        # Завантажуємо байти зображення
+        file = await bot.get_file(photo.file_id)
+        image_bytes_io = await bot.download_file(file.file_path)
+        image_bytes = await image_bytes_io.read()
+        if len(image_bytes) > 10 * 1024 * 1024:
+            await message.reply("❌ Зображення занадто велике (максимум 10 МБ).")
+            return
+
+        await message.reply("⏳ Виконується аналіз скріншота... Це може зайняти до 30 секунд.", parse_mode=None)
+
+        vision_result = await analyze_image_with_vision(image_bytes)
+        # Відправляємо результат текстом, уникаючи HTML тегів
+        await message.reply(vision_result, parse_mode=None)
+
+    except Exception as exc:
+        logger.exception(f"Помилка під час обробки скріншота: {exc}")
+        await message.reply("❌ Сталася помилка під час обробки скріншота.", parse_mode=None)
+
+
+# =========================
+# Глобальний error handler
+# =========================
 @dp.errors()
 async def global_error_handler(event: Any, exception: Exception) -> Any:
     """
@@ -120,9 +171,12 @@ async def global_error_handler(event: Any, exception: Exception) -> Any:
     :param exception: Виняток, що виник.
     """
     logger.error(f"Виникла помилка: {exception}", exc_info=True)
-    # Можна додати логіку сповіщення адміністратора або відправки повідомлення в чат
+    # За потреби можна додати сповіщення адміну
 
 
+# =========================
+# Запуск бота
+# =========================
 async def main() -> None:
     """
     Основний цикл запуску бота.
