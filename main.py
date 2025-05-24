@@ -1,7 +1,7 @@
 """
 main.py
-Мінімальна робоча версія Telegram-бота на aiogram 3.19+ (Python 3.11+).
-Відповідає найкращим практикам: асинхронність, типізація, PEP8, докладні docstrings, якісна обробка помилок.
+Мінімальна асинхронна робоча версія Telegram-бота для MLBB-спільноти на основі aiogram 3.19+ та Python 3.11+.
+Створено з урахуванням світових стандартів якості, типізації, PEP 8, докладних docstrings і коректної обробки помилок.
 """
 
 import asyncio
@@ -11,7 +11,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import Message
-from aiogram import F
+from aiogram.client.default import DefaultBotProperties
 from typing import Any
 
 # --- Налаштування логування ---
@@ -30,10 +30,13 @@ if not TELEGRAM_BOT_TOKEN:
 __all__ = ["TELEGRAM_BOT_TOKEN"]
 
 # --- Ініціалізація бота та диспетчера ---
-bot: Bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
+bot: Bot = Bot(
+    token=TELEGRAM_BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 dp: Dispatcher = Dispatcher()
 
-# --- Обробник команди /start ---
+
 @dp.message(Command("start"))
 async def cmd_start(message: Message) -> None:
     """
@@ -42,11 +45,11 @@ async def cmd_start(message: Message) -> None:
     """
     await message.answer(
         "Вітаю! 🤖 Бот успішно запущено.\n"
-        "Це мінімальна асинхронна версія для MLBB спільноти.\n\n"
+        "Це мінімальна асинхронна версія для MLBB-спільноти.\n\n"
         "Спробуйте додати нові команди — інфраструктура вже готова!"
     )
 
-# --- Загальна обробка помилок ---
+
 @dp.errors()
 async def global_error_handler(update: Any, exception: Exception) -> None:
     """
@@ -55,9 +58,9 @@ async def global_error_handler(update: Any, exception: Exception) -> None:
     :param exception: Виняток, що виник.
     """
     logger.error(f"Виникла помилка: {exception}", exc_info=True)
-    # Можна додати логіку сповіщення адміна, тощо
+    # Можна додати логіку сповіщення адміністратора або відправки повідомлення в чат
 
-# --- Головна асинхронна функція ---
+
 async def main() -> None:
     """
     Основний цикл запуску бота.
@@ -68,7 +71,7 @@ async def main() -> None:
     except Exception as exc:
         logger.critical(f"Фатальна помилка під час запуску polling: {exc}", exc_info=True)
 
-# --- Точка входу ---
+
 if __name__ == "__main__":
     try:
         asyncio.run(main())
