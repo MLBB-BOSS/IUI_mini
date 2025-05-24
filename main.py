@@ -99,12 +99,12 @@ class MLBBChatGPT:
         system_prompt = self._create_smart_prompt(user_name, user_query)
         
         payload = {
-            "model": "gpt-4o-mini",
+            "model": "gpt-4.1",
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}
             ],
-            "max_tokens": 300,
+            "max_tokens": 500,
             "temperature": 0.8,
             "presence_penalty": 0.3,
             "frequency_penalty": 0.2
