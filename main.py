@@ -1,20 +1,10 @@
 """
-MLBB Expert Bot
-===============
+MLBB IUI mini - Мінімалістична версія з максимальною якістю GPT спілкування.
+Фокус на одній функції: розумні відповіді про Mobile Legends Bang Bang.
 
-Мінімалістична, але високоякісна версія Telegram-бота-асистента для Mobile Legends: Bang Bang,
-зосереджена на одній ключовій функції — наданні розумних, структурованих і зручних для
-читання відповідей від GPT-4o-mini.
-
-• Python 3.11+
-• aiogram 3.19+
-• OpenAI Chat Completions API
-
-Author : MLBB-BOSS
-Date   : 2025-05-24
+Python 3.11+ | aiogram 3.19+ | OpenAI GPT-4o-mini
+Author: MLBB-BOSS | Date: 2025-05-24
 """
-
-from __future__ import annotations
 
 import asyncio
 import logging
@@ -24,265 +14,303 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from aiohttp import ClientSession, ClientTimeout
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
+from aiogram.client.default import DefaultBotProperties
+from aiogram.exceptions import TelegramAPIError
+from aiohttp import ClientSession, ClientTimeout
 from dotenv import load_dotenv
 
-# ---------------------------------------------------------------------------#
-#                         НАЛАШТУВАННЯ / CONFIGURATION                       #
-# ---------------------------------------------------------------------------#
+# === НАЛАШТУВАННЯ ===
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    format="%(asctime)s | %(levelname)-8s | %(message)s"
 )
-logger = logging.getLogger("MLBBExpertBot")
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN")
-OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
+TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN")
+OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
 ADMIN_USER_ID: int = int(os.getenv("ADMIN_USER_ID", "0"))
 
 if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY:
-    raise RuntimeError("❌  Встанови TELEGRAM_BOT_TOKEN та OPENAI_API_KEY в .env файлі")
+    raise RuntimeError("❌ Встанови TELEGRAM_BOT_TOKEN та OPENAI_API_KEY в .env файлі")
 
-# ---------------------------------------------------------------------------#
-#                               GPT-АСИСТЕНТ                                 #
-# ---------------------------------------------------------------------------#
+
 class MLBBChatGPT:
-    """GPT-асистент, що формує промпти й пост-обробляє відповіді для Telegram."""
-
-    _HEADER_EMOJIS: dict[str, str] = {
-        "карти": "🗺️",
-        "об'єкт": "🛡️",
-        "тактик": "⚔️",
-        "позиці": "📍",
-        "комунікац": "💬",
-        "герой": "🦸",
-        "фарм": "💰",
-        "ротац": "🔄",
-        "командн": "🤝",
-    }
+    """
+    Спеціалізований GPT асистент для MLBB з персоналізацією.
+    Відповіді структуруються, оформлюються для ідеального вигляду в Telegram.
+    """
 
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
         self.session: Optional[ClientSession] = None
 
-    # ------------------------------ CONTEXT --------------------------------#
-    async def __aenter__(self) -> "MLBBChatGPT":
+    async def __aenter__(self):
         self.session = ClientSession(
             timeout=ClientTimeout(total=30),
-            headers={"Authorization": f"Bearer {self.api_key}"},
+            headers={"Authorization": f"Bearer {self.api_key}"}
         )
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.session:
             await self.session.close()
 
-    # ------------------------------ PROMPT ---------------------------------#
-    @staticmethod
-    def _create_smart_prompt(user_name: str) -> str:
-        """Формує системний промпт із динамічним привітанням та правилами стилю."""
-        hour = datetime.now().hour
-        greeting = (
-            "Доброго ранку"
-            if 5 <= hour < 12
-            else "Доброго дня"
-            if 12 <= hour < 17
-            else "Доброго вечора"
-            if 17 <= hour < 22
-            else "Доброї ночі"
-        )
+    def _create_smart_prompt(self, user_name: str, user_query: str) -> str:
+        """Створює розумний промпт для якісних відповідей."""
+        current_hour = datetime.now().hour
+        greeting = "Доброго ранку" if 5 <= current_hour < 12 else \
+            "Доброго дня" if 12 <= current_hour < 17 else \
+            "Доброго вечора" if 17 <= current_hour < 22 else "Доброї ночі"
 
-        return (
-            f"🎮 {greeting}, {user_name}! Ти спілкуєшся з експертом Mobile Legends.\n\n"
-            "ТВОЯ РОЛЬ: профі-асистент із 5+ роками досвіду гри та коучінгу MLBB.\n\n"
-            "✅ ЩО ТИ РОБИШ:\n"
-            "• Пояснюєш механіки, стратегії, мету, патчі\n"
-            "• Даєш поради щодо героїв та командної взаємодії\n"
-            "• Мотивуєш гравців і підтримуєш командний дух\n\n"
-            "❌ ЧОГО ТИ НЕ РОБИШ:\n"
-            "• Не рекомендуєш точні білди (швидко застарівають)\n"
-            "• Не використовуєш HTML або заголовки Markdown (###)\n\n"
-            "💬 СТИЛЬ: дружній, енергійний, до 200 слів, з емодзі та чіткими відступами."
-        )
+        return f"""
+🎮 {greeting}, {user_name}! Ти в MLBB чаті та спілкуєшся з експертом Mobile Legends!
 
-    # ---------------------------- BEAUTIFIER -------------------------------#
-    def _beautify_response(self, raw_text: str) -> str:
-        """Перетворює markdown-розмітку GPT на приємний для Telegram формат."""
-        # 1) Заголовки ### / ##  →  емодзі + <b>Title</b>:
-        def _hdr(match: re.Match[str]) -> str:
-            title = match.group(1).strip(" :").capitalize()
-            emoji = next(
-                (em for key, em in self._HEADER_EMOJIS.items() if key in title.lower()),
-                "🔹",
-            )
-            return f"\n\n{emoji} <b>{title}</b>:"
+ТВОЯ РОЛЬ: Експертний асистент Mobile Legends Bang Bang з 5+ роками досвіду.
 
-        text = re.sub(r"^#{2,3}\s*(.+)$", _hdr, raw_text, flags=re.MULTILINE)
+✅ ЩО ТИ РОБИШ:
+• Пояснюєш механіки та стратегії MLBB
+• Допомагаєш з вибором героїв та ролей
+• Даєш поради про тактики та командну гру
+• Розповідаєш про мету, патчі та зміни в грі
+• Пояснюєш ігрові терміни простими словами
+• Мотивуєш та підтримуєш геймерський дух
 
-        # 2) Звичайні маркери списку → булет •
-        text = re.sub(r"^\s*[-*]\s+", "• ", text, flags=re.MULTILINE)
+❌ ЧОГО ТИ НЕ РОБИШ:
+• НЕ даєш конкретні білди предметів (можуть бути застарілими)
+• НЕ рекомендуєш точні артефакти або емблеми
+• НЕ використовуєш HTML теги або складне форматування
 
-        # 3) Прибрати надмірні пусті рядки
-        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+💬 СТИЛЬ СПІЛКУВАННЯ:
+- Звертайся до {user_name} на ім'я
+- Використовуй емодзі для кращого сприйняття
+- Будь ентузіастичним та дружнім
+- Говори як досвідчений тіммейт
+- Максимум 200 слів на відповідь
+- Структуруй відповіді чітко та зрозуміло
 
-        return text
+Готовий допомогти {user_name} стати кращим в MLBB! 🚀
+"""
 
-    # ----------------------------- QUERY -----------------------------------#
-    async def ask(self, user_name: str, user_query: str) -> str:
-        """Відправляє запит до OpenAI та повертає оформлену відповідь."""
-        assert self.session, "Session not initialised. Use 'async with'."
+    def _beautify_response(self, text: str) -> str:
+        """
+        Оформлює текст GPT для Telegram: замінює markdown/заголовки, додає емодзі, відступи.
+        """
+        header_emojis = {
+            "карти": "🗺️",
+            "об'єктів": "🛡️",
+            "тактика": "⚔️",
+            "позиція": "📍",
+            "комунікація": "💬",
+            "героя": "🦸",
+            "фарм": "💰",
+            "ротація": "🔄",
+            "командна гра": "🤝",
+        }
 
+        def replace_header(match):
+            header = match.group(1).strip(":").capitalize()
+            emoji = ""
+            for key, emj in header_emojis.items():
+                if key in header.lower():
+                    emoji = emj
+                    break
+            return f"\n\n{emoji} <b>{header}</b>:"
+
+        # Замінюємо markdown заголовки (###) на емодзі+жирний
+        text = re.sub(r"^#{2,3}\s*(.+)", replace_header, text, flags=re.MULTILINE)
+        # Списки на "• "
+        text = re.sub(r"^\s*[\-\*]\s+", "• ", text, flags=re.MULTILINE)
+        # Відступ після кожного жирного заголовка
+        text = re.sub(r"(<b>[^<]+</b>:[^\n]*)", r"\1\n", text)
+        # Прибираємо потрійні і більше переносів
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        # Мінімальний відступ між блоками
+        text = re.sub(r"\n{2,}", "\n\n", text)
+        return text.strip()
+
+    async def get_response(self, user_name: str, user_query: str) -> str:
+        """
+        Отримує якісну відповідь від GPT і оформлює її для Telegram.
+        """
+        system_prompt = self._create_smart_prompt(user_name, user_query)
         payload = {
             "model": "gpt-4.1",
             "messages": [
-                {"role": "system", "content": self._create_smart_prompt(user_name)},
-                {"role": "user", "content": user_query},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_query}
             ],
             "max_tokens": 500,
             "temperature": 0.8,
             "presence_penalty": 0.3,
-            "frequency_penalty": 0.2,
+            "frequency_penalty": 0.2
         }
 
         try:
             async with self.session.post(
-                "https://api.openai.com/v1/chat/completions", json=payload
-            ) as resp:
-                if resp.status != 200:
-                    logger.error("OpenAI API error: %s", resp.status)
-                    return "Вибач, сталася технічна помилка 😔 Спробуй ще раз."
+                "https://api.openai.com/v1/chat/completions",
+                json=payload
+            ) as response:
+                if response.status != 200:
+                    logger.error(f"OpenAI API помилка: {response.status}")
+                    return f"Вибач, {user_name}, технічні проблеми 😔 Спробуй ще раз!"
 
-                data = await resp.json()
-                raw = data["choices"][0]["message"]["content"]
+                result = await response.json()
+                gpt_text = result["choices"][0]["message"]["content"]
 
-                # Легка очистка від **bold** / *italic* і HTML, які GPT інколи вставляє
-                clean = re.sub(r"<[^>]+>", "", raw)
-                clean = re.sub(r"\*\*([^*]+)\*\*", r"\1", clean)
-                clean = re.sub(r"\*([^*]+)\*", r"\1", clean)
+                # Очищення від небажаних елементів
+                clean_text = re.sub(r"<[^>]*>", "", gpt_text)  # HTML теги
+                clean_text = re.sub(r"\*\*([^*]+)\*\*", r"\1", clean_text)  # markdown
+                clean_text = re.sub(r"\*([^*]+)\*", r"\1", clean_text)
 
-                return self._beautify_response(clean)
+                return self._beautify_response(clean_text)
 
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("GPT request failed: %s", exc)
-            return "Не вдалося отримати відповідь від GPT 😕 Спробуй пізніше."
+        except Exception as e:
+            logger.exception(f"GPT помилка: {e}")
+            return f"Не зміг обробити запит, {user_name} 😕 Спробуй пізніше!"
 
-# ---------------------------------------------------------------------------#
-#                                   БОТ                                      #
-# ---------------------------------------------------------------------------#
+
 bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 dp = Dispatcher()
 
-# ------------------------------- HANDLERS ----------------------------------#
+
 @dp.message(CommandStart())
 async def cmd_start(message: Message) -> None:
+    """Просте та ефективне привітання."""
     user_name = message.from_user.first_name
-    hour = datetime.now().hour
-    greeting, emoji = (
-        ("Доброго ранку", "🌅")
-        if 5 <= hour < 12
-        else ("Доброго дня", "☀️")
-        if 12 <= hour < 17
-        else ("Доброго вечора", "🌆")
-        if 17 <= hour < 22
-        else ("Доброї ночі", "🌙")
-    )
+    current_hour = datetime.now().hour
 
-    text = (
-        f"{greeting}, <b>{user_name}</b>! {emoji}\n\n"
-        "🎮 Ласкаво просимо до <b>MLBB Expert Chat Bot</b>!\n\n"
-        "Напиши команду <code>/go</code> та своє запитання.\n\n"
-        "<b>Приклади:</b>\n"
-        "• <code>/go соло стратегії для швидкого ранк-апу</code>\n"
-        "• <code>/go дуо тактики для доміну в лейті</code>\n"
-        "• <code>/go як читати карту та контролювати об'єкти</code>\n\n"
-        "Готовий допомогти тобі підкорити Land of Dawn! 🚀"
-    )
-    await message.answer(text)
-    logger.info("Sent welcome to %s", user_name)
+    if 5 <= current_hour < 12:
+        greeting = "Доброго ранку"
+        emoji = "🌅"
+    elif 12 <= current_hour < 17:
+        greeting = "Доброго дня"
+        emoji = "☀️"
+    elif 17 <= current_hour < 22:
+        greeting = "Доброго вечора"
+        emoji = "🌆"
+    else:
+        greeting = "Доброї ночі"
+        emoji = "🌙"
+
+    welcome_text = f"""
+{greeting}, <b>{user_name}</b>! {emoji}
+
+🎮 Вітаю в MLBB IUI mini!
+
+Я - твій персональний експерт по Mobile Legends Bang Bang, готовий допомогти з будь-якими питаннями про гру!
+
+<b>💡 Як користуватися:</b>
+Просто напиши своє питання після команди /go
+
+<b>🚀 Приклади стратегічних запитів:</b>
+• <code>/go соло стратегії для швидкого ранк-апу</code>
+• <code>/go дуо тактики для доміну в лейті</code>
+• <code>/go тріо комбо для командних боїв</code>
+• <code>/go як читати карту та контролювати об'єкти</code>
+
+Готовий стати твоїм найкращим MLBB тіммейтом! 💪✨
+"""
+    await message.answer(welcome_text)
+    logger.info(f"✅ Привітання для {user_name}")
 
 
 @dp.message(Command("go"))
 async def cmd_go(message: Message) -> None:
+    """Головна функція - якісне спілкування через GPT з красивим оформленням."""
     user_name = message.from_user.first_name
-    query = message.text.replace("/go", "", 1).strip()
+    user_query = message.text.replace("/go", "", 1).strip()
 
-    if not query:
+    if not user_query:
         await message.reply(
-            "📝 Спершу додай запит після /go.\n\n"
+            f"Привіт, <b>{user_name}</b>! 👋\n\n"
+            "Напиши своє питання після /go\n"
             "<b>Приклади:</b>\n"
             "• /go соло стратегії для швидкого ранк-апу\n"
-            "• /go тріо комбо для командних боїв"
+            "• /go дуо тактики для доміну в лейті\n"
+            "• /go тріо комбо для командних боїв\n"
+            "• /go як читати карту та контролювати об'єкти"
         )
         return
 
-    thinking_msgs = [
+    thinking_messages = [
         f"🤔 {user_name}, думаю над твоїм питанням...",
         f"🧠 Аналізую запит, {user_name}!",
-        f"⚡ Готую експертну відповідь...",
-        f"🎯 Шукаю найкращі поради, {user_name}!",
+        f"⚡ Готую експертну відповідь для тебе!",
+        f"🎯 {user_name}, шукаю найкращі поради!"
     ]
-    temp_msg = await message.reply(thinking_msgs[hash(query) % len(thinking_msgs)])
 
-    start = time.time()
+    thinking_msg = await message.reply(
+        thinking_messages[hash(user_query) % len(thinking_messages)]
+    )
+
+    start_time = time.time()
+
     async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
-        reply = await gpt.ask(user_name, query)
-    elapsed = time.time() - start
+        response = await gpt.get_response(user_name, user_query)
 
-    admin_note = f"\n\n<i>⏱ {elapsed:.2f}s</i>" if message.from_user.id == ADMIN_USER_ID else ""
+    processing_time = time.time() - start_time
+
+    admin_info = ""
+    if message.from_user.id == ADMIN_USER_ID:
+        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с</i>"
+
     try:
-        await temp_msg.edit_text(reply + admin_note)
+        await thinking_msg.edit_text(f"{response}{admin_info}")
+        logger.info(f"📤 Відповідь для {user_name} ({processing_time:.2f}s)")
     except TelegramAPIError:
-        await message.reply(reply)
-
-    logger.info("Answered %s in %.2fs", user_name, elapsed)
+        await message.reply(response)
 
 
-# ---------------------------- ERROR HANDLER --------------------------------#
 @dp.errors()
-async def on_error(event, exc):
-    logger.error("Handler error: %s", exc, exc_info=True)
-    if hasattr(event, "message") and event.message:
-        user = event.message.from_user.first_name if event.message.from_user else "друже"
+async def error_handler(event, exception):
+    logger.error(f"🚨 Помилка: {exception}", exc_info=True)
+
+    if hasattr(event, 'message') and event.message:
+        user_name = event.message.from_user.first_name if event.message.from_user else "друже"
         await event.message.answer(
-            f"Вибач, {user}, сталася помилка 😔\nСпробуй ще раз пізніше."
+            f"Вибач, {user_name}, сталася помилка 😔\n"
+            "Спробуй ще раз через хвилину!"
         )
 
 
-# -------------------------------- LAUNCH -----------------------------------#
 async def main() -> None:
-    logger.info("🚀  Запускаю MLBB Expert Bot...")
+    """Запуск бота."""
+    logger.info("🚀 Запуск MLBB Expert Bot...")
+
     try:
-        me = await bot.get_me()
-        logger.info("Bot @%s is up", me.username)
+        bot_info = await bot.get_me()
+        logger.info(f"✅ Бот @{bot_info.username} готовий!")
 
         if ADMIN_USER_ID:
             try:
                 await bot.send_message(
                     ADMIN_USER_ID,
-                    f"🤖 <b>MLBB Expert Bot запущено!</b>\n@{me.username}",
+                    f"🤖 <b>MLBB Expert Bot запущено!</b>\n\n"
+                    f"🆔 @{bot_info.username}\n"
+                    f"⏰ {datetime.now().strftime('%H:%M:%S')}\n"
+                    f"🟢 Готовий до роботи!"
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
         await dp.start_polling(bot)
 
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Shutdown requested by user")
+    except KeyboardInterrupt:
+        logger.info("👋 Бот зупинено")
+    except Exception as e:
+        logger.critical(f"💥 Критична помилка: {e}")
     finally:
         await bot.session.close()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
