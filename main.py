@@ -1,18 +1,21 @@
 """
 main.py
 Мінімальна асинхронна робоча версія Telegram-бота для MLBB-спільноти на основі aiogram 3.19+ та Python 3.11+.
-Створено з урахуванням світових стандартів якості, типізації, PEP 8, докладних docstrings і коректної обробки помилок.
+Додано інтеграцію GPT для обробки запитів через команду /go.
 """
 
 import asyncio
 import logging
 import os
+from typing import Any
+
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.client.default import DefaultBotProperties
-from typing import Any
+from aiohttp import ClientSession
+from dotenv import load_dotenv
 
 # --- Налаштування логування ---
 logging.basicConfig(
@@ -21,13 +24,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Отримання токена ---
+# --- Завантаження змінних середовища ---
+load_dotenv()
+
+# --- Отримання токенів ---
 TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN")
+OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
+
 if not TELEGRAM_BOT_TOKEN:
     logger.error("TELEGRAM_BOT_TOKEN не встановлено! Бот не зможе запуститися.")
     raise RuntimeError("TELEGRAM_BOT_TOKEN is required in environment variables.")
 
-__all__ = ["TELEGRAM_BOT_TOKEN"]
+if not OPENAI_API_KEY:
+    logger.error("OPENAI_API_KEY не встановлено! GPT-функціонал буде недоступний.")
+    raise RuntimeError("OPENAI_API_KEY is required in environment variables.")
+
+__all__ = ["TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY"]
 
 # --- Ініціалізація бота та диспетчера ---
 bot: Bot = Bot(
@@ -46,8 +58,57 @@ async def cmd_start(message: Message) -> None:
     await message.answer(
         "Вітаю! 🤖 Бот успішно запущено.\n"
         "Це мінімальна асинхронна версія для MLBB-спільноти.\n\n"
-        "Спробуйте додати нові команди — інфраструктура вже готова!"
+        "Спробуйте команду /go <ваш запит>, щоб отримати відповідь від GPT!"
     )
+
+
+@dp.message(Command("go"))
+async def cmd_go(message: Message) -> None:
+    """
+    Обробляє команду /go, надсилає запит до GPT-4 і повертає відповідь.
+    :param message: Об'єкт повідомлення від користувача.
+    """
+    user_query = message.text.replace("/go", "").strip()
+
+    if not user_query:
+        await message.reply("⚠️ Будь ласка, введіть запит після команди /go.")
+        return
+
+    await message.reply("⏳ GPT обробляє ваш запит, зачекайте...")
+
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}"
+    }
+    payload = {
+        "model": "gpt-4",
+        "messages": [
+            {"role": "system", "content": "Ви - асистент для Mobile Legends Bang Bang."},
+            {"role": "user", "content": user_query}
+        ],
+        "max_tokens": 200,
+        "temperature": 0.7
+    }
+
+    # Відправка запиту до OpenAI
+    async with ClientSession() as session:
+        try:
+            async with session.post(
+                "https://api.openai.com/v1/chat/completions",
+                json=payload,
+                headers=headers
+            ) as response:
+                if response.status != 200:
+                    logger.error(f"Помилка API OpenAI: {response.status}")
+                    await message.reply("❌ Не вдалося отримати відповідь від GPT.")
+                    return
+
+                result = await response.json()
+                gpt_response = result["choices"][0]["message"]["content"]
+                await message.reply(f"🤖 GPT відповідає:\n\n{gpt_response}")
+
+        except Exception as e:
+            logger.exception(f"Помилка виклику OpenAI API: {e}")
+            await message.reply("❌ Сталася помилка при спробі отримати відповідь від GPT.")
 
 
 @dp.errors()
