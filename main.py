@@ -14,14 +14,13 @@ import logging
 import os
 from typing import Any
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, Router
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.client.default import DefaultBotProperties
 from aiohttp import ClientSession
 from dotenv import load_dotenv
-from io import BytesIO
 
 # --- Налаштування логування ---
 logging.basicConfig(
@@ -51,6 +50,7 @@ bot: Bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 dp: Dispatcher = Dispatcher()
+router: Router = Router()
 
 
 # =======================
@@ -62,12 +62,10 @@ async def analyze_image_with_vision(image_bytes: bytes) -> str:
     :param image_bytes: Байт-контент зображення.
     :return: Текст аналізу або повідомлення про помилку.
     """
-    # Кодуємо зображення у base64 для передачі в data_url
     import base64
     image_base64 = base64.b64encode(image_bytes).decode("utf-8")
     data_uri = f"data:image/jpeg;base64,{image_base64}"
 
-    # Системний промпт: можна кастомізувати під MLBB
     vision_prompt = (
         "Це скріншот з ігрового акаунта Mobile Legends: Bang Bang.\n"
         "Опиши, що саме на ньому зображено, які основні ігрові дані видно, "
@@ -94,7 +92,6 @@ async def analyze_image_with_vision(image_bytes: bytes) -> str:
         "Content-Type": "application/json"
     }
 
-    # Відправляємо запит до OpenAI Vision API
     async with ClientSession() as session:
         try:
             async with session.post(
@@ -117,7 +114,7 @@ async def analyze_image_with_vision(image_bytes: bytes) -> str:
 # ===========================
 # Обробник команди /vision
 # ===========================
-@dp.message(Command("vision"))
+@router.message(Command("vision"))
 async def cmd_vision_instruct(message: Message) -> None:
     """
     Інструктує користувача надіслати скріншот для аналізу.
@@ -133,7 +130,10 @@ async def cmd_vision_instruct(message: Message) -> None:
 # ===============================
 # Обробка отриманих скріншотів
 # ===============================
-@dp.message(lambda m: m.reply_to_message and m.reply_to_message.text and "/vision" in m.reply_to_message.text, lambda m: m.photo)
+@router.message(
+    lambda m: m.reply_to_message and m.reply_to_message.text and "/vision" in m.reply_to_message.text,
+    lambda m: m.photo
+)
 async def handle_vision_screenshot(message: Message) -> None:
     """
     Приймає скріншот у відповідь на /vision, аналізує його через GPT-4 Vision і повертає результат.
@@ -141,7 +141,6 @@ async def handle_vision_screenshot(message: Message) -> None:
     """
     photo = message.photo[-1]  # Найякісніше зображення
     try:
-        # Завантажуємо байти зображення
         file = await bot.get_file(photo.file_id)
         image_bytes_io = await bot.download_file(file.file_path)
         image_bytes = await image_bytes_io.read()
@@ -152,7 +151,6 @@ async def handle_vision_screenshot(message: Message) -> None:
         await message.reply("⏳ Виконується аналіз скріншота... Це може зайняти до 30 секунд.", parse_mode=None)
 
         vision_result = await analyze_image_with_vision(image_bytes)
-        # Відправляємо результат текстом, уникаючи HTML тегів
         await message.reply(vision_result, parse_mode=None)
 
     except Exception as exc:
@@ -182,6 +180,7 @@ async def main() -> None:
     Основний цикл запуску бота.
     """
     logger.info("Бот запускається...")
+    dp.include_router(router)
     try:
         await dp.start_polling(bot)
     except Exception as exc:
