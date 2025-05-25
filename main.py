@@ -2,7 +2,7 @@
 MLBB IUI mini - Мінімалістична версія з максимальною якістю GPT спілкування.
 Фокус на одній функції: розумні відповіді про Mobile Legends Bang Bang.
 
-Python 3.11+ | aiogram 3.19+ | OpenAI GPT-4o-mini
+Python 3.11+ | aiogram 3.19+ | OpenAI gpt-4.1
 Author: MLBB-BOSS | Date: 2025-05-24
 """
 
