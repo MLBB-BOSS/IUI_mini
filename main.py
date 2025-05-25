@@ -145,7 +145,7 @@ class MLBBChatGPT:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}
             ],
-            "max_tokens": 500,
+            "max_tokens": 700,
             "temperature": 0.8,
             "presence_penalty": 0.3,
             "frequency_penalty": 0.2
