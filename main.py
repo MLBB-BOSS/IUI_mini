@@ -208,7 +208,7 @@ class MLBBChatGPT:
         
         # Оптимізовані параметри для найкращої якості
         payload = {
-            "model": "gpt-4o",  # Найновіша модель для кращих результатів
+            "model": "GPT-4.1",  # Найновіша модель для кращих результатів
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}
