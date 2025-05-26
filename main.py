@@ -267,7 +267,7 @@ class MLBBChatGPT:
         self.class_logger.info(f"Запит до Vision API. Промпт починається з: '{prompt[:70]}...'")
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         payload = {
-            "model": "GPT-4o", # Жорстко задана модель
+            "model": "gpt-4o-mini", # Жорстко задана модель
             "messages": [
                 {
                     "role": "user",
@@ -278,7 +278,7 @@ class MLBBChatGPT:
                 }
             ],
             "max_tokens": 1500,
-            "temperature": 0.4 
+            "temperature": 0.3 
         }
         # ... (решта логіки з v2.7 без змін)
         self.class_logger.debug(f"Параметри для Vision API: модель={payload['model']}, max_tokens={payload['max_tokens']}, temperature={payload['temperature']}")
@@ -363,7 +363,7 @@ class MLBBChatGPT:
             "model": "gpt-4.1", # Жорстко задана модель
             "messages": [{"role": "system", "content": system_prompt_text}],
             "max_tokens": 300,
-            "temperature": 0.6,
+            "temperature": 0.7,
             "top_p": 0.9,
             "presence_penalty": 0.2,
             "frequency_penalty": 0.2
