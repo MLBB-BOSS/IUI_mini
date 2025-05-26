@@ -1,10 +1,10 @@
-# топ2 віжен
+
 """
 MLBB IUI mini - Мінімалістична версія з максимальною якістю GPT спілкування.
 Фокус на одній функції: розумні відповіді про Mobile Legends Bang Bang.
 Додано функціонал аналізу скріншотів профілю гравця з "вау-ефектом" та описом від ШІ.
 Моделі GPT жорстко встановлені в коді. Оновлено промпти для /go та Vision.
-Прибрано вивід інформації про топ героїв.
+Прибрано вивід інформації про топ героїв. Покращено розпізнавання поточного рангу.
 
 Python 3.11+ | aiogram 3.19+ | OpenAI
 Author: MLBB-BOSS | Date: 2025-05-26
@@ -62,37 +62,41 @@ class VisionAnalysisStates(StatesGroup):
 
 # === ПРОМПТИ ===
 
-# Оновлений Промпт для Vision API v2.10
+# Оновлений Промпт для Vision API v2.11 (покращене розпізнавання поточного рангу)
 PROFILE_SCREENSHOT_PROMPT = """
-Ти — уважний AI-аналітик, спеціалізований на розпізнаванні даних з профілів гри Mobile Legends: Bang Bang.
-Твоє завдання — ретельно проаналізувати наданий скріншот головного екрану профілю гравця.
+Ти — високоточний AI-аналітик, експерт з розпізнавання даних на скріншотах профілів гри Mobile Legends: Bang Bang.
+Твоє завдання — надзвичайно уважно проаналізувати наданий скріншот головного екрану профілю гравця.
 Витягни наступну інформацію та поверни її ВИКЛЮЧНО у форматі валідного JSON об'єкта.
-Не додавай жодного тексту до або після JSON, лише сам JSON.
+Жодного тексту до або після JSON, лише сам JSON.
 
-Структура JSON повинна бути такою:
+Структура JSON:
 {
-  "game_nickname": "string (нікнейм гравця, наприклад, 'PlayerX') або null, якщо не видно",
-  "mlbb_id_server": "string (ID гравця та сервер у форматі 'ID (SERVER)', наприклад, '123456789 (1234)') або null, якщо не видно. Шукай уважно, зазвичай під нікнеймом.",
-  "current_rank": "string (поточний ранг гравця, наприклад, 'Епічний V', 'Легенда III 2★', 'Міфічний 111★') або null. Звертай увагу на зірки ★.",
-  "highest_rank_season": "string (найвищий ранг гравця в сезоні, наприклад, 'Міфічна Слава 267★', 'Міфічний 50★') або null. Це поле зазвичай має підпис 'Highest Rank'. Звертай увагу на зірки ★.",
-  "matches_played": "int (загальна кількість зіграних матчів) або null",
-  "likes_received": "int (кількість отриманих лайків) або null",
-  "squad_name": "string (назва скваду, якщо гравець у скваді) або null",
-  "location": "string (локація гравця, якщо вказана, наприклад, 'Ukraine/Kyiv') або null"
+  "game_nickname": "string (нікнейм гравця, наприклад, 'PlayerX') або null",
+  "mlbb_id_server": "string (ID гравця та сервер 'ID (SERVER)', наприклад, '123456789 (1234)') або null. Зазвичай під нікнеймом.",
+  "current_rank": "string (поточний ранг гравця) або null. Дуже уважно!",
+  "highest_rank_season": "string (найвищий ранг сезону, наприклад, 'Міфічна Слава 267★') або null. Зазвичай підпис 'Highest Rank'. Включай ★.",
+  "matches_played": "int (загальна кількість матчів) або null",
+  "likes_received": "int (кількість лайків) або null",
+  "squad_name": "string (назва скваду) або null",
+  "location": "string (локація гравця, наприклад, 'Ukraine/Kyiv') або null"
 }
 
-КРИТИЧНО ВАЖЛИВІ ІНСТРУКЦІЇ ДЛЯ ТОЧНОСТІ:
-1.  **ТІЛЬКИ JSON:** Твоя відповідь має бути ВИКЛЮЧНО валідним JSON об'єктом. Без жодних пояснень, привітань чи іншого тексту.
-2.  **УВАГА ДО ДЕТАЛЕЙ:** Дуже уважно розпізнавай цифри, назви та символи.
-    *   **ID та Сервер:** Формат 'ID (SERVER)'. Наприклад, якщо бачиш "ID: 987654321 (4321)", то поле має бути "987654321 (4321)".
-    *   **Ранги та Зірки (★):** Обов'язково включай кількість зірок, якщо вони є, і сам символ ★. Наприклад: "Міфічний III 15★", "Легенда V 2★", "Міфічна Слава 1026★". Якщо зірок немає, просто назву рангу, наприклад "Епічний V".
-3.  **ПОШУК ІНФОРМАЦІЇ:** Шукай інформацію тільки на наданому скріншоті. Не вигадуй дані.
-4.  **ВІДСУТНІСТЬ ДАНИХ:** Якщо якась інформація дійсно відсутня на скріншоті або її неможливо чітко розпізнати, використовуй значення `null` для відповідного поля в JSON. Не пиши "не розпізнано" або "N/A" як рядок.
-5.  **НІКНЕЙМ:** Зазвичай найбільший текст у верхній частині профілю.
-6.  **ПОТОЧНИЙ РАНГ:** Зазвичай велика іконка рангу з підписом "Current Rank" або аналогічним.
-7.  **НАЙВИЩИЙ РАНГ:** Зазвичай менша іконка з підписом "Highest Rank" або аналогічним.
+КРИТИЧНО ВАЖЛИВІ ІНСТРУКЦІЇ ЩОДО ПОТОЧНОГО РАНГУ ("current_rank"):
+1.  **Ідентифікуй Основний Ранг:** Спочатку визнач назву рангу (наприклад, "Епік", "Легенда", "Міфік", "Міфічна Слава").
+2.  **Римські Цифри (для Епіка/Легенди):** Якщо ранг "Епік" або "Легенда", знайди римську цифру (V, IV, III, II, I), яка вказує на рівень.
+3.  **Зірки (★):**
+    *   **Для Епіка/Легенди:** Після римської цифри, якщо поруч (зазвичай під іконкою рангу або праворуч від неї) є число із зіркою (наприклад, "22★", "5★"), додай це до рангу. Приклад: "Епічний V 22★", "Легенда III 1★".
+    *   **Для Міфіка/Міфічної Слави:** Ці ранги завжди мають кількість зірок. Включи їх. Приклад: "Міфічний 111★", "Міфічна Слава 1026★".
+    *   **Якщо зірок НЕМАЄ** для Епіка/Легенди (наприклад, 0 зірок), то просто вказуй ранг з римською цифрою: "Епічний V", "Легенда I".
+4.  **НЕ ПЛУТАЙ:** Не плутай зірки поточного рангу із зірками найвищого рангу сезону. Поточний ранг – це зазвичай велика іконка.
+5.  **Приклад неправильного розпізнавання "Епічний X":** Ранг "Епік" має рівні від V до I. "Епічний X" - не існує. Якщо бачиш щось схоже, перевір уважніше.
 
-Будь максимально точним та акуратним. Якість розпізнавання є пріоритетом.
+ІНШІ ВАЖЛИВІ ІНСТРУКЦІЇ:
+-   **ТІЛЬКИ JSON:** Відповідь має бути ВИКЛЮЧНО валідним JSON.
+-   **ID та Сервер:** Формат 'ID (SERVER)'.
+-   **ВІДСУТНІСТЬ ДАНИХ:** Якщо інформація відсутня або нерозбірлива, використовуй `null`. Не пиши "не розпізнано".
+
+Будь максимально точним. Якість розпізнавання поточного рангу є надзвичайно важливою.
 """
 
 # Промпт для генерації "людського" опису профілю (з версії v2.7/v2.8)
@@ -136,6 +140,7 @@ class MLBBChatGPT:
 
     # Промпт для /go (з версії eb838b67, v2.9)
     def _create_smart_prompt(self, user_name: str, user_query: str) -> str:
+        # ... (код з v2.10, без змін)
         kyiv_tz = timezone(timedelta(hours=3))
         current_time_kyiv = datetime.now(kyiv_tz)
         current_hour = current_time_kyiv.hour
@@ -211,7 +216,7 @@ class MLBBChatGPT:
 """
 
     def _beautify_response(self, text: str) -> str:
-        # ... (код з v2.9, без змін)
+        # ... (код з v2.10, без змін)
         self.class_logger.debug(f"Beautify: Початковий текст (перші 100 символів): '{text[:100]}'")
         header_emojis = {
             "карти": "🗺️", "об'єктів": "🛡️", "тактика": "⚔️", "позиція": "📍", "комунікація": "💬",
@@ -249,7 +254,7 @@ class MLBBChatGPT:
         return text.strip()
 
     async def get_response(self, user_name: str, user_query: str) -> str: # Для /go
-        # ... (код з v2.9, без змін)
+        # ... (код з v2.10, без змін)
         self.class_logger.info(f"Запит до GPT (/go) від '{user_name}': '{user_query}'")
         system_prompt = self._create_smart_prompt(user_name, user_query)
         payload = {
@@ -292,9 +297,9 @@ class MLBBChatGPT:
         except Exception as e:
             self.class_logger.exception(f"Загальна помилка текстового GPT для '{user_query}': {e}")
             return f"Не вдалося обробити твій запит, {user_name} 😕."
-
+            
     async def analyze_image_with_vision(self, image_base64: str, prompt: str) -> Optional[Dict[str, Any]]: # Аналіз скріншота
-        # ... (код з v2.9, без змін)
+        # ... (код з v2.10, без змін)
         self.class_logger.info(f"Запит до Vision API. Промпт починається з: '{prompt[:70]}...'")
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         payload = {
@@ -340,7 +345,7 @@ class MLBBChatGPT:
             return {"error": f"Загальна помилка при аналізі зображення: {str(e)}"}
 
     async def _handle_vision_response(self, response: aiohttp.ClientResponse) -> Optional[Dict[str, Any]]:
-        # ... (код з v2.9, без змін)
+        # ... (код з v2.10, без змін)
         if response.status == 200:
             try:
                 result = await response.json()
@@ -377,7 +382,7 @@ class MLBBChatGPT:
             return {"error": f"Помилка Vision API: {response.status}", "details": error_text[:200]}
 
     async def get_profile_description(self, user_name: str, profile_data: Dict[str, Any]) -> str: # Опис профілю
-        # ... (код з v2.9, без змін)
+        # ... (код з v2.10, без змін)
         self.class_logger.info(f"Запит на генерацію опису профілю для '{user_name}'.")
         system_prompt_text = PROFILE_DESCRIPTION_PROMPT_TEMPLATE.format(
             user_name=html.escape(user_name),
@@ -434,7 +439,7 @@ dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
-    # ... (код з v2.9, без змін)
+    # ... (код з v2.10, без змін)
     await state.clear() 
     user_name = message.from_user.first_name
     user_id = message.from_user.id
@@ -452,7 +457,7 @@ async def cmd_start(message: Message, state: FSMContext):
     welcome_text = f"""
 {greeting_msg}, <b>{user_name}</b>! {emoji}
 
-🎮 Вітаю в MLBB IUI mini v2.10!
+🎮 Вітаю в MLBB IUI mini v2.11!
 Я - твій персональний AI-експерт по Mobile Legends Bang Bang.
 
 <b>💡 Можливості бота:</b>
@@ -467,13 +472,13 @@ async def cmd_start(message: Message, state: FSMContext):
 """
     try:
         await message.answer(welcome_text)
-        logger.info(f"Привітання для {user_name} (v2.10) надіслано.")
+        logger.info(f"Привітання для {user_name} (v2.11) надіслано.")
     except TelegramAPIError as e:
         logger.error(f"Не вдалося надіслати привітання для {user_name}: {e}")
 
 @dp.message(Command("go"))
 async def cmd_go(message: Message, state: FSMContext):
-    # ... (код з v2.9, оновлено версію бота в admin_info)
+    # ... (код з v2.10, оновлено версію бота в admin_info)
     await state.clear()
     user_name = message.from_user.first_name
     user_id = message.from_user.id
@@ -508,7 +513,7 @@ async def cmd_go(message: Message, state: FSMContext):
     logger.info(f"Час обробки /go для '{user_query}' від {user_name}: {processing_time:.2f}с")
     admin_info = ""
     if message.from_user.id == ADMIN_USER_ID:
-        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | v2.10 GPT (gpt-4.1)</i>" 
+        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | v2.11 GPT (gpt-4.1)</i>" 
     full_response_to_send = f"{response_text}{admin_info}"
     try:
         if thinking_msg: await thinking_msg.edit_text(full_response_to_send)
@@ -530,7 +535,7 @@ async def cmd_go(message: Message, state: FSMContext):
 # === ОБРОБНИКИ ДЛЯ АНАЛІЗУ СКРІНШОТІВ ===
 @dp.message(Command("analyzeprofile"))
 async def cmd_analyze_profile(message: Message, state: FSMContext):
-    # ... (код з v2.9, без змін)
+    # ... (код з v2.10, без змін)
     user_name = message.from_user.first_name
     logger.info(f"Користувач {user_name} (ID: {message.from_user.id}) активував /analyzeprofile.")
     await state.set_state(VisionAnalysisStates.awaiting_profile_screenshot)
@@ -542,7 +547,7 @@ async def cmd_analyze_profile(message: Message, state: FSMContext):
 
 @dp.message(VisionAnalysisStates.awaiting_profile_screenshot, F.photo)
 async def handle_profile_screenshot(message: Message, state: FSMContext):
-    # ... (код з v2.9, без змін)
+    # ... (код з v2.10, без змін)
     bot_instance = message.bot
     user_name = message.from_user.first_name
     chat_id = message.chat.id
@@ -586,6 +591,7 @@ async def handle_profile_screenshot(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "trigger_vision_analysis", VisionAnalysisStates.awaiting_analysis_trigger)
 async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state: FSMContext):
+    # ... (код з v2.10, без змін у логіці, але `fields_translation` відповідає новому промпту)
     bot_instance = callback_query.bot
     chat_id = callback_query.message.chat.id
     message_id = callback_query.message.message_id
@@ -633,7 +639,6 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
             if analysis_result_json and "error" not in analysis_result_json:
                 logger.info(f"Успішний аналіз профілю (JSON) для {user_name}: {analysis_result_json}")
                 response_parts = [f"<b>Детальний аналіз твого профілю, {user_name}:</b>"]
-                # Поля для виводу, виключаючи улюблених героїв та вінрейти по них
                 fields_translation = {
                     "game_nickname": "🎮 Нікнейм", "mlbb_id_server": "🆔 ID (Сервер)",
                     "current_rank": "🏆 Поточний ранг", "highest_rank_season": "🌟 Найвищий ранг (сезон)",
@@ -644,7 +649,7 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                 has_data = False
                 for key, readable_name in fields_translation.items():
                     value = analysis_result_json.get(key)
-                    if value is not None: # Виводимо поле, тільки якщо воно є і не null
+                    if value is not None: 
                         display_value = str(value)
                         if "rank" in key and ("★" in display_value or "зірок" in display_value.lower() or "слава" in display_value.lower()):
                             if "★" not in display_value:
@@ -652,11 +657,10 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                             display_value = re.sub(r'\s+★', '★', display_value)
                         response_parts.append(f"<b>{readable_name}:</b> {html.escape(display_value)}")
                         has_data = True
-                    # Якщо поле null або відсутнє в JSON, воно просто не буде виведене
                 
                 if not has_data and analysis_result_json.get("raw_response"):
                      response_parts.append(f"\n<i>Не вдалося структурувати дані. Можливо, на скріншоті недостатньо інформації.</i>")
-                elif not has_data and not analysis_result_json.get("raw_response"): # Якщо взагалі нічого не розпізнано
+                elif not has_data and not analysis_result_json.get("raw_response"): 
                      response_parts.append(f"\n<i>Не вдалося розпізнати жодних даних. Спробуйте чіткіший скріншот.</i>")
                 structured_data_text = "\n".join(response_parts)
 
@@ -694,7 +698,7 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
 
 @dp.callback_query(F.data == "delete_bot_message")
 async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMContext):
-    # ... (код з v2.9, без змін)
+    # ... (код з v2.10, без змін)
     try:
         await callback_query.message.delete() # type: ignore
         await callback_query.answer("Повідомлення видалено.")
@@ -709,7 +713,7 @@ async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMC
 @dp.message(VisionAnalysisStates.awaiting_profile_screenshot, Command("cancel"))
 @dp.message(VisionAnalysisStates.awaiting_analysis_trigger, Command("cancel"))
 async def cancel_profile_analysis(message: Message, state: FSMContext):
-    # ... (код з v2.9, без змін)
+    # ... (код з v2.10, без змін)
     logger.info(f"Користувач {message.from_user.first_name} скасував аналіз профілю командою /cancel.")
     
     user_data = await state.get_data()
@@ -727,7 +731,7 @@ async def cancel_profile_analysis(message: Message, state: FSMContext):
 @dp.message(VisionAnalysisStates.awaiting_profile_screenshot)
 @dp.message(VisionAnalysisStates.awaiting_analysis_trigger)
 async def handle_wrong_input_for_profile_screenshot(message: Message, state: FSMContext):
-    # ... (код з v2.9, без змін)
+    # ... (код з v2.10, без змін)
     if message.text and message.text.lower() == "/cancel":
         await cancel_profile_analysis(message, state)
         return
@@ -749,7 +753,7 @@ async def handle_wrong_input_for_profile_screenshot(message: Message, state: FSM
 # === ГЛОБАЛЬНИЙ ОБРОБНИК ПОМИЛОК ===
 @dp.errors()
 async def error_handler(update_event, exception: Exception):
-    # ... (код з v2.9, без змін)
+    # ... (код з v2.10, без змін)
     logger.error(f"Глобальна помилка в error_handler: {exception} для update: {update_event}", exc_info=True)
     chat_id = None
     user_name = "друже"
@@ -769,7 +773,7 @@ async def error_handler(update_event, exception: Exception):
 
 # === ЗАПУСК БОТА ===
 async def main() -> None:
-    logger.info(f"🚀 Запуск MLBB IUI mini v2.10... (PID: {os.getpid()})") 
+    logger.info(f"🚀 Запуск MLBB IUI mini v2.11... (PID: {os.getpid()})") 
     try:
         bot_info = await bot.get_me()
         logger.info(f"✅ Бот @{bot_info.username} (ID: {bot_info.id}) успішно авторизований!")
@@ -779,10 +783,10 @@ async def main() -> None:
                 launch_time_kyiv = datetime.now(kyiv_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
                 await bot.send_message(
                     ADMIN_USER_ID,
-                    f"🤖 <b>MLBB IUI mini v2.10 запущено!</b>\n\n" 
+                    f"🤖 <b>MLBB IUI mini v2.11 запущено!</b>\n\n" 
                     f"🆔 @{bot_info.username}\n"
                     f"⏰ {launch_time_kyiv}\n"
-                    f"🎯 <b>Оновлено Vision промпт (v2.10), прибрано топ героїв з виводу.</b>\n"
+                    f"🎯 <b>Оновлено Vision промпт (v2.11) для кращого розпізнавання рангу.</b>\n"
                     f"🔩 Моделі: Vision: <code>gpt-4o-mini</code>, Текст/Опис: <code>gpt-4.1</code> (жорстко задані)\n"
                     f"🟢 Готовий до роботи!"
                 )
