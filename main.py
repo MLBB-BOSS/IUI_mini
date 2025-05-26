@@ -49,7 +49,7 @@ ADMIN_USER_ID: int = int(os.getenv("ADMIN_USER_ID", "0"))
 
 # URL для вітального зображення (має бути замінений на актуальний, якщо потрібно)
 # Попередній банер, наданий користувачем (Image 5)
-WELCOME_IMAGE_URL: str = "https://i.imgur.com/your_actual_image_id.png" # ЗАМІНІТЬ НА ВАШ АКТУАЛЬНИЙ URL!
+WELCOME_IMAGE_URL: str = "https://res.cloudinary.com/ha1pzppgf/image/upload/v1748286434/file_0000000017a46246b78bf97e2ecd9348_zuk16r.png" # ЗАМІНІТЬ НА ВАШ АКТУАЛЬНИЙ URL!
 
 if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY:
     logger.critical("❌ TELEGRAM_BOT_TOKEN та OPENAI_API_KEY повинні бути встановлені в .env файлі")
