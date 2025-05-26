@@ -214,7 +214,7 @@ class MLBBChatGPT:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}
             ],
-            "max_tokens": 800, 
+            "max_tokens": 1000, 
             "temperature": 0.7, # Збільшимо трохи для більш природних відповідей
             "top_p": 0.9,
             "presence_penalty": 0.3,
