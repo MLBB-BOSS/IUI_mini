@@ -50,7 +50,7 @@ ADMIN_USER_ID: int = int(os.getenv("ADMIN_USER_ID", "0"))
 # !!! ВАЖЛИВО: Замініть цей URL на повний та дійсний URL вашого зображення для привітання !!!
 # URL з mls_core.py (pages[0]["image_url"]) був неповним:
 # "https://res.cloudinary.com/ha1pzppgf/image/upload/v1743910260/file_0000000089c051f788c80bab57fde478_conversation_id_67f19402-8e94-8000-a3cc-8bd0fbb6145d_message_id_be471a50-56a7-[...]"
-WELCOME_IMAGE_URL: str = "https://i.imgur.com/GUOZV4x.png" # Тимчасовий URL-заповнювач
+WELCOME_IMAGE_URL: str = "https://res.cloudinary.com/ha1pzppgf/image/upload/v1748286434/file_0000000017a46246b78bf97e2ecd9348_zuk16r.png" # Тимчасовий URL-заповнювач
 
 if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY:
     logger.critical("❌ TELEGRAM_BOT_TOKEN та OPENAI_API_KEY повинні бути встановлені в .env файлі")
