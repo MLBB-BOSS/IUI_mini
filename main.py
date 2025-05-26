@@ -215,7 +215,7 @@ class MLBBChatGPT:
                 {"role": "user", "content": user_query}
             ],
             "max_tokens": 800, 
-            "temperature": 0.8, # Збільшимо трохи для більш природних відповідей
+            "temperature": 0.7, # Збільшимо трохи для більш природних відповідей
             "top_p": 0.9,
             "presence_penalty": 0.3,
             "frequency_penalty": 0.2
