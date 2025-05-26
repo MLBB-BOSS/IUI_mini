@@ -267,7 +267,7 @@ class MLBBChatGPT:
         self.class_logger.info(f"Запит до Vision API. Промпт починається з: '{prompt[:70]}...'")
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         payload = {
-            "model": "GPT-4.1", # Жорстко задана модель
+            "model": "GPT-4o", # Жорстко задана модель
             "messages": [
                 {
                     "role": "user",
