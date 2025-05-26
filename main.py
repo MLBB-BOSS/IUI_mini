@@ -228,10 +228,10 @@ class MLBBChatGPT:
                 {"role": "user", "content": user_query}
             ],
             "max_tokens": 1000, 
-            "temperature": 0.4, # Як було в v2.7
+            "temperature": 0.65, # Як було в v2.7
             "top_p": 0.9,
-            "presence_penalty": 0.1, 
-            "frequency_penalty": 0.1 
+            "presence_penalty": 0.3, 
+            "frequency_penalty": 0.2 
         }
         # ... (решта логіки з v2.7 без змін)
         self.class_logger.debug(f"Параметри тексту для GPT: temperature={payload['temperature']}")
@@ -267,7 +267,7 @@ class MLBBChatGPT:
         self.class_logger.info(f"Запит до Vision API. Промпт починається з: '{prompt[:70]}...'")
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         payload = {
-            "model": "gpt-4o-mini", # Жорстко задана модель
+            "model": "GPT-4.1", # Жорстко задана модель
             "messages": [
                 {
                     "role": "user",
@@ -278,7 +278,7 @@ class MLBBChatGPT:
                 }
             ],
             "max_tokens": 1500,
-            "temperature": 0.3 
+            "temperature": 0.4 
         }
         # ... (решта логіки з v2.7 без змін)
         self.class_logger.debug(f"Параметри для Vision API: модель={payload['model']}, max_tokens={payload['max_tokens']}, temperature={payload['temperature']}")
@@ -362,8 +362,8 @@ class MLBBChatGPT:
         payload = {
             "model": "gpt-4.1", # Жорстко задана модель
             "messages": [{"role": "system", "content": system_prompt_text}],
-            "max_tokens": 200,
-            "temperature": 0.7,
+            "max_tokens": 300,
+            "temperature": 0.6,
             "top_p": 0.9,
             "presence_penalty": 0.2,
             "frequency_penalty": 0.2
