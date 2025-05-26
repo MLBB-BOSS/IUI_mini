@@ -1,8 +1,7 @@
-#вау ефект працює 
 """
 MLBB IUI mini - Мінімалістична версія з максимальною якістю GPT спілкування.
 Фокус на одній функції: розумні відповіді про Mobile Legends Bang Bang.
-Додано функціонал аналізу скріншотів профілю гравця з "вау-ефектом".
+Додано функціонал аналізу скріншотів профілю гравця з "вау-ефектом" та описом від ШІ.
 
 Python 3.11+ | aiogram 3.19+ | OpenAI gpt-4o (або аналогічна для Vision)
 Author: MLBB-BOSS | Date: 2025-05-26
@@ -46,19 +45,21 @@ TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 ADMIN_USER_ID: int = int(os.getenv("ADMIN_USER_ID", "0"))
 VISION_MODEL_NAME: str = os.getenv("VISION_MODEL_NAME", "gpt-4o")
+TEXT_MODEL_NAME: str = os.getenv("TEXT_MODEL_NAME", "gpt-4-turbo") # Модель для текстових описів
 
 if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY:
     logger.critical("❌ TELEGRAM_BOT_TOKEN та OPENAI_API_KEY повинні бути встановлені в .env файлі")
     raise RuntimeError("❌ Встанови TELEGRAM_BOT_TOKEN та OPENAI_API_KEY в .env файлі")
 
 logger.info(f"Використовується модель для Vision: {VISION_MODEL_NAME}")
+logger.info(f"Використовується модель для текстових генерацій: {TEXT_MODEL_NAME}")
 
 # === СТАНИ FSM ДЛЯ АНАЛІЗУ ЗОБРАЖЕНЬ ===
 class VisionAnalysisStates(StatesGroup):
     awaiting_profile_screenshot = State()
-    awaiting_analysis_trigger = State() # Новий стан для очікування натискання кнопки "Аналіз"
+    awaiting_analysis_trigger = State()
 
-# === ПРОМПТ ДЛЯ АНАЛІЗУ ПРОФІЛЮ (v2 з попереднього оновлення) ===
+# === ПРОМПТИ ===
 PROFILE_SCREENSHOT_PROMPT = """
 Ти — експертний аналітик гри Mobile Legends: Bang Bang.
 Твоє завдання — уважно проаналізувати наданий скріншот профілю гравця.
@@ -88,6 +89,25 @@ PROFILE_SCREENSHOT_PROMPT = """
 Для рангів, якщо бачиш римські цифри ТА зірки, вказуй їх разом (наприклад, "Міфічний III 15 ★", "Легенда V 2 ★").
 """
 
+PROFILE_DESCRIPTION_PROMPT_TEMPLATE = """
+Ти — крутий стрімер та аналітик Mobile Legends, який розмовляє з гравцями на їхній мові. Твоє завдання — дати короткий, але яскравий коментар до профілю гравця {user_name}.
+
+Ось дані з профілю:
+- Нікнейм: {game_nickname}
+- Поточний ранг: {current_rank}
+- Найвищий ранг сезону: {highest_rank_season}
+- Матчів зіграно: {matches_played}
+- Лайків отримано: {likes_received}
+- Локація: {location}
+- Сквад: {squad_name}
+
+Напиши 2-4 речення українською мовою, використовуючи ігровий сленг MLBB (наприклад, "тащер", "імба", "фармить як боженька", "рве топи", "ветеран каток", "скіловий гравець", "підняв рейт", "заливає катки" тощо).
+Зроби акцент на якихось цікавих моментах профілю (багато матчів, високий ранг, багато лайків).
+Головне — щоб було дружньо, з гумором (якщо доречно) і по-геймерськи.
+Не треба перераховувати всі дані, просто дай загальне враження.
+Відповідь – ТІЛЬКИ сам текст коментаря, без привітань типу "Привіт, {user_name}!".
+"""
+
 class MLBBChatGPT:
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
@@ -99,17 +119,16 @@ class MLBBChatGPT:
             timeout=ClientTimeout(total=60), 
             headers={"Authorization": f"Bearer {self.api_key}"}
         )
-        self.class_logger.debug("Aiohttp ClientSession створено.")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.session and not self.session.closed:
             await self.session.close()
-            self.class_logger.debug("Aiohttp ClientSession закрито.")
         if exc_type:
-            self.class_logger.error(f"Помилка в контекстному менеджері MLBBChatGPT: {exc_type} {exc_val}", exc_info=True)
+            self.class_logger.error(f"Помилка в MLBBChatGPT: {exc_type} {exc_val}", exc_info=True)
 
     def _create_smart_prompt(self, user_name: str, user_query: str) -> str:
+        # ... (код з v2.6, без змін)
         kyiv_tz = timezone(timedelta(hours=3))
         current_time_kyiv = datetime.now(kyiv_tz)
         current_hour = current_time_kyiv.hour
@@ -159,7 +178,7 @@ class MLBBChatGPT:
 Твоя експертна відповідь (ПАМ'ЯТАЙ: БЕЗ ВИГАДОК, тільки фактичні герої та інформація, валідний HTML):"""
 
     def _beautify_response(self, text: str) -> str:
-        # ... (код з попередньої версії, без змін)
+        # ... (код з v2.6, без змін)
         self.class_logger.debug(f"Beautify: Початковий текст (перші 100 символів): '{text[:100]}'")
         header_emojis = {
             "карти": "🗺️", "об'єктів": "🛡️", "тактика": "⚔️", "позиція": "📍", "комунікація": "💬",
@@ -197,11 +216,11 @@ class MLBBChatGPT:
         return text.strip()
 
     async def get_response(self, user_name: str, user_query: str) -> str:
-        # ... (код з попередньої версії, без змін)
+        # ... (код з v2.6, без змін, використовує TEXT_MODEL_NAME)
         self.class_logger.info(f"Запит до GPT від '{user_name}': '{user_query}'")
         system_prompt = self._create_smart_prompt(user_name, user_query)
         payload = {
-            "model": "gpt-4-turbo", 
+            "model": TEXT_MODEL_NAME, 
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}
@@ -241,9 +260,8 @@ class MLBBChatGPT:
             self.class_logger.exception(f"Загальна помилка текстового GPT для '{user_query}': {e}")
             return f"Не вдалося обробити твій запит, {user_name} 😕."
 
-
     async def analyze_image_with_vision(self, image_base64: str, prompt: str) -> Optional[Dict[str, Any]]:
-        # ... (код з попередньої версії, без змін)
+        # ... (код з v2.6, без змін)
         self.class_logger.info(f"Запит до Vision API. Промпт починається з: '{prompt[:70]}...'")
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         payload = {
@@ -289,7 +307,7 @@ class MLBBChatGPT:
             return {"error": f"Загальна помилка при аналізі зображення: {str(e)}"}
 
     async def _handle_vision_response(self, response: aiohttp.ClientResponse) -> Optional[Dict[str, Any]]:
-        # ... (код з попередньої версії, без змін)
+        # ... (код з v2.6, без змін)
         if response.status == 200:
             try:
                 result = await response.json()
@@ -325,12 +343,68 @@ class MLBBChatGPT:
             self.class_logger.error(f"Vision API помилка: {response.status} - {error_text[:300]}")
             return {"error": f"Помилка Vision API: {response.status}", "details": error_text[:200]}
 
+    async def get_profile_description(self, user_name: str, profile_data: Dict[str, Any]) -> str:
+        """Генерує дружній опис профілю з ігровим сленгом на основі даних."""
+        self.class_logger.info(f"Запит на генерацію опису профілю для '{user_name}'.")
+        
+        # Заповнюємо шаблон даними, обережно обробляючи можливі None значення
+        system_prompt_text = PROFILE_DESCRIPTION_PROMPT_TEMPLATE.format(
+            user_name=html.escape(user_name),
+            game_nickname=html.escape(str(profile_data.get("game_nickname", "Не вказано"))),
+            current_rank=html.escape(str(profile_data.get("current_rank", "Не вказано"))),
+            highest_rank_season=html.escape(str(profile_data.get("highest_rank_season", "Не вказано"))),
+            matches_played=profile_data.get("matches_played", "N/A"),
+            likes_received=profile_data.get("likes_received", "N/A"),
+            location=html.escape(str(profile_data.get("location", "Не вказано"))),
+            squad_name=html.escape(str(profile_data.get("squad_name", "Немає"))),
+        )
+        
+        payload = {
+            "model": TEXT_MODEL_NAME,
+            "messages": [{"role": "system", "content": system_prompt_text}],
+            "max_tokens": 200, # Короткий опис
+            "temperature": 0.7, # Більш креативний
+            "top_p": 0.9,
+            "presence_penalty": 0.2,
+            "frequency_penalty": 0.2
+        }
+        self.class_logger.debug(f"Параметри для опису профілю: temp={payload['temperature']}, max_tokens={payload['max_tokens']}")
+
+        try:
+            if not self.session or self.session.closed:
+                 self.class_logger.warning("Aiohttp сесія для опису профілю була закрита або відсутня. Перестворюю.")
+                 self.session = ClientSession(
+                    timeout=ClientTimeout(total=30), 
+                    headers={"Authorization": f"Bearer {self.api_key}"}
+                )
+            async with self.session.post( # type: ignore
+                "https://api.openai.com/v1/chat/completions", json=payload
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    self.class_logger.error(f"OpenAI API помилка (опис профілю): {response.status} - {error_text}")
+                    return "<i>Не вдалося згенерувати дружній опис. Але ось твої дані:</i>" # Fallback
+                result = await response.json()
+                if not result.get("choices") or not result["choices"][0].get("message") or not result["choices"][0]["message"].get("content"):
+                    self.class_logger.error(f"OpenAI API помилка (опис профілю): несподівана структура - {result}")
+                    return "<i>Не вдалося отримати опис від ШІ. Але ось твої дані:</i>" # Fallback
+                
+                description_text = result["choices"][0]["message"]["content"].strip()
+                self.class_logger.info(f"Згенеровано опис профілю: '{description_text[:100]}'")
+                return html.escape(description_text) # Екрануємо на випадок HTML в описі від GPT
+        except asyncio.TimeoutError:
+            self.class_logger.error(f"OpenAI API Timeout (опис профілю) для: '{user_name}'")
+            return "<i>Опис профілю генерувався занадто довго... Але ось твої дані:</i>" # Fallback
+        except Exception as e:
+            self.class_logger.exception(f"Загальна помилка (опис профілю) для '{user_name}': {e}")
+            return "<i>Виникла помилка при генерації опису. Але ось твої дані:</i>" # Fallback
+
 bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
-    # ... (код з попередньої версії, оновлено версію бота)
+    # ... (код з v2.6, оновлено версію бота)
     await state.clear() 
     user_name = message.from_user.first_name
     user_id = message.from_user.id
@@ -346,7 +420,7 @@ async def cmd_start(message: Message, state: FSMContext):
             "🌆" if 17 <= current_hour < 22 else "🌙"
     welcome_text = f"""
 {greeting_msg}, <b>{user_name}</b>! {emoji}
-🎮 Вітаю в MLBB IUI mini v2.6!
+🎮 Вітаю в MLBB IUI mini v2.7!
 Я - твій персональний AI-експерт по Mobile Legends Bang Bang.
 <b>💡 Як користуватися:</b>
 • Для текстових запитів: <code>/go твоє питання</code>
@@ -354,20 +428,20 @@ async def cmd_start(message: Message, state: FSMContext):
 <b>🚀 Приклади запитів <code>/go</code>:</b>
 • <code>/go як грати на експ лінії проти бійців</code>
 • <code>/go порадь сильних магів для підняття рангу соло</code>
-<b>🔥 Покращення v2.6:</b>
-• Реалізовано "вау-ефект" для аналізу скріншотів: бот видаляє ваш скріншот і надсилає його знову з кнопками для аналізу!
-• Оновлено промпт для Vision API для точнішого розпізнавання рангів та зірок ★.
+<b>🔥 Покращення v2.7:</b>
+• Додано дружній опис профілю з ігровим сленгом від ШІ до результатів аналізу скріншота!
+• "Вау-ефект" для аналізу скріншотів: бот видаляє ваш скріншот і надсилає його знову з кнопками.
 Готовий стати твоїм найкращим MLBB тіммейтом! 💪✨"""
     try:
         await message.answer(welcome_text)
-        logger.info(f"Привітання для {user_name} (v2.6) надіслано.")
+        logger.info(f"Привітання для {user_name} (v2.7) надіслано.")
     except TelegramAPIError as e:
         logger.error(f"Не вдалося надіслати привітання для {user_name}: {e}")
 
 
 @dp.message(Command("go"))
 async def cmd_go(message: Message, state: FSMContext):
-    # ... (код з попередньої версії, оновлено версію бота в admin_info)
+    # ... (код з v2.6, оновлено версію бота в admin_info)
     await state.clear()
     user_name = message.from_user.first_name
     user_id = message.from_user.id
@@ -402,7 +476,7 @@ async def cmd_go(message: Message, state: FSMContext):
     logger.info(f"Час обробки /go для '{user_query}' від {user_name}: {processing_time:.2f}с")
     admin_info = ""
     if message.from_user.id == ADMIN_USER_ID:
-        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | v2.6 GPT (temp:0.4)</i>"
+        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | v2.7 GPT (temp:0.4)</i>"
     full_response_to_send = f"{response_text}{admin_info}"
     try:
         if thinking_msg: await thinking_msg.edit_text(full_response_to_send)
@@ -421,9 +495,11 @@ async def cmd_go(message: Message, state: FSMContext):
             try: await message.reply(f"Вибач, {user_name}, помилка відправки. (Код: TG_{e.__class__.__name__})", parse_mode=None)
             except Exception as final_e: logger.error(f"Не вдалося надіслати повідомлення про помилку Telegram для {user_name}: {final_e}")
 
-# === ОБРОБНИКИ ДЛЯ АНАЛІЗУ СКРІНШОТІВ (оновлено з "вау-ефектом") ===
+
+# === ОБРОБНИКИ ДЛЯ АНАЛІЗУ СКРІНШОТІВ ===
 @dp.message(Command("analyzeprofile"))
 async def cmd_analyze_profile(message: Message, state: FSMContext):
+    # ... (код з v2.6, без змін)
     user_name = message.from_user.first_name
     logger.info(f"Користувач {user_name} (ID: {message.from_user.id}) активував /analyzeprofile.")
     await state.set_state(VisionAnalysisStates.awaiting_profile_screenshot)
@@ -435,19 +511,20 @@ async def cmd_analyze_profile(message: Message, state: FSMContext):
 
 @dp.message(VisionAnalysisStates.awaiting_profile_screenshot, F.photo)
 async def handle_profile_screenshot(message: Message, state: FSMContext):
+    # ... (код з v2.6, без змін)
     bot_instance = message.bot
     user_name = message.from_user.first_name
     chat_id = message.chat.id
     logger.info(f"Отримано скріншот профілю від {user_name} (ID: {message.from_user.id}).")
 
-    if not message.photo: # Малоймовірно через фільтр F.photo, але для безпеки
+    if not message.photo: 
         await message.answer("Щось пішло не так. Будь ласка, надішли саме фото (скріншот).")
         return
 
     photo_file_id = message.photo[-1].file_id
     
     try:
-        await message.delete() # Видаляємо повідомлення користувача зі скріншотом
+        await message.delete() 
         logger.info(f"Повідомлення користувача {user_name} зі скріншотом видалено.")
     except TelegramAPIError as e:
         logger.warning(f"Не вдалося видалити повідомлення користувача зі скріншотом: {e}")
@@ -457,7 +534,7 @@ async def handle_profile_screenshot(message: Message, state: FSMContext):
     caption_text = "Скріншот профілю отримано.\nНатисніть «🔍 Аналіз», щоб дізнатися більше."
     
     analyze_button = InlineKeyboardButton(text="🔍 Аналіз", callback_data="trigger_vision_analysis")
-    delete_preview_button = InlineKeyboardButton(text="🗑️ Видалити", callback_data="delete_bot_message") # Універсальний для видалення повідомлень бота
+    delete_preview_button = InlineKeyboardButton(text="🗑️ Видалити", callback_data="delete_bot_message") 
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[analyze_button, delete_preview_button]])
     
@@ -476,6 +553,7 @@ async def handle_profile_screenshot(message: Message, state: FSMContext):
         await bot_instance.send_message(chat_id, "Не вдалося обробити ваш запит на аналіз. Спробуйте ще раз.")
         await state.clear()
 
+
 @dp.callback_query(F.data == "trigger_vision_analysis", VisionAnalysisStates.awaiting_analysis_trigger)
 async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state: FSMContext):
     bot_instance = callback_query.bot
@@ -484,13 +562,12 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
     
     try:
         await callback_query.message.edit_caption( # type: ignore
-            caption="⏳ Обробляю ваш скріншот... Це може зайняти до хвилини.",
-            reply_markup=None # Видаляємо кнопки під час обробки
+            caption="⏳ Обробляю ваш скріншот... Це може зайняти до хвилини.\n🤖 Генерую також дружній опис...",
+            reply_markup=None
         )
         await callback_query.answer("Розпочато аналіз...")
     except TelegramAPIError as e:
         logger.warning(f"Не вдалося відредагувати повідомлення перед аналізом: {e}")
-        # Продовжуємо, навіть якщо не вдалося відредагувати
 
     user_data = await state.get_data()
     photo_file_id = user_data.get("vision_photo_file_id")
@@ -504,7 +581,10 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
         await state.clear()
         return
 
-    analysis_result_text = f"Вибач, {user_name}, сталася непередбачена помилка при генерації відповіді. 😔"
+    final_caption_text = f"Вибач, {user_name}, сталася непередбачена помилка при генерації відповіді. 😔"
+    structured_data_text = ""
+    profile_description = ""
+
     try:
         file_info = await bot_instance.get_file(photo_file_id)
         if not file_info.file_path:
@@ -519,43 +599,48 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
 
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt_analyzer:
             analysis_result_json = await gpt_analyzer.analyze_image_with_vision(image_base64, PROFILE_SCREENSHOT_PROMPT)
-        
-        if analysis_result_json and "error" not in analysis_result_json:
-            logger.info(f"Успішний аналіз профілю для {user_name}: {analysis_result_json}")
-            response_parts = [f"<b>Аналіз твого профілю, {user_name}:</b>"]
-            fields_translation = {
-                "game_nickname": "🎮 Нікнейм", "mlbb_id_server": "🆔 ID (Сервер)",
-                "current_rank": "🏆 Поточний ранг", "highest_rank_season": "🌟 Найвищий ранг (сезон)",
-                "matches_played": "⚔️ Матчів зіграно", "likes_received": "👍 Лайків отримано",
-                "location": "🌍 Локація", "squad_name": "🛡️ Сквад"
-            }
-            has_data = False
-            for key, readable_name in fields_translation.items():
-                value = analysis_result_json.get(key)
-                if value is not None:
-                    display_value = str(value)
-                    if key in ["current_rank", "highest_rank_season"] and ("★" in display_value or "зірок" in display_value.lower() or "слава" in display_value.lower()):
-                        if "★" not in display_value:
-                             display_value = display_value.replace("зірок", "★").replace("зірки", "★")
-                        display_value = re.sub(r'\s+★', '★', display_value)
-                    response_parts.append(f"<b>{readable_name}:</b> {html.escape(display_value)}")
-                    has_data = True
-                else:
-                     response_parts.append(f"<b>{readable_name}:</b> <i>не розпізнано</i>")
             
-            if not has_data and analysis_result_json.get("raw_response"):
-                 response_parts.append(f"\n<i>Не вдалося структурувати дані. Можливо, на скріншоті недостатньо інформації.</i>")
-            elif not has_data:
-                 response_parts.append(f"\n<i>Не вдалося розпізнати дані. Спробуйте чіткіший скріншот.</i>")
-            analysis_result_text = "\n".join(response_parts)
-        else:
-            error_msg = analysis_result_json.get('error', 'Невідома помилка аналізу.') if analysis_result_json else 'Відповідь від Vision API не отримана.'
-            logger.error(f"Помилка аналізу профілю для {user_name}: {error_msg}")
-            analysis_result_text = f"😔 Вибач, {user_name}, сталася помилка під час аналізу скріншота.\n<i>Помилка: {html.escape(error_msg)}</i>"
+            if analysis_result_json and "error" not in analysis_result_json:
+                logger.info(f"Успішний аналіз профілю (JSON) для {user_name}: {analysis_result_json}")
+                response_parts = [f"<b>Детальний аналіз твого профілю, {user_name}:</b>"]
+                fields_translation = {
+                    "game_nickname": "🎮 Нікнейм", "mlbb_id_server": "🆔 ID (Сервер)",
+                    "current_rank": "🏆 Поточний ранг", "highest_rank_season": "🌟 Найвищий ранг (сезон)",
+                    "matches_played": "⚔️ Матчів зіграно", "likes_received": "👍 Лайків отримано",
+                    "location": "🌍 Локація", "squad_name": "🛡️ Сквад"
+                }
+                has_data = False
+                for key, readable_name in fields_translation.items():
+                    value = analysis_result_json.get(key)
+                    if value is not None:
+                        display_value = str(value)
+                        if key in ["current_rank", "highest_rank_season"] and ("★" in display_value or "зірок" in display_value.lower() or "слава" in display_value.lower()):
+                            if "★" not in display_value:
+                                 display_value = display_value.replace("зірок", "★").replace("зірки", "★")
+                            display_value = re.sub(r'\s+★', '★', display_value)
+                        response_parts.append(f"<b>{readable_name}:</b> {html.escape(display_value)}")
+                        has_data = True
+                    else:
+                         response_parts.append(f"<b>{readable_name}:</b> <i>не розпізнано</i>")
+                
+                if not has_data and analysis_result_json.get("raw_response"):
+                     response_parts.append(f"\n<i>Не вдалося структурувати дані. Можливо, на скріншоті недостатньо інформації.</i>")
+                elif not has_data:
+                     response_parts.append(f"\n<i>Не вдалося розпізнати дані. Спробуйте чіткіший скріншот.</i>")
+                structured_data_text = "\n".join(response_parts)
+
+                # Генеруємо дружній опис
+                profile_description = await gpt_analyzer.get_profile_description(user_name, analysis_result_json)
+                final_caption_text = f"{profile_description}\n\n{structured_data_text}"
+
+            else: # Помилка від Vision API
+                error_msg = analysis_result_json.get('error', 'Невідома помилка аналізу.') if analysis_result_json else 'Відповідь від Vision API не отримана.'
+                logger.error(f"Помилка аналізу профілю (JSON) для {user_name}: {error_msg}")
+                final_caption_text = f"😔 Вибач, {user_name}, сталася помилка під час аналізу скріншота.\n<i>Помилка: {html.escape(error_msg)}</i>"
 
     except Exception as e:
         logger.exception(f"Критична помилка обробки скріншота профілю для {user_name}: {e}")
-        analysis_result_text = f"Дуже шкода, {user_name}, але сталася непередбачена помилка при обробці зображення."
+        final_caption_text = f"Дуже шкода, {user_name}, але сталася непередбачена помилка при обробці зображення."
     
     delete_button = InlineKeyboardButton(text="🗑️ Видалити аналіз", callback_data="delete_bot_message")
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[delete_button]])
@@ -564,26 +649,25 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
         await bot_instance.edit_message_caption( # type: ignore
             chat_id=chat_id,
             message_id=message_id, # type: ignore
-            caption=analysis_result_text,
+            caption=final_caption_text,
             reply_markup=keyboard
         )
     except TelegramAPIError as e:
         logger.error(f"Не вдалося відредагувати повідомлення з результатами аналізу: {e}. Надсилаю нове.")
-        # Якщо редагування не вдалося (наприклад, повідомлення занадто старе), надсилаємо нове
         try:
-            await bot_instance.send_photo(chat_id=chat_id, photo=photo_file_id, caption=analysis_result_text, reply_markup=keyboard) # type: ignore
+            await bot_instance.send_photo(chat_id=chat_id, photo=photo_file_id, caption=final_caption_text, reply_markup=keyboard) # type: ignore
         except Exception as send_err:
             logger.error(f"Не вдалося надіслати нове повідомлення з аналізом: {send_err}")
-            await bot_instance.send_message(chat_id, analysis_result_text) # крайній випадок - просто текст
+            await bot_instance.send_message(chat_id, final_caption_text)
 
     await state.clear()
 
 @dp.callback_query(F.data == "delete_bot_message")
 async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMContext):
+    # ... (код з v2.6, без змін)
     try:
         await callback_query.message.delete() # type: ignore
         await callback_query.answer("Повідомлення видалено.")
-        # Якщо це було повідомлення-прев'ю, і стан ще активний, очистимо його
         current_state = await state.get_state()
         if current_state == VisionAnalysisStates.awaiting_analysis_trigger.state: # type: ignore
             logger.info("Прев'ю аналізу видалено користувачем, очищую стан.")
@@ -596,6 +680,7 @@ async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMC
 @dp.message(VisionAnalysisStates.awaiting_profile_screenshot, Command("cancel"))
 @dp.message(VisionAnalysisStates.awaiting_analysis_trigger, Command("cancel"))
 async def cancel_profile_analysis(message: Message, state: FSMContext):
+    # ... (код з v2.6, без змін)
     logger.info(f"Користувач {message.from_user.first_name} скасував аналіз профілю командою /cancel.")
     
     user_data = await state.get_data()
@@ -613,28 +698,29 @@ async def cancel_profile_analysis(message: Message, state: FSMContext):
 @dp.message(VisionAnalysisStates.awaiting_profile_screenshot)
 @dp.message(VisionAnalysisStates.awaiting_analysis_trigger)
 async def handle_wrong_input_for_profile_screenshot(message: Message, state: FSMContext):
+    # ... (код з v2.6, без змін)
     if message.text and message.text.lower() == "/cancel":
         await cancel_profile_analysis(message, state)
         return
     if message.text and message.text.startswith("/go"):
         logger.info(f"Користувач {message.from_user.first_name} ввів /go у стані аналізу. Скасовую стан і виконую /go.")
-        user_data = await state.get_data() # Спробуємо видалити повідомлення бота, якщо воно є
+        user_data = await state.get_data() 
         bot_message_id = user_data.get("bot_message_id_for_analysis")
         if bot_message_id:
             try: await message.bot.delete_message(chat_id=message.chat.id, message_id=bot_message_id)
             except TelegramAPIError: pass
         await state.clear()
-        await cmd_go(message, state) # Передаємо обробку команді /go
+        await cmd_go(message, state) 
     elif message.text:
         logger.info(f"Користувач {message.from_user.first_name} надіслав текст у стані аналізу. Пропоную скасувати.")
         await message.reply("Очікувався скріншот або дія з аналізом. Використай /cancel для скасування поточного аналізу.")
-    else: # Інший тип контенту
-        await message.reply("Будь ласка, надішли фото (скріншот) або команду /cancel для скасування.")
+    else: 
+        await message.reply("Будь ласка, надішли фото (скріншот) свого профілю або команду /cancel для скасування.")
 
 # === ГЛОБАЛЬНИЙ ОБРОБНИК ПОМИЛОК ===
 @dp.errors()
 async def error_handler(update_event, exception: Exception):
-    # ... (код з попередньої версії, без змін)
+    # ... (код з v2.6, без змін)
     logger.error(f"Глобальна помилка в error_handler: {exception} для update: {update_event}", exc_info=True)
     chat_id = None
     user_name = "друже"
@@ -655,8 +741,8 @@ async def error_handler(update_event, exception: Exception):
 
 # === ЗАПУСК БОТА ===
 async def main() -> None:
-    # ... (код з попередньої версії, оновлено версію бота)
-    logger.info(f"🚀 Запуск MLBB IUI mini v2.6... (PID: {os.getpid()})") 
+    # ... (код з v2.6, оновлено версію бота)
+    logger.info(f"🚀 Запуск MLBB IUI mini v2.7... (PID: {os.getpid()})") 
     try:
         bot_info = await bot.get_me()
         logger.info(f"✅ Бот @{bot_info.username} (ID: {bot_info.id}) успішно авторизований!")
@@ -666,10 +752,10 @@ async def main() -> None:
                 launch_time_kyiv = datetime.now(kyiv_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
                 await bot.send_message(
                     ADMIN_USER_ID,
-                    f"🤖 <b>MLBB IUI mini v2.6 запущено!</b>\n\n" 
+                    f"🤖 <b>MLBB IUI mini v2.7 запущено!</b>\n\n" 
                     f"🆔 @{bot_info.username}\n"
                     f"⏰ {launch_time_kyiv}\n"
-                    f"🎯 <b>Промпт v2.3 (текст), Vision (профіль /analyzeprofile, промпт v2, 'вау-ефект') активні!</b>\n"
+                    f"🎯 <b>Промпт v2.3 (текст), Vision (профіль /analyzeprofile, промпт v2, 'вау-ефект' + опис ШІ) активні!</b>\n"
                     f"🟢 Готовий до роботи!"
                 )
                 logger.info(f"Повідомлення про запуск надіслано адміну ID: {ADMIN_USER_ID}")
