@@ -208,16 +208,16 @@ class MLBBChatGPT:
         self.class_logger.info(f"Запит до GPT від '{user_name}': '{user_query}'")
         system_prompt = self._create_smart_prompt(user_name, user_query)
         payload = {
-            "model": "gpt-4-turbo", # Або "gpt-4.1", якщо це назва конкретної версії, яку використовує користувач
+            "model": "gpt-4.1", # Або "gpt-4.1", якщо це назва конкретної версії, яку використовує користувач
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}
             ],
             "max_tokens": 1000, 
-            "temperature": 0.4, # Зменшено для більшої точності, як обговорювали
+            "temperature": 0.65, # Зменшено для більшої точності, як обговорювали
             "top_p": 0.9,
-            "presence_penalty": 0.1, # Значення з попередньої версії користувача
-            "frequency_penalty": 0.1 # Значення з попередньої версії користувача
+            "presence_penalty": 0.3, # Значення з попередньої версії користувача
+            "frequency_penalty": 0.2 # Значення з попередньої версії користувача
         }
         self.class_logger.debug(f"Параметри тексту для GPT: temperature={payload['temperature']}")
         try:
