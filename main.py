@@ -225,13 +225,13 @@ class MLBBChatGPT:
         self.logger.info(f"Запит до GPT від {user_name}: '{user_query}'")
         system_prompt = self._create_smart_prompt(user_name, user_query)
         payload = {
-            "model": "gpt-4-turbo", # Або інша доступна модель
+            "model": "gpt-4.1", # Або інша доступна модель
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}
             ],
-            "max_tokens": 1000,
-            "temperature": 0.65,
+            "max_tokens": 700,
+            "temperature": 0.8,
             "top_p": 0.9,
             "presence_penalty": 0.1,
             "frequency_penalty": 0.15
