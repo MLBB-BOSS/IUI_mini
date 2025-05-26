@@ -3,7 +3,7 @@ MLBB IUI mini - Мінімалістична версія з максималь�
 Фокус на одній функції: розумні відповіді про Mobile Legends Bang Bang.
 Додано функціонал аналізу скріншотів профілю гравця.
 
-Python 3.11+ | aiogram 3.19+ | OpenAI gpt-4-turbo (або аналогічна)
+Python 3.11+ | aiogram 3.19+ | OpenAI gpt-4o (або аналогічна для Vision)
 Author: MLBB-BOSS | Date: 2025-05-26
 """
 
@@ -26,7 +26,8 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
-from aiohttp import ClientSession, ClientTimeout
+import aiohttp # Явний імпорт для type hint
+from aiohttp import ClientSession, ClientTimeout # ClientTimeout вже був
 from dotenv import load_dotenv
 
 # Нові імпорти для FSM
@@ -46,8 +47,8 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 ADMIN_USER_ID: int = int(os.getenv("ADMIN_USER_ID", "0"))
-# Нова конфігурація для Vision моделі
-VISION_MODEL_NAME: str = os.getenv("VISION_MODEL_NAME", "gpt-4o") # Рекомендовано gpt-4o або gpt-4-turbo
+# Конфігурація для Vision моделі
+VISION_MODEL_NAME: str = os.getenv("VISION_MODEL_NAME", "gpt-4o")
 
 if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY:
     logger.critical("❌ TELEGRAM_BOT_TOKEN та OPENAI_API_KEY повинні бути встановлені в .env файлі")
@@ -97,8 +98,9 @@ class MLBBChatGPT:
         self.class_logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     async def __aenter__(self):
+        # Таймаут для сесії, може бути перекритий у конкретних запитах
         self.session = ClientSession(
-            timeout=ClientTimeout(total=60), # Загальний таймаут для сесії (може бути перекритий у запиті)
+            timeout=ClientTimeout(total=60), 
             headers={"Authorization": f"Bearer {self.api_key}"}
         )
         self.class_logger.debug("Aiohttp ClientSession створено.")
@@ -112,12 +114,14 @@ class MLBBChatGPT:
             self.class_logger.error(f"Помилка в контекстному менеджері MLBBChatGPT: {exc_type} {exc_val}", exc_info=True)
 
     def _create_smart_prompt(self, user_name: str, user_query: str) -> str:
+        # Код з файлу користувача, залишаємо без змін
         kyiv_tz = timezone(timedelta(hours=3))
         current_time_kyiv = datetime.now(kyiv_tz)
         current_hour = current_time_kyiv.hour
         greeting = "Доброго ранку" if 5 <= current_hour < 12 else \
             "Доброго дня" if 12 <= current_hour < 17 else \
             "Доброго вечора" if 17 <= current_hour < 22 else "Доброї ночі"
+        # Промпт v2.2 (або v2.3, якщо користувач оновив його у своєму файлі)
         return f"""# СИСТЕМА: MLBB ЕКСПЕРТ IUI v2.3 🎮
 ## ПРОФІЛЬ АСИСТЕНТА
 Ти - IUI, AI-експерт Mobile Legends Bang Bang. Твоя головна мета – надавати точну та перевірену інформацію.
@@ -160,7 +164,9 @@ class MLBBChatGPT:
 ## ЗАПИТ ВІД {user_name}: "{user_query}"
 Твоя експертна відповідь (ПАМ'ЯТАЙ: БЕЗ ВИГАДОК, тільки фактичні герої та інформація, валідний HTML):"""
 
+
     def _beautify_response(self, text: str) -> str:
+        # Код з файлу користувача, залишаємо без змін
         self.class_logger.debug(f"Beautify: Початковий текст (перші 100 символів): '{text[:100]}'")
         header_emojis = {
             "карти": "🗺️", "об'єктів": "🛡️", "тактика": "⚔️", "позиція": "📍", "комунікація": "💬",
@@ -198,24 +204,25 @@ class MLBBChatGPT:
         return text.strip()
 
     async def get_response(self, user_name: str, user_query: str) -> str:
+        # Код з файлу користувача, з невеликими коригуваннями моделі/параметрів на основі попередніх обговорень
         self.class_logger.info(f"Запит до GPT від '{user_name}': '{user_query}'")
         system_prompt = self._create_smart_prompt(user_name, user_query)
         payload = {
-            "model": "gpt-4-turbo", # Використовуємо більш нову модель, якщо доступна
+            "model": "gpt-4-turbo", # Або "gpt-4.1", якщо це назва конкретної версії, яку використовує користувач
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}
             ],
             "max_tokens": 1000, 
-            "temperature": 0.4,
+            "temperature": 0.4, # Зменшено для більшої точності, як обговорювали
             "top_p": 0.9,
-            "presence_penalty": 0.1,
-            "frequency_penalty": 0.1 
+            "presence_penalty": 0.1, # Значення з попередньої версії користувача
+            "frequency_penalty": 0.1 # Значення з попередньої версії користувача
         }
         self.class_logger.debug(f"Параметри тексту для GPT: temperature={payload['temperature']}")
         try:
             if not self.session or self.session.closed:
-                 self.class_logger.warning("Aiohttp сесія для текстового GPT була закрита. Перестворюю.")
+                 self.class_logger.warning("Aiohttp сесія для текстового GPT була закрита або відсутня. Перестворюю.")
                  self.session = ClientSession(
                     timeout=ClientTimeout(total=45), 
                     headers={"Authorization": f"Bearer {self.api_key}"}
@@ -242,67 +249,46 @@ class MLBBChatGPT:
             return f"Не вдалося обробити твій запит, {user_name} 😕."
 
     async def analyze_image_with_vision(self, image_base64: str, prompt: str) -> Optional[Dict[str, Any]]:
-        """
-        Надсилає зображення та промпт до OpenAI Vision API та повертає розпарсений JSON.
-
-        Args:
-            image_base64: Зображення, закодоване в base64.
-            prompt: Текстовий промпт для аналізу зображення.
-
-        Returns:
-            Словник з даними, якщо аналіз успішний і JSON розпарсений, 
-            або словник з ключем "error", якщо сталася помилка.
-        """
         self.class_logger.info(f"Запит до Vision API. Промпт починається з: '{prompt[:70]}...'")
-        
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
-        }
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         payload = {
-            "model": VISION_MODEL_NAME,
+            "model": VISION_MODEL_NAME, # Використовуємо змінну з .env
             "messages": [
                 {
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_base64}"
-                            }
-                        }
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
                     ]
                 }
             ],
-            "max_tokens": 1500 # Достатньо для JSON відповіді профілю
+            "max_tokens": 1500,     # Вказано безпосередньо
+            "temperature": 0.3      # Вказано безпосередньо для точності
         }
-        self.class_logger.debug(f"Параметри для Vision API: модель={VISION_MODEL_NAME}, max_tokens={payload['max_tokens']}")
+        self.class_logger.debug(f"Параметри для Vision API: модель={VISION_MODEL_NAME}, max_tokens={payload['max_tokens']}, temperature={payload['temperature']}")
 
         try:
+            # Перевіряємо сесію перед використанням
             if not self.session or self.session.closed:
-                self.class_logger.warning("Aiohttp сесія для Vision була закрита або відсутня. Створюю нову.")
-                # Створюємо нову сесію спеціально для цього запиту, якщо основна закрита
-                async with ClientSession(
-                    timeout=ClientTimeout(total=90), # Збільшений таймаут для Vision
-                    headers={"Authorization": f"Bearer {self.api_key}"}
-                ) as vision_session:
-                    async with vision_session.post(
+                self.class_logger.warning("Aiohttp сесія для Vision була закрита або відсутня. Спроба використати нову тимчасову сесію.")
+                # Створюємо тимчасову сесію для цього конкретного запиту
+                async with ClientSession(headers={"Authorization": f"Bearer {self.api_key}"}) as temp_session:
+                    async with temp_session.post(
                         "https://api.openai.com/v1/chat/completions", 
-                        headers=headers, 
-                        json=payload
+                        headers=headers, # Повторно передаємо, бо сесія нова
+                        json=payload,
+                        timeout=ClientTimeout(total=90) # Таймаут для Vision запиту
                     ) as response:
-                        return await self._handle_vision_response(response) # type: ignore
+                        return await self._handle_vision_response(response)
             else:
-                 # Використовуємо існуючу сесію
-                async with self.session.post( # type: ignore
+                # Використовуємо існуючу сесію класу
+                async with self.session.post(
                     "https://api.openai.com/v1/chat/completions", 
-                    headers=headers, 
+                    headers=headers, # Заголовки вже є в self.session, але можна і тут для ясності
                     json=payload,
-                    timeout=ClientTimeout(total=90) # Явно вказуємо таймаут для цього запиту
+                    timeout=ClientTimeout(total=90) # Таймаут для Vision запиту
                 ) as response:
-                    return await self._handle_vision_response(response) # type: ignore
-
+                    return await self._handle_vision_response(response)
         except asyncio.TimeoutError:
             self.class_logger.error("Vision API Timeout помилка.")
             return {"error": "Запит до Vision API зайняв занадто багато часу."}
@@ -310,11 +296,16 @@ class MLBBChatGPT:
             self.class_logger.exception(f"Загальна помилка під час виклику Vision API: {e}")
             return {"error": f"Загальна помилка при аналізі зображення: {str(e)}"}
 
-    async def _handle_vision_response(self, response: ClientSession._RequestContextManager) -> Optional[Dict[str, Any]]: # type: ignore
+    async def _handle_vision_response(self, response: aiohttp.ClientResponse) -> Optional[Dict[str, Any]]:
         """Допоміжна функція для обробки відповіді від Vision API."""
-        # response тут це вже результат `aiohttp.ClientResponse`
-        if response.status == 200: # type: ignore
-            result = await response.json() # type: ignore
+        if response.status == 200:
+            try:
+                result = await response.json()
+            except aiohttp.ContentTypeError: # Обробка помилки, якщо відповідь не JSON
+                raw_text_response = await response.text()
+                self.class_logger.error(f"Vision API відповідь не є JSON. Статус: {response.status}. Відповідь: {raw_text_response[:300]}")
+                return {"error": "Vision API повернуло не JSON відповідь.", "raw_response": raw_text_response}
+
             content = result.get("choices", [{}])[0].get("message", {}).get("content")
             if content:
                 self.class_logger.info(f"Vision API відповідь отримана (перші 100 символів): {content[:100]}")
@@ -322,30 +313,26 @@ class MLBBChatGPT:
                 if json_match:
                     json_str = json_match.group(1)
                 else:
-                    # Якщо немає ```json, припускаємо, що вся відповідь - це JSON
-                    # Це може трапитися, якщо модель точно слідує інструкції "тільки JSON"
-                    json_str = content.strip() 
+                    json_str = content.strip()
                 
                 try:
-                    # Додаткове очищення, якщо JSON все ще не валідний
-                    # Наприклад, видалення зайвих символів на початку/кінці, якщо вони є
-                    # Це дуже базова спроба, можливо знадобиться більш складний парсинг
+                    # Базове очищення JSON рядка
                     if not json_str.startswith("{") and "{" in json_str:
                         json_str = json_str[json_str.find("{"):]
                     if not json_str.endswith("}") and "}" in json_str:
                         json_str = json_str[:json_str.rfind("}")+1]
-                        
+                    
                     return json.loads(json_str)
                 except json.JSONDecodeError as e:
-                    self.class_logger.error(f"Помилка декодування JSON з Vision API: {e}. Відповідь: '{json_str[:300]}'")
+                    self.class_logger.error(f"Помилка декодування JSON з Vision API: {e}. Рядок: '{json_str[:300]}'")
                     return {"error": "Не вдалося розпарсити JSON відповідь від Vision API.", "raw_response": content}
             else:
                 self.class_logger.error(f"Vision API відповідь без контенту: {result}")
                 return {"error": "Vision API повернуло порожню відповідь."}
         else:
-            error_text = await response.text() # type: ignore
-            self.class_logger.error(f"Vision API помилка: {response.status} - {error_text[:300]}") # type: ignore
-            return {"error": f"Помилка Vision API: {response.status}", "details": error_text[:200]} # type: ignore
+            error_text = await response.text()
+            self.class_logger.error(f"Vision API помилка: {response.status} - {error_text[:300]}")
+            return {"error": f"Помилка Vision API: {response.status}", "details": error_text[:200]}
 
 bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
@@ -353,14 +340,12 @@ bot = Bot(
 )
 dp = Dispatcher()
 
-
 @dp.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext): # Додано state
+async def cmd_start(message: Message, state: FSMContext):
+    await state.clear() 
     user_name = message.from_user.first_name
     user_id = message.from_user.id
     logger.info(f"Користувач {user_name} (ID: {user_id}) запустив бота командою /start.")
-    await state.clear() # Очищуємо будь-який попередній стан при /start
-    
     kyiv_tz = timezone(timedelta(hours=3))
     current_time_kyiv = datetime.now(kyiv_tz)
     current_hour = current_time_kyiv.hour
@@ -372,7 +357,7 @@ async def cmd_start(message: Message, state: FSMContext): # Додано state
             "🌆" if 17 <= current_hour < 22 else "🌙"
     welcome_text = f"""
 {greeting_msg}, <b>{user_name}</b>! {emoji}
-🎮 Вітаю в MLBB IUI mini v2.3!
+🎮 Вітаю в MLBB IUI mini v2.4!
 Я - твій персональний AI-експерт по Mobile Legends Bang Bang.
 <b>💡 Як користуватися:</b>
 • Для текстових запитів: <code>/go твоє питання</code>
@@ -380,20 +365,20 @@ async def cmd_start(message: Message, state: FSMContext): # Додано state
 <b>🚀 Приклади запитів <code>/go</code>:</b>
 • <code>/go як грати на експ лінії проти бійців</code>
 • <code>/go порадь сильних магів для підняття рангу соло</code>
-<b>🔥 Покращення v2.3:</b>
+<b>🔥 Покращення v2.4:</b>
 • Додано аналіз скріншотів профілю!
-• Зменшено "вигадування" неіснуючих героїв.
-• Більший фокус на фактичній інформації.
+• Оновлено логіку обробки відповідей Vision API.
+• Зменшено "вигадування" неіснуючих героїв у текстових відповідях.
 Готовий стати твоїм найкращим MLBB тіммейтом! 💪✨"""
     try:
         await message.answer(welcome_text)
-        logger.info(f"Привітання для {user_name} (v2.3) надіслано.")
+        logger.info(f"Привітання для {user_name} (v2.4) надіслано.")
     except TelegramAPIError as e:
         logger.error(f"Не вдалося надіслати привітання для {user_name}: {e}")
 
 @dp.message(Command("go"))
-async def cmd_go(message: Message, state: FSMContext): # Додано state
-    await state.clear() # Очищуємо стан, якщо користувач вводить /go
+async def cmd_go(message: Message, state: FSMContext):
+    await state.clear()
     user_name = message.from_user.first_name
     user_id = message.from_user.id
     user_query = message.text.replace("/go", "", 1).strip() if message.text else ""
@@ -427,7 +412,7 @@ async def cmd_go(message: Message, state: FSMContext): # Додано state
     logger.info(f"Час обробки /go для '{user_query}' від {user_name}: {processing_time:.2f}с")
     admin_info = ""
     if message.from_user.id == ADMIN_USER_ID:
-        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | v2.3 GPT (temp:0.4)</i>"
+        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | v2.4 GPT (temp:0.4)</i>"
     full_response_to_send = f"{response_text}{admin_info}"
     try:
         if thinking_msg: await thinking_msg.edit_text(full_response_to_send)
@@ -455,16 +440,17 @@ async def cmd_analyze_profile(message: Message, state: FSMContext):
     await message.reply(
         f"Привіт, <b>{user_name}</b>! 👋\n"
         "Будь ласка, надішли мені скріншот свого профілю з Mobile Legends, і я спробую його проаналізувати.\n"
-        "Якщо передумаєш, просто надішли будь-яке текстове повідомлення або команду /cancel."
+        "Якщо передумаєш, просто надішли команду /cancel."
     )
 
 @dp.message(VisionAnalysisStates.awaiting_profile_screenshot, F.photo)
-async def handle_profile_screenshot(message: Message, state: FSMContext, bot_instance: Bot = bot): # Використовуємо глобальний bot
+async def handle_profile_screenshot(message: Message, state: FSMContext):
+    bot_instance = message.bot # Отримуємо екземпляр бота з повідомлення
     user_name = message.from_user.first_name
     user_id = message.from_user.id
     logger.info(f"Отримано скріншот профілю від {user_name} (ID: {user_id}).")
 
-    if not message.photo: # Додаткова перевірка, хоча фільтр F.photo вже є
+    if not message.photo:
         await message.reply("Щось пішло не так. Будь ласка, надішли саме фото (скріншот).")
         return
 
@@ -486,7 +472,7 @@ async def handle_profile_screenshot(message: Message, state: FSMContext, bot_ins
             analysis_result = await gpt_analyzer.analyze_image_with_vision(image_base64, PROFILE_SCREENSHOT_PROMPT)
         
         try: await bot_instance.delete_message(chat_id=processing_msg.chat.id, message_id=processing_msg.message_id)
-        except TelegramAPIError: logger.warning("Не вдалося видалити повідомлення про обробку (ймовірно, вже видалено).")
+        except TelegramAPIError: logger.warning("Не вдалося видалити повідомлення про обробку.")
 
         if analysis_result and "error" not in analysis_result:
             logger.info(f"Успішний аналіз профілю для {user_name}: {analysis_result}")
@@ -503,15 +489,12 @@ async def handle_profile_screenshot(message: Message, state: FSMContext, bot_ins
                 if value is not None:
                     response_parts.append(f"<b>{readable_name}:</b> {html.escape(str(value))}")
                     has_data = True
-                else: # Якщо дані не знайдено, але поле є в промпті
+                else:
                      response_parts.append(f"<b>{readable_name}:</b> <i>не розпізнано</i>")
-
-
-            if not has_data and analysis_result.get("raw_response"): # Якщо JSON порожній, але є сира відповідь
+            if not has_data and analysis_result.get("raw_response"):
                  response_parts.append(f"\n<i>Не вдалося структурувати дані. Можливо, на скріншоті недостатньо інформації або вона нечітка.</i>")
             elif not has_data:
                  response_parts.append(f"\n<i>Не вдалося розпізнати дані на скріншоті. Спробуй інший або переконайся, що він чіткий.</i>")
-
             await message.reply("\n".join(response_parts))
         else:
             error_msg = analysis_result.get('error', 'Невідома помилка аналізу.') if analysis_result else 'Відповідь від Vision API не отримана.'
@@ -531,22 +514,23 @@ async def handle_profile_screenshot(message: Message, state: FSMContext, bot_ins
 
 @dp.message(VisionAnalysisStates.awaiting_profile_screenshot, Command("cancel"))
 async def cancel_profile_analysis(message: Message, state: FSMContext):
-    logger.info(f"Користувач {message.from_user.first_name} скасував аналіз профілю.")
+    logger.info(f"Користувач {message.from_user.first_name} скасував аналіз профілю командою /cancel.")
     await state.clear()
     await message.reply("Аналіз скріншота скасовано. Ти можеш продовжити використовувати команду /go.")
 
 @dp.message(VisionAnalysisStates.awaiting_profile_screenshot)
 async def handle_wrong_input_for_profile_screenshot(message: Message, state: FSMContext):
-    # Якщо користувач надсилає текст замість фото, або команду /go, виходимо зі стану
+    if message.text and message.text.lower() == "/cancel": # Додаткова обробка /cancel як тексту
+        await cancel_profile_analysis(message, state)
+        return
     if message.text and message.text.startswith("/go"):
-        logger.info(f"Користувач {message.from_user.first_name} ввів /go у стані очікування скріншота. Скасовую стан.")
+        logger.info(f"Користувач {message.from_user.first_name} ввів /go у стані очікування скріншота. Скасовую стан і виконую /go.")
         await state.clear()
-        await cmd_go(message, state) # Передаємо обробку команді /go
+        await cmd_go(message, state)
     elif message.text:
-        logger.info(f"Користувач {message.from_user.first_name} надіслав текст замість фото. Скасовую стан.")
-        await state.clear()
-        await message.reply("Очікувався скріншот профілю, але отримано текст. Аналіз скасовано. Можеш спробувати /analyzeprofile ще раз або використати /go.")
-    else: # Інший тип контенту (не фото, не текст)
+        logger.info(f"Користувач {message.from_user.first_name} надіслав текст замість фото. Пропоную скасувати або надіслати фото.")
+        await message.reply("Очікувався скріншот профілю. Будь ласка, надішли фото або використай /cancel для скасування аналізу.")
+    else:
         await message.reply("Будь ласка, надішли саме фото (скріншот) свого профілю або команду /cancel для скасування.")
 
 # === ГЛОБАЛЬНИЙ ОБРОБНИК ПОМИЛОК ===
@@ -571,7 +555,7 @@ async def error_handler(update_event, exception: Exception):
 
 # === ЗАПУСК БОТА ===
 async def main() -> None:
-    logger.info(f"🚀 Запуск MLBB IUI mini v2.3... (PID: {os.getpid()})")
+    logger.info(f"🚀 Запуск MLBB IUI mini v2.4... (PID: {os.getpid()})")
     try:
         bot_info = await bot.get_me()
         logger.info(f"✅ Бот @{bot_info.username} (ID: {bot_info.id}) успішно авторизований!")
@@ -581,26 +565,28 @@ async def main() -> None:
                 launch_time_kyiv = datetime.now(kyiv_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
                 await bot.send_message(
                     ADMIN_USER_ID,
-                    f"🤖 <b>MLBB IUI mini v2.3 запущено!</b>\n\n"
+                    f"🤖 <b>MLBB IUI mini v2.4 запущено!</b>\n\n"
                     f"🆔 @{bot_info.username}\n"
                     f"⏰ {launch_time_kyiv}\n"
-                    f"🎯 <b>Промпт v2.3 (анти-галюцинації), Vision (профіль) активні!</b>\n"
+                    f"🎯 <b>Промпт v2.3, Vision (профіль /analyzeprofile) активні!</b>\n"
                     f"🟢 Готовий до роботи!"
                 )
                 logger.info(f"Повідомлення про запуск надіслано адміну ID: {ADMIN_USER_ID}")
             except Exception as e: logger.warning(f"Не вдалося надіслати повідомлення про запуск адміну: {e}")
         logger.info("Розпочинаю polling...")
-        # Реєстрація обробників (перенесено сюди для ясності, хоча dp.message робить це глобально)
-        # dp.include_router(router) # Якщо б ми мали окремий роутер для Vision
         await dp.start_polling(bot)
     except KeyboardInterrupt: logger.info("👋 Бот зупинено користувачем.")
     except TelegramAPIError as e: logger.critical(f"Критична помилка Telegram API: {e}", exc_info=True)
     except Exception as e: logger.critical(f"Непередбачена критична помилка: {e}", exc_info=True)
     finally:
         logger.info("🛑 Зупинка бота та закриття сесій...")
-        if bot.session and not bot.session.closed: # type: ignore
-            await bot.session.close() # type: ignore
-            logger.info("Сесію HTTP клієнта бота закрито.")
+        # Закриття сесії бота, якщо вона була створена і не закрита
+        # Aiogram 3.x зазвичай сам керує сесією бота, але для ClientSession, створених вручну, потрібне явне закриття.
+        # У нас MLBBChatGPT керує своєю сесією через __aexit__.
+        # Сесія самого Bot (bot.session) закривається автоматично при зупинці polling або явно, якщо потрібно.
+        if bot.session and hasattr(bot.session, "close") and not bot.session.closed: # type: ignore
+             await bot.session.close() # type: ignore
+             logger.info("Сесію HTTP клієнта екземпляра Bot закрито.")
         logger.info("👋 Бот остаточно зупинено.")
 
 if __name__ == "__main__":
