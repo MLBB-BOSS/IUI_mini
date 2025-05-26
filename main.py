@@ -11,7 +11,7 @@ import logging
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta  # Оновлено імпорт
 from typing import Optional
 
 from aiogram import Bot, Dispatcher
@@ -65,7 +65,10 @@ class MLBBChatGPT:
         """
         🚀 РЕВОЛЮЦІЙНИЙ ПРОМПТ v2.0 - Науковий підхід до 90-95% якості відповідей
         """
-        current_hour = datetime.now().hour
+        kyiv_tz = timezone(timedelta(hours=3))  # UTC+3 для України
+        current_time_kyiv = datetime.now(kyiv_tz)
+        current_hour = current_time_kyiv.hour
+
         greeting = "Доброго ранку" if 5 <= current_hour < 12 else \
             "Доброго дня" if 12 <= current_hour < 17 else \
             "Доброго вечора" if 17 <= current_hour < 22 else "Доброї ночі"
@@ -194,8 +197,8 @@ class MLBBChatGPT:
                 json=payload
             ) as response:
                 if response.status != 200:
-                    logger.error(f"OpenAI API помилка: {response.status}")
-                    return f"Вибач, {user_name}, технічні проблеми 😔 Спробуй ще раз!"
+                    logger.error(f"OpenAI API помилка: {response.status} - {await response.text()}")
+                    return f"Вибач, {user_name}, технічні проблеми з OpenAI 😔 Спробуй ще раз!"
 
                 result = await response.json()
                 gpt_text = result["choices"][0]["message"]["content"]
@@ -218,7 +221,10 @@ dp = Dispatcher()
 async def cmd_start(message: Message) -> None:
     """Просте та ефективне привітання."""
     user_name = message.from_user.first_name
-    current_hour = datetime.now().hour
+    
+    kyiv_tz = timezone(timedelta(hours=3))  # UTC+3 для України
+    current_time_kyiv = datetime.now(kyiv_tz)
+    current_hour = current_time_kyiv.hour
 
     if 5 <= current_hour < 12:
         greeting = "Доброго ранку"
@@ -284,7 +290,7 @@ async def cmd_go(message: Message) -> None:
     ]
 
     thinking_msg = await message.reply(
-        thinking_messages[hash(user_query) % len(thinking_messages)]
+        thinking_messages[hash(user_query + str(time.time())) % len(thinking_messages)] # Додано time.time() для кращої рандомізації
     )
 
     start_time = time.time()
@@ -301,20 +307,37 @@ async def cmd_go(message: Message) -> None:
     try:
         await thinking_msg.edit_text(f"{response}{admin_info}")
         logger.info(f"📤 Відповідь для {user_name} ({processing_time:.2f}s)")
-    except TelegramAPIError:
-        await message.reply(f"{response}{admin_info}")
+    except TelegramAPIError as e:
+        logger.error(f"Telegram API помилка при редагуванні повідомлення: {e}")
+        # Якщо редагування не вдалося, спробуємо надіслати нове повідомлення
+        try:
+            await message.reply(f"{response}{admin_info}")
+            logger.info(f"📤 Відповідь для {user_name} (надіслано новим повідомленням після помилки редагування)")
+        except Exception as final_e:
+            logger.error(f"Не вдалося надіслати відповідь навіть новим повідомленням: {final_e}")
+            await message.reply(f"Вибач, {user_name}, не вдалося відобразити відповідь. Спробуй ще раз.")
 
 
 @dp.errors()
-async def error_handler(event, exception):
-    logger.error(f"🚨 Помилка: {exception}", exc_info=True)
+async def error_handler(event, exception: Exception): # Додано тип для exception
+    logger.error(f"🚨 Загальна помилка в обробнику: {exception}", exc_info=True)
 
-    if hasattr(event, 'message') and event.message:
-        user_name = event.message.from_user.first_name if event.message.from_user else "друже"
-        await event.message.answer(
-            f"Вибач, {user_name}, сталася помилка 😔\n"
-            "Спробуй ще раз через хвилину!"
-        )
+    if hasattr(event, 'message') and event.message and hasattr(event.message, 'from_user') and event.message.from_user:
+        user_name = event.message.from_user.first_name
+        error_message_text = f"Вибач, {user_name}, сталася непередбачена помилка 😔\nСпробуй, будь ласка, ще раз через хвилину!"
+        try:
+            await event.message.answer(error_message_text)
+        except Exception as e:
+            logger.error(f"🚨 Не вдалося надіслати повідомлення про помилку користувачу {user_name}: {e}")
+    elif hasattr(event, 'update') and event.update and event.update.message and event.update.message.from_user:
+        user_name = event.update.message.from_user.first_name
+        error_message_text = f"Вибач, {user_name}, сталася непередбачена помилка 😔\nСпробуй, будь ласка, ще раз через хвилину!"
+        try:
+            await bot.send_message(event.update.message.chat.id, error_message_text)
+        except Exception as e:
+            logger.error(f"🚨 Не вдалося надіслати повідомлення про помилку користувачу {user_name} (через update): {e}")
+    else:
+        logger.warning("🚨 Помилка сталася, але не вдалося визначити користувача для відповіді.")
 
 
 async def main() -> None:
@@ -327,25 +350,35 @@ async def main() -> None:
 
         if ADMIN_USER_ID:
             try:
+                # Використовуємо kyiv_tz для часу запуску в повідомленні адміну
+                kyiv_tz = timezone(timedelta(hours=3))
+                launch_time_kyiv = datetime.now(kyiv_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
+                
                 await bot.send_message(
                     ADMIN_USER_ID,
                     f"🤖 <b>MLBB IUI mini v2.0 запущено!</b>\n\n"
                     f"🆔 @{bot_info.username}\n"
-                    f"⏰ {datetime.now().strftime('%H:%M:%S')}\n"
+                    f"⏰ {launch_time_kyiv}\n" # Використовуємо час з часовою зоною
                     f"🎯 <b>Покращений промпт активний!</b>\n"
                     f"🟢 Готовий до роботи!"
                 )
-            except Exception:
-                pass
+                logger.info(f"ℹ️ Повідомлення про запуск надіслано адміну ID: {ADMIN_USER_ID}")
+            except Exception as e:
+                logger.warning(f"⚠️ Не вдалося надіслати повідомлення про запуск адміну: {e}")
 
         await dp.start_polling(bot)
 
     except KeyboardInterrupt:
-        logger.info("👋 Бот зупинено")
+        logger.info("👋 Бот зупинено користувачем (KeyboardInterrupt)")
+    except TelegramAPIError as e:
+        logger.critical(f"💥 Критична помилка Telegram API при запуску: {e}")
     except Exception as e:
-        logger.critical(f"💥 Критична помилка: {e}")
+        logger.critical(f"💥 Критична помилка при запуску: {e}", exc_info=True)
     finally:
-        await bot.session.close()
+        logger.info("🛑 Закриття сесії бота...")
+        if bot.session: # Перевірка чи сесія існує
+            await bot.session.close()
+        logger.info("👋 Бот остаточно зупинено.")
 
 
 if __name__ == "__main__":
