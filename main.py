@@ -617,7 +617,7 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
     
     try:
         await callback_query.message.edit_caption( 
-            caption=f"⏳ Обробляю ваш скріншот, {user_name} (gpt-4o-mini)...\n🤖 Генерую також дружній опис (gpt-4.1)...",
+            caption=f"⏳ Обробляю ваш скріншот, {user_name}",
             reply_markup=None # Прибираємо кнопки на час обробки
         )
         await callback_query.answer("Розпочато аналіз...")
