@@ -47,9 +47,7 @@ TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 ADMIN_USER_ID: int = int(os.getenv("ADMIN_USER_ID", "0"))
 
-# URL для вітального зображення (має бути замінений на актуальний, якщо потрібно)
-# Банер Image 5, наданий користувачем
-WELCOME_IMAGE_URL: str = "https://res.cloudinary.com/ha1pzppgf/image/upload/v1748286434/file_0000000017a46246b78bf97e2ecd9348_zuk16r.png" # ЗАМІНІТЬ НА ВАШ АКТУАЛЬНИЙ URL!
+WELCOME_IMAGE_URL: str = "https://res.cloudinary.com/ha1pzppgf/image/upload/v1748286434/file_0000000017a46246b78bf97e2ecd9348_zuk16r.png"
 
 if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY:
     logger.critical("❌ TELEGRAM_BOT_TOKEN та OPENAI_API_KEY повинні бути встановлені в .env файлі")
@@ -57,6 +55,95 @@ if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY:
 
 logger.info(f"Модель для Vision (аналіз скріншотів): gpt-4o-mini (жорстко задано)")
 logger.info(f"Модель для текстових генерацій (/go, опис профілю): gpt-4.1 (жорстко задано)")
+
+MAX_TELEGRAM_MESSAGE_LENGTH = 4090 # Трохи менше за офіційний ліміт 4096 для безпеки
+
+async def send_message_in_chunks(
+    bot_instance: Bot, 
+    chat_id: int, 
+    text: str, 
+    parse_mode: Optional[str],
+    initial_message_to_edit: Optional[Message] = None
+):
+    """
+    Надсилає повідомлення, розбиваючи його на частини, якщо воно занадто довге.
+    Редагує initial_message_to_edit першою частиною, якщо надано,
+    надсилає наступні частини як нові повідомлення.
+    """
+    if not text.strip():
+        if initial_message_to_edit:
+            try:
+                await initial_message_to_edit.delete()
+                logger.info(f"Видалено thinking_msg для chat_id {chat_id}, оскільки текст порожній.")
+            except TelegramAPIError:
+                pass # Ігноруємо, якщо не вдалося видалити
+        return
+
+    current_pos = 0
+    processed_initial_message = False
+
+    # Спроба відредагувати initial_message_to_edit першою частиною
+    if initial_message_to_edit:
+        first_chunk_text = text[:MAX_TELEGRAM_MESSAGE_LENGTH]
+        if len(text) > MAX_TELEGRAM_MESSAGE_LENGTH: # Якщо текст буде розбитий
+            split_point = text.rfind('\n', 0, MAX_TELEGRAM_MESSAGE_LENGTH)
+            if split_point != -1 and split_point > current_pos:
+                first_chunk_text = text[:split_point + 1]
+        
+        if first_chunk_text.strip():
+            try:
+                await initial_message_to_edit.edit_text(first_chunk_text, parse_mode=parse_mode)
+                logger.info(f"Відредаговано initial_message_to_edit для chat_id {chat_id}. Довжина частини: {len(first_chunk_text)}")
+                current_pos = len(first_chunk_text)
+                processed_initial_message = True
+            except TelegramAPIError as e:
+                logger.warning(f"Не вдалося відредагувати initial_message_to_edit для chat_id {chat_id}: {e}. Повідомлення буде надіслано частинами.")
+                try:
+                    await initial_message_to_edit.delete() # Видаляємо, якщо редагування не вдалося
+                except TelegramAPIError:
+                    pass # Ігноруємо помилку видалення
+                processed_initial_message = True # Позначаємо як оброблене (видалене)
+        else: # Якщо перша частина порожня після обрізки
+             try:
+                await initial_message_to_edit.delete()
+                logger.info(f"Видалено thinking_msg для chat_id {chat_id}, оскільки перша частина порожня.")
+             except TelegramAPIError: pass
+             processed_initial_message = True
+
+
+    # Надсилання решти частин (або всіх, якщо редагування не було)
+    while current_pos < len(text):
+        remaining_text_length = len(text) - current_pos
+        chunk_size_to_cut = min(MAX_TELEGRAM_MESSAGE_LENGTH, remaining_text_length)
+        
+        actual_chunk_size = chunk_size_to_cut
+        if chunk_size_to_cut < remaining_text_length: # Якщо це не остання частина
+            split_point = text.rfind('\n', current_pos, current_pos + chunk_size_to_cut)
+            if split_point != -1 and split_point > current_pos:
+                actual_chunk_size = (split_point - current_pos) + 1
+            # Інакше, якщо немає '\n', ріжемо по MAX_TELEGRAM_MESSAGE_LENGTH
+
+        chunk = text[current_pos : current_pos + actual_chunk_size]
+        current_pos += actual_chunk_size
+
+        if not chunk.strip(): # Пропускаємо надсилання порожніх частин
+            continue
+
+        try:
+            await bot_instance.send_message(chat_id, chunk, parse_mode=parse_mode)
+            logger.info(f"Надіслано частину повідомлення для chat_id {chat_id}. Довжина: {len(chunk)}")
+        except TelegramAPIError as e:
+            logger.error(f"Telegram API помилка при надсиланні частини для chat_id {chat_id}: {e}. Частина (100): {html.escape(chunk[:100])}")
+            if "can't parse entities" in str(e).lower() or "unclosed" in str(e).lower() or "expected" in str(e).lower():
+                plain_chunk = re.sub(r"<[^>]+>", "", chunk)
+                if plain_chunk.strip():
+                    try:
+                        await bot_instance.send_message(chat_id, plain_chunk, parse_mode=None)
+                        logger.info(f"Надіслано частину повідомлення як простий текст для chat_id {chat_id}. Довжина: {len(plain_chunk)}")
+                        continue 
+                    except TelegramAPIError as plain_e:
+                        logger.error(f"Не вдалося надіслати частину як простий текст для chat_id {chat_id}: {plain_e}")
+            break # Зупиняємо надсилання наступних частин у разі непередбаченої помилки
 
 # === СТАНИ FSM ДЛЯ АНАЛІЗУ ЗОБРАЖЕНЬ ===
 class VisionAnalysisStates(StatesGroup):
@@ -269,7 +356,7 @@ class MLBBChatGPT:
         self.class_logger.info(f"Запит до Vision API. Промпт починається з: '{prompt[:70]}...'")
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         payload = {
-            "model": "gpt-4o-mini", # Змінено на gpt-4o-mini як зазначено в логах
+            "model": "gpt-4o-mini",
             "messages": [
                 {
                     "role": "user",
@@ -285,13 +372,12 @@ class MLBBChatGPT:
         self.class_logger.debug(f"Параметри для Vision API: модель={payload['model']}, max_tokens={payload['max_tokens']}, temperature={payload['temperature']}")
 
         try:
-            # Використовуємо тимчасову сесію для Vision запитів, щоб уникнути конфліктів з основною сесією
             async with ClientSession(headers={"Authorization": f"Bearer {self.api_key}"}) as temp_session:
                 async with temp_session.post(
                     "https://api.openai.com/v1/chat/completions", 
                     headers=headers,
                     json=payload,
-                    timeout=ClientTimeout(total=90) # Збільшено таймаут для Vision
+                    timeout=ClientTimeout(total=90) 
                 ) as response:
                     return await self._handle_vision_response(response)
         except asyncio.TimeoutError:
@@ -315,16 +401,13 @@ class MLBBChatGPT:
             content = result.get("choices", [{}])[0].get("message", {}).get("content")
             if content:
                 self.class_logger.info(f"Vision API відповідь отримана (перші 100 символів): {content[:100]}")
-                # Спроба витягнути JSON з блоку коду або просто з рядка
                 json_match = re.search(r"```json\\s*([\\s\\S]+?)\\s*```", content, re.DOTALL)
                 if json_match:
                     json_str = json_match.group(1)
                 else:
-                    # Якщо немає ```json```, беремо весь рядок, видаляючи зайві пробіли
                     json_str = content.strip() 
                 
                 try:
-                    # Додаткова перевірка та очищення перед json.loads
                     if not json_str.startswith("{") and "{" in json_str:
                         json_str = json_str[json_str.find("{"):]
                     if not json_str.endswith("}") and "}" in json_str:
@@ -346,7 +429,6 @@ class MLBBChatGPT:
         """Генерує дружній опис профілю на основі даних від Vision API."""
         self.class_logger.info(f"Запит на генерацію опису профілю для '{user_name}'.")
         
-        # Екрануємо дані перед вставкою в промпт, щоб уникнути проблем з форматуванням
         escaped_profile_data = {k: html.escape(str(v)) if v is not None else "Не вказано" for k, v in profile_data.items()}
 
         system_prompt_text = PROFILE_DESCRIPTION_PROMPT_TEMPLATE.format(
@@ -360,7 +442,7 @@ class MLBBChatGPT:
         )
         payload = {
             "model": "gpt-4.1", 
-            "messages": [{"role": "system", "content": system_prompt_text}], # Використовуємо system для кращого слідування інструкціям
+            "messages": [{"role": "system", "content": system_prompt_text}],
             "max_tokens": 300,
             "temperature": 0.7,
             "top_p": 0.9,
@@ -390,9 +472,6 @@ class MLBBChatGPT:
                 
                 description_text = result["choices"][0]["message"]["content"].strip()
                 self.class_logger.info(f"Згенеровано опис профілю: '{description_text[:100]}'")
-                # Оскільки промпт вимагає відповідь БЕЗ HTML, ми не будемо тут робити html.escape()
-                # Якщо ШІ все ж додасть HTML, це може спричинити проблеми при відправці.
-                # Поки що довіряємо промпту.
                 return description_text 
         except asyncio.TimeoutError:
             self.class_logger.error(f"OpenAI API Timeout (опис профілю) для: '{user_name}'")
@@ -468,11 +547,12 @@ async def cmd_start(message: Message, state: FSMContext):
 
 @dp.message(Command("go"))
 async def cmd_go(message: Message, state: FSMContext):
-    """Обробник команди /go. Надсилає запит до GPT."""
+    """Обробник команди /go. Надсилає запит до GPT та відповідь частинами, якщо потрібно."""
     await state.clear()
     user = message.from_user
     user_name_escaped = html.escape(user.first_name if user else "Гравець")
     user_id = user.id if user else "невідомий"
+    # Перевірка, чи message.text існує, перед викликом .replace()
     user_query = message.text.replace("/go", "", 1).strip() if message.text else ""
     
     logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) зробив запит з /go: '{user_query}'")
@@ -499,12 +579,13 @@ async def cmd_go(message: Message, state: FSMContext):
         logger.error(f"Не вдалося надіслати 'thinking_msg' для {user_name_escaped}: {e}")
     
     start_time = time.time()
-    response_text = f"Вибач, {user_name_escaped}, сталася непередбачена помилка при генерації відповіді. 😔"
+    response_text = f"Вибач, {user_name_escaped}, сталася непередбачена помилка при генерації відповіді. 😔" # Default error
     try:
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
             response_text = await gpt.get_response(user_name_escaped, user_query)
     except Exception as e:
         logger.exception(f"Критична помилка MLBBChatGPT для '{user_query}' від {user_name_escaped}: {e}")
+        # response_text вже встановлено на повідомлення про помилку
     
     processing_time = time.time() - start_time
     logger.info(f"Час обробки /go для '{user_query}' від {user_name_escaped}: {processing_time:.2f}с")
@@ -516,27 +597,29 @@ async def cmd_go(message: Message, state: FSMContext):
     full_response_to_send = f"{response_text}{admin_info}"
     
     try:
-        if thinking_msg: 
-            await thinking_msg.edit_text(full_response_to_send)
-        else: 
-            await message.reply(full_response_to_send)
-        logger.info(f"Відповідь /go для {user_name_escaped} успішно надіслано/відредаговано.")
-    except TelegramAPIError as e:
-        logger.error(f"Telegram API помилка /go для {user_name_escaped}: {e}. Текст (100): '{html.escape(full_response_to_send[:100])}'")
-        if "can't parse entities" in str(e).lower() or "unclosed" in str(e).lower() or "expected" in str(e).lower():
-            plain_text_response = re.sub(r"<[^>]+>", "", response_text) 
-            fallback_message = (f"{plain_text_response}{admin_info}\n\n<i>(Помилка форматування HTML. Показано як простий текст.)</i>")
-            try:
-                if thinking_msg: await thinking_msg.edit_text(fallback_message, parse_mode=None)
-                else: await message.reply(fallback_message, parse_mode=None)
-                logger.info(f"Надіслано простий текст /go для {user_name_escaped} через помилку парсингу HTML.")
-            except Exception as plain_e: 
-                logger.error(f"Не вдалося надіслати простий текст /go для {user_name_escaped}: {plain_e}")
-        else:
-            try: 
-                await message.reply(f"Вибач, {user_name_escaped}, помилка відправки відповіді. (Код: TG_{e.__class__.__name__})", parse_mode=None)
-            except Exception as final_e: 
-                logger.error(f"Не вдалося надіслати повідомлення про помилку Telegram для {user_name_escaped}: {final_e}")
+        await send_message_in_chunks(
+            bot_instance=bot, 
+            chat_id=message.chat.id,
+            text=full_response_to_send,
+            parse_mode=ParseMode.HTML,
+            initial_message_to_edit=thinking_msg
+        )
+        logger.info(f"Відповідь /go для {user_name_escaped} успішно надіслано (можливо, частинами).")
+    except Exception as e: 
+        logger.error(f"Не вдалося надіслати відповідь /go для {user_name_escaped} навіть частинами: {e}", exc_info=True)
+        # Спроба надіслати загальне повідомлення про помилку, якщо send_message_in_chunks не впоралось
+        try:
+            final_error_msg = f"Вибач, {user_name_escaped}, сталася критична помилка при відправці відповіді. Спробуйте пізніше. (Код: GO_SEND_FAIL)"
+            if thinking_msg and not thinking_msg.is_bot: # Перевірка, чи thinking_msg ще існує і не видалене
+                 try:
+                    await thinking_msg.edit_text(final_error_msg, parse_mode=None)
+                 except TelegramAPIError: # Якщо редагування не вдалося, надсилаємо нове
+                    await message.reply(final_error_msg, parse_mode=None)
+            else:
+                await message.reply(final_error_msg, parse_mode=None)
+        except Exception as final_err_send:
+            logger.error(f"Зовсім не вдалося надіслати фінальне повідомлення про помилку для {user_name_escaped}: {final_err_send}")
+
 
 @dp.message(Command("analyzeprofile"))
 async def cmd_analyze_profile(message: Message, state: FSMContext):
@@ -606,7 +689,7 @@ async def handle_profile_screenshot(message: Message, state: FSMContext):
 async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state: FSMContext):
     """Обробляє натискання кнопки "Аналіз", викликає Vision API та надсилає результат."""
     bot_instance = callback_query.bot
-    if not callback_query.message or not callback_query.message.chat: # Додано перевірку на message.chat
+    if not callback_query.message or not callback_query.message.chat:
         logger.error("trigger_vision_analysis_callback: callback_query.message або callback_query.message.chat is None.")
         await callback_query.answer("Помилка: не вдалося обробити запит.", show_alert=True)
         await state.clear()
@@ -619,12 +702,12 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
     user_name = user_data.get("original_user_name", "Гравець") 
     
     try:
-        if callback_query.message.caption: # Редагуємо caption тільки якщо він є
+        if callback_query.message.caption: 
             await callback_query.message.edit_caption( 
                 caption=f"⏳ Обробляю ваш скріншот, {user_name}...",
-                reply_markup=None # Прибираємо кнопки на час обробки
+                reply_markup=None 
             )
-        else: # Якщо caption немає (наприклад, фото без підпису), редагуємо reply_markup
+        else: 
              await callback_query.message.edit_reply_markup(reply_markup=None)
         await callback_query.answer("Розпочато аналіз...")
     except TelegramAPIError as e:
@@ -637,7 +720,6 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
         try:
             if callback_query.message.caption:
                 await callback_query.message.edit_caption(caption=f"Помилка, {user_name}: дані для аналізу втрачено. Спробуйте надіслати скріншот знову.")
-            # Якщо caption немає, можливо, нічого не редагувати або надіслати нове повідомлення
         except TelegramAPIError: pass
         await state.clear()
         return
@@ -673,11 +755,10 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                     value = analysis_result_json.get(key)
                     if value is not None:
                         display_value = str(value)
-                        # Нормалізація відображення рангу
                         if key == "highest_rank_season" and ("★" in display_value or "зірок" in display_value.lower() or "слава" in display_value.lower()):
                             if "★" not in display_value:
                                  display_value = display_value.replace("зірок", "★").replace("зірки", "★")
-                            display_value = re.sub(r'\\s+★', '★', display_value) # видаляємо пробіл перед зіркою
+                            display_value = re.sub(r'\\s+★', '★', display_value) 
                         response_parts.append(f"<b>{readable_name}:</b> {html.escape(display_value)}")
                         has_data = True
                     else:
@@ -691,7 +772,6 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                 structured_data_text = "\n".join(response_parts)
                 profile_description = await gpt_analyzer.get_profile_description(user_name, analysis_result_json)
                 
-                # Змінено порядок: спочатку структуровані дані, потім опис
                 final_caption_text = f"{structured_data_text}\n\n{profile_description}"
 
             else: 
@@ -702,7 +782,6 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                     final_caption_text += f"\nДеталі: {html.escape(analysis_result_json.get('raw_response')[:100])}..."
                 elif analysis_result_json and analysis_result_json.get("details"):
                      final_caption_text += f"\nДеталі: {html.escape(analysis_result_json.get('details')[:100])}..."
-
 
     except TelegramAPIError as e:
         logger.exception(f"Telegram API помилка під час обробки файлу для {user_name}: {e}")
@@ -715,39 +794,34 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
         final_caption_text = f"Дуже шкода, {user_name}, але сталася непередбачена помилка при обробці зображення."
     
     try:
-        # Переконуємося, що message існує перед редагуванням
         if callback_query.message:
-            await bot_instance.edit_message_caption( 
-                chat_id=chat_id,
-                message_id=message_id, 
-                caption=final_caption_text,
-                reply_markup=None 
-            )
-            logger.info(f"Результати аналізу для {user_name} відредаговано.")
+            # Використовуємо send_message_in_chunks для надсилання потенційно довгого caption
+            # Для цього треба передати bot_instance та chat_id, а також текст як caption
+            # Однак send_message_in_chunks розрахована на текстові повідомлення, не на редагування caption фото.
+            # Тому для caption фото, якщо воно задовге, краще надіслати текст окремим повідомленням.
+            if len(final_caption_text) > 1024: # Ліміт Telegram для підписів до медіа
+                logger.warning(f"Підпис до фото для {user_name} задовгий ({len(final_caption_text)} символів). Редагую фото без підпису і надсилаю текст окремо.")
+                await bot_instance.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None) # Видаляємо кнопки
+                await send_message_in_chunks(bot_instance, chat_id, final_caption_text, ParseMode.HTML)
+            else:
+                await bot_instance.edit_message_caption( 
+                    chat_id=chat_id,
+                    message_id=message_id, 
+                    caption=final_caption_text,
+                    reply_markup=None, # Кнопки видаляються
+                    parse_mode=ParseMode.HTML 
+                )
+            logger.info(f"Результати аналізу для {user_name} відредаговано/надіслано.")
     except TelegramAPIError as e:
-        logger.error(f"Не вдалося відредагувати повідомлення з результатами аналізу для {user_name}: {e}. Надсилаю нове.")
+        logger.error(f"Не вдалося відредагувати/надіслати повідомлення з результатами аналізу для {user_name}: {e}. Спроба надіслати текст окремо.")
         try:
-            # Перевіряємо, чи є photo_file_id, щоб вирішити, надсилати фото чи текст
-            if photo_file_id and callback_query.message: # Додано перевірку на message
-                 await bot_instance.send_photo(
-                     chat_id=chat_id, 
-                     photo=photo_file_id, 
-                     caption=final_caption_text, 
-                     reply_markup=None
-                 )
-                 logger.info(f"Результати аналізу для {user_name} надіслано новим фото.")
-            elif callback_query.message: # Додано перевірку на message
-                 await bot_instance.send_message(
-                     chat_id, 
-                     final_caption_text, 
-                     reply_markup=None
-                 )
-                 logger.info(f"Результати аналізу для {user_name} надіслано новим текстовим повідомленням.")
+            await send_message_in_chunks(bot_instance, chat_id, final_caption_text, ParseMode.HTML)
         except Exception as send_err:
             logger.error(f"Не вдалося надіслати нове повідомлення з аналізом для {user_name}: {send_err}")
-            if callback_query.message: # Додано перевірку на message
+            # Остання спроба - надіслати хоча б повідомлення про помилку
+            if callback_query.message:
                 try: 
-                    await bot_instance.send_message(chat_id, final_caption_text) # parse_mode тут не потрібен, бо final_caption_text вже має HTML
+                    await bot_instance.send_message(chat_id, f"Вибачте, {user_name}, сталася помилка при відображенні результатів аналізу.")
                 except Exception as final_fallback_err:
                      logger.error(f"Не вдалося надіслати навіть текстове повідомлення з аналізом для {user_name}: {final_fallback_err}")
 
@@ -755,9 +829,7 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
 
 @dp.callback_query(F.data == "delete_bot_message")
 async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMContext):
-    """
-    Обробляє натискання кнопки "Видалити" на повідомленні-прев'ю скріншота.
-    """
+    """ Обробляє натискання кнопки "Видалити" на повідомленні-прев'ю скріншота. """
     if not callback_query.message: 
         logger.error("delete_bot_message_callback: callback_query.message is None.")
         await callback_query.answer("Помилка видалення.", show_alert=True)
@@ -801,7 +873,7 @@ async def handle_wrong_input_for_profile_screenshot(message: Message, state: FSM
     """Обробляє некоректне введення під час очікування скріншота або тригера аналізу."""
     user = message.from_user
     user_name_escaped = html.escape(user.first_name if user else "Гравець")
-    if message.text and message.text.lower() == "/cancel": # Перевіряємо чи є текст перед .lower()
+    if message.text and message.text.lower() == "/cancel": 
         await cancel_profile_analysis(message, state)
         return
         
@@ -833,12 +905,12 @@ async def error_handler(update_event, exception: Exception):
     if hasattr(update_event, 'message') and update_event.message:
         chat_id = update_event.message.chat.id
         if update_event.message.from_user: 
-            user_name = html.escape(update_event.message.from_user.first_name or "Гравець") # Додано or "Гравець"
+            user_name = html.escape(update_event.message.from_user.first_name or "Гравець") 
     elif hasattr(update_event, 'callback_query') and update_event.callback_query:
-        if update_event.callback_query.message and update_event.callback_query.message.chat : # Додано перевірку на message.chat
+        if update_event.callback_query.message and update_event.callback_query.message.chat : 
              chat_id = update_event.callback_query.message.chat.id
         if update_event.callback_query.from_user: 
-            user_name = html.escape(update_event.callback_query.from_user.first_name or "Гравець") # Додано or "Гравець"
+            user_name = html.escape(update_event.callback_query.from_user.first_name or "Гравець") 
         try: 
             await update_event.callback_query.answer("Сталася помилка...", show_alert=False)
         except Exception: pass 
@@ -855,7 +927,7 @@ async def error_handler(update_event, exception: Exception):
 
 async def main() -> None:
     """Головна функція запуску бота."""
-    logger.info(f"🚀 Запуск MLBB IUI mini v2.8 (змінено порядок виводу аналізу)... (PID: {os.getpid()})") 
+    logger.info(f"🚀 Запуск MLBB IUI mini v2.9 (з обробкою довгих повідомлень)... (PID: {os.getpid()})") 
     try:
         bot_info = await bot.get_me()
         logger.info(f"✅ Бот @{bot_info.username} (ID: {bot_info.id}) успішно авторизований!")
@@ -864,15 +936,12 @@ async def main() -> None:
                 kyiv_tz = timezone(timedelta(hours=3))
                 launch_time_kyiv = datetime.now(kyiv_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
                 admin_message = (
-                    f"🤖 <b>MLBB IUI mini v2.8 (змінено порядок виводу аналізу) запущено!</b>\n\n" 
+                    f"🤖 <b>MLBB IUI mini v2.9 (з обробкою довгих повідомлень) запущено!</b>\n\n" 
                     f"🆔 @{bot_info.username}\n"
                     f"⏰ {launch_time_kyiv}\n"
                     f"🎯 <b>Промпт v2.3 (текст), Vision (профіль /analyzeprofile, 'вау-ефект' + опис ШІ) активні!</b>\n"
                     f"🔩 Моделі: Vision: <code>gpt-4o-mini</code>, Текст/Опис: <code>gpt-4.1</code> (жорстко задані)\n"
-                    f"🖼️ Привітання /start тепер з зображенням.\n"
-                    f"⚙️ Аналіз профілю тепер без 'поточного рангу'.\n"
-                    f"📊 Порядок виводу аналізу: спочатку структуровані дані, потім опис ШІ.\n"
-                    f"🗑️ Кнопка 'Видалити аналіз' прибрана з фінального повідомлення.\n"
+                    f"📄 Додано розбиття довгих повідомлень на частини.\n"
                     f"🟢 Готовий до роботи!"
                 )
                 await bot.send_message(ADMIN_USER_ID, admin_message)
@@ -896,10 +965,6 @@ async def main() -> None:
                 logger.info("Сесію HTTP клієнта Bot закрито.")
             except Exception as e:
                 logger.error(f"Помилка під час закриття сесії HTTP клієнта Bot: {e}", exc_info=True)
-        
-        # Закриття сесії OpenAI, якщо вона була створена глобально (зараз вона створюється в __aenter__)
-        # Якщо MLBBChatGPT створюється з `async with`, його сесія закриється автоматично.
-        # Якщо ти зміниш логіку створення MLBBChatGPT на глобальний екземпляр, тут треба буде додати логіку закриття його сесії.
         
         logger.info("👋 Бот остаточно зупинено.")
 
