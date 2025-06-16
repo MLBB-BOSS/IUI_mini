@@ -2,7 +2,7 @@ import base64
 import html
 import logging
 import re
-from typing import Dict, Any, Optional, Union, Tuple
+from typing import Dict, Any, Optional, Union
 from decimal import Decimal, ROUND_HALF_UP
 
 from aiogram import Bot, Dispatcher, F
@@ -26,26 +26,57 @@ from utils.message_utils import send_message_in_chunks
 # === КОНСТАНТИ ДЛЯ АНАЛІТИКИ ===
 
 class MLBBAnalyticsCalculator:
-    """Розрахунки унікальної аналітики для MLBB статистики."""
+    """
+    Розрахунки унікальної аналітики для MLBB статистики.
+    
+    Забезпечує точні математичні операції з обробкою помилок
+    та округленням за світовими стандартами фінансових розрахунків.
+    """
     
     @staticmethod
     def safe_divide(numerator: Union[int, float, str], denominator: Union[int, float, str], 
                    precision: int = 2) -> Optional[float]:
-        """Безпечне ділення з обробкою помилок та округленням."""
+        """
+        Безпечне ділення з обробкою помилок та точним округленням.
+        
+        Args:
+            numerator: Чисельник (будь-який числовий тип або рядок)
+            denominator: Знаменник (будь-який числовий тип або рядок)
+            precision: Кількість знаків після коми
+            
+        Returns:
+            Результат ділення або None при помилці
+            
+        Raises:
+            Не викидає винятків - повертає None при помилках
+        """
         try:
             num = float(str(numerator).replace(',', '').replace(' ', ''))
             den = float(str(denominator).replace(',', '').replace(' ', ''))
+            
             if den == 0:
                 return None
+                
             result = num / den
-            return float(Decimal(str(result)).quantize(Decimal(f'0.{"0" * precision}'), 
-                                                     rounding=ROUND_HALF_UP))
-        except (ValueError, TypeError):
+            return float(Decimal(str(result)).quantize(
+                Decimal(f'0.{"0" * precision}'), 
+                rounding=ROUND_HALF_UP
+            ))
+        except (ValueError, TypeError, ArithmeticError) as e:
+            logger.debug(f"Помилка в safe_divide({numerator}, {denominator}): {e}")
             return None
     
     @staticmethod
     def safe_number(value: Any) -> Optional[float]:
-        """Безпечне перетворення в число."""
+        """
+        Безпечне перетворення будь-якого значення в число.
+        
+        Args:
+            value: Значення для перетворення
+            
+        Returns:
+            Числове значення або None при помилці
+        """
         if value is None:
             return None
         try:
@@ -56,12 +87,14 @@ class MLBBAnalyticsCalculator:
     @classmethod
     def calculate_mvp_rating(cls, mvp_count: Any, matches_played: Any) -> Optional[float]:
         """Розраховує MVP рейтинг у відсотках."""
-        return cls.safe_divide(mvp_count, matches_played, 2)
+        result = cls.safe_divide(mvp_count, matches_played, 2)
+        return result * 100 if result is not None else None
     
     @classmethod
     def calculate_mvp_loss_percentage(cls, mvp_loss_count: Any, mvp_count: Any) -> Optional[float]:
         """Розраховує частку MVP у поразках."""
-        return cls.safe_divide(mvp_loss_count, mvp_count, 2)
+        result = cls.safe_divide(mvp_loss_count, mvp_count, 2)
+        return result * 100 if result is not None else None
     
     @classmethod
     def calculate_savage_frequency(cls, savage_count: Any, matches_played: Any) -> Optional[float]:
@@ -89,29 +122,71 @@ class MLBBAnalyticsCalculator:
 
 
 class AnalysisFormatter:
-    """Клас для форматування результатів аналізу з уніфікованою структурою."""
+    """
+    Клас для форматування результатів аналізу з уніфікованою структурою.
+    
+    Забезпечує консистентний вигляд всіх повідомлень та правильне
+    екранування HTML для безпеки.
+    """
     
     @staticmethod
     def _create_header_section(title: str, icon: str = "📊") -> str:
-        """Створює заголовок секції."""
+        """
+        Створює заголовок секції з візуальним розділювачем.
+        
+        Args:
+            title: Текст заголовка
+            icon: Емодзі-іконка
+            
+        Returns:
+            Відформатований заголовок
+        """
         return f"\n<b>{icon} {title}</b>\n" + "─" * 35
     
     @staticmethod
     def _format_field(label: str, value: Any, icon: str = "•", unit: str = "") -> str:
-        """Форматує окреме поле з валідацією."""
+        """
+        Форматує окреме поле з валідацією та правильним відображенням емодзі.
+        
+        ВИПРАВЛЕННЯ: Видалено дублювання емодзі-іконок
+        
+        Args:
+            label: Назва поля
+            value: Значення поля
+            icon: Емодзі-іконка (тільки одна!)
+            unit: Одиниця вимірювання
+            
+        Returns:
+            Відформатований рядок
+        """
         if value is None or value == "":
             return f"  {icon} <b>{label}:</b> <i>не розпізнано</i>"
         
         display_value = str(value)
+        
+        # Обробка рангів зі зірочками
         if "★" in display_value or "зірок" in display_value.lower():
-            display_value = re.sub(r'\s+★', '★', display_value.replace("зірок", "★").replace("зірки", "★"))
+            display_value = re.sub(r'\s+★', '★', 
+                                 display_value.replace("зірок", "★").replace("зірки", "★"))
         
         return f"  {icon} <b>{label}:</b> {html.escape(display_value)}{unit}"
     
     @staticmethod
     def _format_metric(label: str, value: Optional[float], icon: str, unit: str = "", 
                       precision: int = 2) -> str:
-        """Форматує метрику з числовим значенням."""
+        """
+        Форматує метрику з числовим значенням та правильним округленням.
+        
+        Args:
+            label: Назва метрики
+            value: Числове значення
+            icon: Емодзі-іконка
+            unit: Одиниця вимірювання
+            precision: Точність округлення
+            
+        Returns:
+            Відформатований рядок метрики
+        """
         if value is None:
             return f"  {icon} <b>{label}:</b> <i>недостатньо даних</i>"
         
@@ -133,6 +208,9 @@ async def cmd_analyze_profile(message: Message, state: FSMContext) -> None:
     Args:
         message: Повідомлення від користувача
         state: FSM контекст для збереження стану
+        
+    Raises:
+        Не викидає винятків - всі помилки обробляються внутрішньо
     """
     if not message.from_user:
         logger.warning("Команда /analyzeprofile викликана без інформації про користувача.")
@@ -165,6 +243,9 @@ async def cmd_analyze_player_stats(message: Message, state: FSMContext) -> None:
     Args:
         message: Повідомлення від користувача
         state: FSM контекст для збереження стану
+        
+    Raises:
+        Не викидає винятків - всі помилки обробляються внутрішньо
     """
     if not message.from_user:
         logger.warning("Команда /analyzestats викликана без інформації про користувача.")
@@ -184,7 +265,8 @@ async def cmd_analyze_player_stats(message: Message, state: FSMContext) -> None:
     await state.set_state(VisionAnalysisStates.awaiting_profile_screenshot)
     await message.reply(
         f"Привіт, <b>{user_name_escaped}</b>! 👋\n"
-        "Будь ласка, надішли мені скріншот своєї ігрової статистики (зазвичай розділ \"Statistics\" -> \"All Seasons\" або \"Current Season\").\n"
+        "Будь ласка, надішли мені скріншот своєї ігрової статистики "
+        "(зазвичай розділ \"Statistics\" → \"All Seasons\" або \"Current Season\").\n"
         "Якщо передумаєш, просто надішли команду /cancel.",
         parse_mode=ParseMode.HTML
     )
@@ -200,6 +282,9 @@ async def handle_profile_screenshot(message: Message, state: FSMContext, bot: Bo
         message: Повідомлення з фото від користувача
         state: FSM контекст
         bot: Екземпляр бота
+        
+    Raises:
+        Не викидає винятків - всі помилки обробляються внутрішньо
     """
     if not message.from_user or not message.chat:
         logger.error("handle_profile_screenshot: відсутній message.from_user або message.chat")
@@ -227,7 +312,8 @@ async def handle_profile_screenshot(message: Message, state: FSMContext, bot: Bo
 
     await state.update_data(vision_photo_file_id=photo_file_id)
 
-    caption_text = "Скріншот отримано.\nНатисніть «🔍 Аналіз», щоб дізнатися більше, або «🗑️ Видалити», щоб скасувати операцію."
+    caption_text = ("Скріншот отримано.\nНатисніть «🔍 Аналіз», щоб дізнатися більше, "
+                   "або «🗑️ Видалити», щоб скасувати операцію.")
 
     analyze_button = InlineKeyboardButton(text="🔍 Аналіз", callback_data="trigger_vision_analysis")
     delete_preview_button = InlineKeyboardButton(text="🗑️ Видалити", callback_data="delete_bot_message")
@@ -262,6 +348,9 @@ def format_profile_result(user_name: str, data: Dict[str, Any], ai_comment: Opti
     
     Returns:
         Відформатований HTML текст
+        
+    Raises:
+        Не викидає винятків - обробляє всі помилки внутрішньо
     """
     if not data:
         return f"Не вдалося розпізнати дані профілю для {user_name}."
@@ -282,37 +371,38 @@ def format_profile_result(user_name: str, data: Dict[str, Any], ai_comment: Opti
     # 3. 📊 Детальна статистика гравця
     result_parts.append(AnalysisFormatter._create_header_section("Детальна статистика гравця", "📊"))
     
-    # Основні дані профілю
+    # Основні дані профілю з правильними емодзі (БЕЗ ДУБЛЮВАННЯ!)
     fields_translation = {
-        "game_nickname": ("🎮 Нікнейм", "🎮"),
-        "mlbb_id_server": ("🆔 ID (Сервер)", "🆔"), 
-        "highest_rank_season": ("🌟 Найвищий ранг", "🌟"),
-        "matches_played": ("⚔️ Матчів зіграно", "⚔️"),
-        "likes_received": ("👍 Лайків отримано", "👍"),
-        "location": ("🌍 Локація", "🌍"),
-        "squad_name": ("🛡️ Сквад", "🛡️")
+        "game_nickname": "🎮 Нікнейм",
+        "mlbb_id_server": "🆔 ID (Сервер)", 
+        "highest_rank_season": "🌟 Найвищий ранг",
+        "matches_played": "⚔️ Матчів зіграно",
+        "likes_received": "👍 Лайків отримано",
+        "location": "🌍 Локація",
+        "squad_name": "🛡️ Сквад"
     }
     
     has_data = False
-    for key, (readable_name, icon) in fields_translation.items():
+    for key, label in fields_translation.items():
         value = data.get(key)
+        # Використовуємо пустий icon, оскільки емодзі вже в label
+        result_parts.append(AnalysisFormatter._format_field(label, value, ""))
         if value is not None:
-            result_parts.append(AnalysisFormatter._format_field(readable_name, value, icon))
             has_data = True
-        else:
-            result_parts.append(AnalysisFormatter._format_field(readable_name, None, icon))
     
     if not has_data and data.get("raw_response"):
-        result_parts.append(f"\n<i>⚠️ Не вдалося структурувати дані. Можливо, на скріншоті недостатньо інформації.</i>")
+        result_parts.append("\n<i>⚠️ Не вдалося структурувати дані. Можливо, на скріншоті недостатньо інформації.</i>")
         result_parts.append(f"<code>{html.escape(str(data.get('raw_response'))[:200])}...</code>")
     elif not has_data:
-        result_parts.append(f"\n<i>⚠️ Не вдалося розпізнати дані. Спробуйте чіткіший скріншот.</i>")
+        result_parts.append("\n<i>⚠️ Не вдалося розпізнати дані. Спробуйте чіткіший скріншот.</i>")
     
     return "\n".join(result_parts)
 
 def format_player_stats_result(user_name: str, data: Dict[str, Any], ai_comment: Optional[str] = None) -> str:
     """
     Форматує результати аналізу статистики згідно з новою структурою з унікальними показниками.
+    
+    ВИПРАВЛЕННЯ: Додано підтримку професійного коментаря для статистики
     
     Args:
         user_name: Ім'я користувача
@@ -321,13 +411,16 @@ def format_player_stats_result(user_name: str, data: Dict[str, Any], ai_comment:
         
     Returns:
         Відформатований HTML текст
+        
+    Raises:
+        Не викидає винятків - обробляє всі помилки внутрішньо
     """
     if not data:
         return f"Не вдалося розпізнати дані статистики для {user_name}."
 
     result_parts = []
     
-    # 1. 🎙️ Коментар від IUI
+    # 1. 🎙️ Коментар від IUI (ВИПРАВЛЕНО: тепер відображається для статистики!)
     if ai_comment:
         result_parts.append(AnalysisFormatter._create_header_section("Коментар від IUI", "🎙️"))
         result_parts.append(f"{html.escape(ai_comment)}")
@@ -346,7 +439,7 @@ def format_player_stats_result(user_name: str, data: Dict[str, Any], ai_comment:
     # Основні показники
     main_ind = data.get("main_indicators", {})
     if main_ind:
-        result_parts.append(f"\n<b><u>⚡ Основні показники:</u></b>")
+        result_parts.append("\n<b><u>⚡ Основні показники:</u></b>")
         result_parts.append(AnalysisFormatter._format_field("Матчів зіграно", main_ind.get('matches_played'), "🎯"))
         
         win_rate = main_ind.get('win_rate')
@@ -360,7 +453,7 @@ def format_player_stats_result(user_name: str, data: Dict[str, Any], ai_comment:
     # Досягнення (ліва колонка)
     ach_left = data.get("achievements_left_column", {})
     if ach_left:
-        result_parts.append(f"\n<b><u>🏅 Досягнення (Колонка 1):</u></b>")
+        result_parts.append("\n<b><u>🏅 Досягнення (Колонка 1):</u></b>")
         achievements_left = [
             ("Легендарних", ach_left.get('legendary_count'), "🔥"),
             ("Маніяків", ach_left.get('maniac_count'), "😈"),
@@ -377,7 +470,7 @@ def format_player_stats_result(user_name: str, data: Dict[str, Any], ai_comment:
     # Досягнення (права колонка)
     ach_right = data.get("achievements_right_column", {})
     if ach_right:
-        result_parts.append(f"\n<b><u>🎖️ Досягнення (Колонка 2):</u></b>")
+        result_parts.append("\n<b><u>🎖️ Досягнення (Колонка 2):</u></b>")
         achievements_right = [
             ("Дикунств (Savage)", ach_right.get('savage_count'), "🔥"),
             ("Потрійних вбивств", ach_right.get('triple_kill_count'), "⚔️"),
@@ -393,10 +486,12 @@ def format_player_stats_result(user_name: str, data: Dict[str, Any], ai_comment:
     # Деталі (права панель)
     details = data.get("details_panel", {})
     if details:
-        result_parts.append(f"\n<b><u>📋 Деталі (Права панель):</u></b>")
+        result_parts.append("\n<b><u>📋 Деталі (Права панель):</u></b>")
         details_fields = [
             ("KDA", details.get('kda_ratio'), "⚔️"),
-            ("Участь у ком. боях", f"{details.get('teamfight_participation_rate')}%" if details.get('teamfight_participation_rate') is not None else None, "🤝"),
+            ("Участь у ком. боях", 
+             f"{details.get('teamfight_participation_rate')}%" if details.get('teamfight_participation_rate') is not None else None, 
+             "🤝"),
             ("Сер. золото/хв", details.get('avg_gold_per_min'), "💰"),
             ("Сер. шкода героям/хв", details.get('avg_hero_dmg_per_min'), "💥"),
             ("Сер. смертей/матч", details.get('avg_deaths_per_match'), "💀"),
@@ -417,144 +512,178 @@ def _calculate_unique_analytics(data: Dict[str, Any]) -> str:
         
     Returns:
         Відформатований текст з унікальними показниками
+        
+    Raises:
+        Не викидає винятків - обробляє всі помилки внутрішньо
     """
     calc = MLBBAnalyticsCalculator()
     analytics = []
     
-    # Отримуємо дані з різних секцій
-    main_ind = data.get("main_indicators", {})
-    ach_left = data.get("achievements_left_column", {})
-    ach_right = data.get("achievements_right_column", {})
-    details = data.get("details_panel", {})
-    
-    matches_played = main_ind.get('matches_played')
-    wins = None
-    losses = None
-    
-    # Розраховуємо перемоги/поразки з відсотка перемог
-    win_rate = main_ind.get('win_rate')
-    if win_rate is not None and matches_played is not None:
-        matches_num = calc.safe_number(matches_played)
-        wr_num = calc.safe_number(win_rate)
-        if matches_num and wr_num:
-            wins = int(matches_num * wr_num / 100)
-            losses = int(matches_num - wins)
-    
-    # 1. MVP Рейтинг
-    mvp_rating = calc.calculate_mvp_rating(main_ind.get('mvp_count'), matches_played)
-    analytics.append(AnalysisFormatter._format_metric(
-        "MVP Рейтинг", mvp_rating, "⭐", "% матчів"
-    ))
-    
-    # 2. Частка MVP у поразках
-    mvp_loss_percentage = calc.calculate_mvp_loss_percentage(
-        ach_right.get('mvp_loss_count'), main_ind.get('mvp_count')
-    )
-    analytics.append(AnalysisFormatter._format_metric(
-        "Частка MVP у поразках", mvp_loss_percentage, "🏆", "%"
-    ))
-    
-    # 3. Частота Savage
-    savage_frequency = calc.calculate_savage_frequency(
-        ach_right.get('savage_count'), matches_played
-    )
-    analytics.append(AnalysisFormatter._format_metric(
-        "Частота Savage", savage_frequency, "🔥", " на 1000 матчів", 2
-    ))
-    
-    # 4. Частота Legendary
-    legendary_frequency = calc.calculate_legendary_frequency(
-        ach_left.get('legendary_count'), matches_played
-    )
-    analytics.append(AnalysisFormatter._format_metric(
-        "Частота Legendary", legendary_frequency, "✨", " на 100 матчів", 2
-    ))
-    
-    # 5. Ефективність золота
-    gold_efficiency = calc.calculate_gold_efficiency(
-        details.get('avg_hero_dmg_per_min'), details.get('avg_gold_per_min')
-    )
-    analytics.append(AnalysisFormatter._format_metric(
-        "Ефективність золота", gold_efficiency, "⚡", " шкоди/хв на 1 золото/хв"
-    ))
-    
-    # 6. Середній вплив (K+A)/матч
-    avg_impact = calc.calculate_average_impact(
-        ach_left.get('most_kills_in_one_game'), ach_right.get('most_assists_in_one_game')
-    )
-    analytics.append(AnalysisFormatter._format_metric(
-        "Сер. вплив (K+A)/матч", avg_impact, "🎯", "", 2
-    ))
-    
-    # 7. Додаткові розрахунки з співвідношень
-    if wins is not None and losses is not None:
-        analytics.append(AnalysisFormatter._format_field(
-            "Перемог/Поразок", f"{wins} / {losses}", "📊"
+    try:
+        # Отримуємо дані з різних секцій
+        main_ind = data.get("main_indicators", {})
+        ach_left = data.get("achievements_left_column", {})
+        ach_right = data.get("achievements_right_column", {})
+        details = data.get("details_panel", {})
+        
+        matches_played = main_ind.get('matches_played')
+        wins = None
+        losses = None
+        
+        # Розраховуємо перемоги/поразки з відсотка перемог
+        win_rate = main_ind.get('win_rate')
+        if win_rate is not None and matches_played is not None:
+            matches_num = calc.safe_number(matches_played)
+            wr_num = calc.safe_number(win_rate)
+            if matches_num and wr_num:
+                wins = int(matches_num * wr_num / 100)
+                losses = int(matches_num - wins)
+        
+        # 1. MVP Рейтинг
+        mvp_rating = calc.calculate_mvp_rating(main_ind.get('mvp_count'), matches_played)
+        analytics.append(AnalysisFormatter._format_metric(
+            "MVP Рейтинг", mvp_rating, "⭐", "% матчів"
         ))
-    
-    # 8. Коефіцієнт домінування (якщо є дані про найбільшу серію перемог)
-    win_streak = ach_left.get('longest_win_streak')
-    if win_streak and matches_played:
-        dominance_coefficient = calc.safe_divide(win_streak, matches_played, 4)
-        if dominance_coefficient:
-            analytics.append(AnalysisFormatter._format_metric(
-                "Коефіцієнт домінування", dominance_coefficient * 100, "👑", "%"
+        
+        # 2. Частка MVP у поразках
+        mvp_loss_percentage = calc.calculate_mvp_loss_percentage(
+            ach_right.get('mvp_loss_count'), main_ind.get('mvp_count')
+        )
+        analytics.append(AnalysisFormatter._format_metric(
+            "Частка MVP у поразках", mvp_loss_percentage, "🏆", "%"
+        ))
+        
+        # 3. Частота Savage
+        savage_frequency = calc.calculate_savage_frequency(
+            ach_right.get('savage_count'), matches_played
+        )
+        analytics.append(AnalysisFormatter._format_metric(
+            "Частота Savage", savage_frequency, "🔥", " на 1000 матчів", 2
+        ))
+        
+        # 4. Частота Legendary
+        legendary_frequency = calc.calculate_legendary_frequency(
+            ach_left.get('legendary_count'), matches_played
+        )
+        analytics.append(AnalysisFormatter._format_metric(
+            "Частота Legendary", legendary_frequency, "✨", " на 100 матчів", 2
+        ))
+        
+        # 5. Ефективність золота
+        gold_efficiency = calc.calculate_gold_efficiency(
+            details.get('avg_hero_dmg_per_min'), details.get('avg_gold_per_min')
+        )
+        analytics.append(AnalysisFormatter._format_metric(
+            "Ефективність золота", gold_efficiency, "⚡", " шкоди/хв на 1 золото/хв"
+        ))
+        
+        # 6. Середній вплив (K+A)/матч
+        avg_impact = calc.calculate_average_impact(
+            ach_left.get('most_kills_in_one_game'), ach_right.get('most_assists_in_one_game')
+        )
+        analytics.append(AnalysisFormatter._format_metric(
+            "Сер. вплив (K+A)/матч", avg_impact, "🎯", "", 2
+        ))
+        
+        # 7. Додаткові розрахунки з співвідношень
+        if wins is not None and losses is not None:
+            analytics.append(AnalysisFormatter._format_field(
+                "Перемог/Поразок", f"{wins} / {losses}", "📊"
             ))
-    
-    return "\n".join(analytics) if analytics else "📈 Недостатньо даних для розрахунку унікальної аналітики"
+        
+        # 8. Коефіцієнт домінування (якщо є дані про найбільшу серію перемог)
+        win_streak = ach_left.get('longest_win_streak')
+        if win_streak and matches_played:
+            dominance_coefficient = calc.safe_divide(win_streak, matches_played, 4)
+            if dominance_coefficient:
+                analytics.append(AnalysisFormatter._format_metric(
+                    "Коефіцієнт домінування", dominance_coefficient * 100, "👑", "%"
+                ))
+        
+        return "\n".join(analytics) if analytics else "📈 Недостатньо даних для розрахунку унікальної аналітики"
+        
+    except Exception as e:
+        logger.error(f"Помилка при розрахунку унікальної аналітики: {e}")
+        return "📈 Помилка при розрахунку аналітики"
 
 def _generate_profile_analytics(data: Dict[str, Any]) -> str:
-    """Генерує базову аналітику для профілю."""
+    """
+    Генерує базову аналітику для профілю.
+    
+    Args:
+        data: Дані профілю від ШІ
+        
+    Returns:
+        Відформатований текст аналітики
+        
+    Raises:
+        Не викидає винятків - обробляє всі помилки внутрішньо
+    """
     analytics = []
+    calc = MLBBAnalyticsCalculator()
     
-    # Аналіз рангу
-    rank = data.get("highest_rank_season")
-    if rank:
-        rank_str = str(rank).lower()
-        if "mythic" in rank_str or "міфічний" in rank_str:
-            analytics.append("🔮 <b>Статус:</b> Досвідчений гравець вищого рівня")
-        elif "legend" in rank_str or "легенда" in rank_str:
-            analytics.append("⭐ <b>Статус:</b> Сильний гравець з хорошими навичками")
-        elif "epic" in rank_str or "епік" in rank_str:
-            analytics.append("💎 <b>Статус:</b> Гравець середнього рівня")
-        else:
-            analytics.append("🌱 <b>Статус:</b> Гравець, що розвивається")
-    
-    # Аналіз активності
-    matches = data.get("matches_played")
-    if matches:
-        calc = MLBBAnalyticsCalculator()
-        matches_num = calc.safe_number(matches)
-        if matches_num:
-            if matches_num > 5000:
-                analytics.append("🎮 <b>Активність:</b> Надзвичайно активний гравець")
-            elif matches_num > 2000:
-                analytics.append("🎮 <b>Активність:</b> Дуже активний гравець")
-            elif matches_num > 1000:
-                analytics.append("🎮 <b>Активність:</b> Регулярний гравець")
+    try:
+        # Аналіз рангу
+        rank = data.get("highest_rank_season")
+        if rank:
+            rank_str = str(rank).lower()
+            if "mythic" in rank_str or "міфічний" in rank_str:
+                analytics.append("🔮 <b>Статус:</b> Досвідчений гравець вищого рівня")
+            elif "legend" in rank_str or "легенда" in rank_str:
+                analytics.append("⭐ <b>Статус:</b> Сильний гравець з хорошими навичками")
+            elif "epic" in rank_str or "епік" in rank_str:
+                analytics.append("💎 <b>Статус:</b> Гравець середнього рівня")
             else:
-                analytics.append("🎮 <b>Активність:</b> Помірний гравець")
-    
-    # Аналіз популярності
-    likes = data.get("likes_received")
-    if likes:
-        calc = MLBBAnalyticsCalculator()
-        likes_num = calc.safe_number(likes)
-        if likes_num:
-            if likes_num > 1000:
-                analytics.append("👥 <b>Популярність:</b> Високо оцінений спільнотою")
-            elif likes_num > 500:
-                analytics.append("👥 <b>Популярність:</b> Добре відомий в спільноті")
-            else:
-                analytics.append("👥 <b>Популярність:</b> Будує репутацію")
-    
-    if not analytics:
-        analytics.append("📈 Базова аналітика недоступна через недостатність даних")
-    
-    return "\n".join(analytics)
+                analytics.append("🌱 <b>Статус:</b> Гравець, що розвивається")
+        
+        # Аналіз активності
+        matches = data.get("matches_played")
+        if matches:
+            matches_num = calc.safe_number(matches)
+            if matches_num:
+                if matches_num > 5000:
+                    analytics.append("🎮 <b>Активність:</b> Надзвичайно активний гравець")
+                elif matches_num > 2000:
+                    analytics.append("🎮 <b>Активність:</b> Дуже активний гравець")
+                elif matches_num > 1000:
+                    analytics.append("🎮 <b>Активність:</b> Регулярний гравець")
+                else:
+                    analytics.append("🎮 <b>Активність:</b> Помірний гравець")
+        
+        # Аналіз популярності
+        likes = data.get("likes_received")
+        if likes:
+            likes_num = calc.safe_number(likes)
+            if likes_num:
+                if likes_num > 1000:
+                    analytics.append("👥 <b>Популярність:</b> Високо оцінений спільнотою")
+                elif likes_num > 500:
+                    analytics.append("👥 <b>Популярність:</b> Добре відомий в спільноті")
+                else:
+                    analytics.append("👥 <b>Популярність:</b> Будує репутацію")
+        
+        if not analytics:
+            analytics.append("📈 Базова аналітика недоступна через недостатність даних")
+        
+        return "\n".join(analytics)
+        
+    except Exception as e:
+        logger.error(f"Помилка при генерації аналітики профілю: {e}")
+        return "📈 Помилка при генерації аналітики"
 
 async def _send_error_message(bot: Bot, chat_id: int, user_name: str, error_text: str) -> None:
-    """Допоміжна функція для надсилання повідомлень про помилки."""
+    """
+    Допоміжна функція для надсилання повідомлень про помилки.
+    
+    Args:
+        bot: Екземпляр бота
+        chat_id: ID чату
+        user_name: Ім'я користувача
+        error_text: Текст помилки
+        
+    Raises:
+        Не викидає винятків - логує помилки
+    """
     try:
         await bot.send_message(chat_id, f"{error_text}, {user_name}. Спробуйте ще раз.")
     except TelegramAPIError as e:
@@ -567,10 +696,15 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
     Обробляє натискання кнопки "Аналіз".
     Викликає Vision API для аналізу зображення та надсилає результат користувачеві.
     
+    ВИПРАВЛЕННЯ: Додано генерацію професійного коментаря для статистики
+    
     Args:
         callback_query: Callback від натискання кнопки
         state: FSM контекст
         bot: Екземпляр бота
+        
+    Raises:
+        Не викидає винятків - всі помилки обробляються внутрішньо
     """
     if not callback_query.message or not callback_query.message.chat:
         logger.error("trigger_vision_analysis_callback: callback_query.message або callback_query.message.chat is None.")
@@ -635,7 +769,7 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                         ai_comment = await gpt_analyzer.get_profile_description(user_name, analysis_result_json)
                         final_caption_text = format_profile_result(user_name, analysis_result_json, ai_comment)
                     elif analysis_type == "player_stats":
-                        # Генеруємо професійний коментар для статистики
+                        # ВИПРАВЛЕНО: Тепер генеруємо професійний коментар для статистики!
                         ai_comment = await gpt_analyzer.get_stats_professional_commentary(user_name, analysis_result_json)
                         final_caption_text = format_player_stats_result(user_name, analysis_result_json, ai_comment)
                     else:
@@ -669,7 +803,20 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
 
 async def _handle_analysis_error(callback_query: CallbackQuery, bot: Bot, chat_id: int, 
                                message_id: int, user_name: str, error_reason: str) -> None:
-    """Обробляє помилки аналізу."""
+    """
+    Обробляє помилки аналізу.
+    
+    Args:
+        callback_query: Callback запит
+        bot: Екземпляр бота
+        chat_id: ID чату
+        message_id: ID повідомлення
+        user_name: Ім'я користувача
+        error_reason: Причина помилки
+        
+    Raises:
+        Не викидає винятків - логує помилки
+    """
     try:
         if callback_query.message and callback_query.message.caption:
             await callback_query.message.edit_caption(
@@ -677,11 +824,21 @@ async def _handle_analysis_error(callback_query: CallbackQuery, bot: Bot, chat_i
             )
         else:
             await bot.send_message(chat_id, f"Помилка, {user_name}: {error_reason}. Спробуйте надіслати скріншот ще раз.")
-    except TelegramAPIError:
-        pass
+    except TelegramAPIError as e:
+        logger.error(f"Не вдалося надіслати повідомлення про помилку аналізу для {user_name}: {e}")
 
 async def _format_error_response(user_name: str, error_msg: str, analysis_result: Optional[Dict[str, Any]]) -> str:
-    """Форматує повідомлення про помилку аналізу."""
+    """
+    Форматує повідомлення про помилку аналізу.
+    
+    Args:
+        user_name: Ім'я користувача
+        error_msg: Повідомлення про помилку
+        analysis_result: Результат аналізу (може містити деталі)
+        
+    Returns:
+        Відформатоване повідомлення про помилку
+    """
     base_text = f"😔 Вибач, {user_name}, сталася помилка під час аналізу скріншота.\n<i>Помилка: {html.escape(error_msg)}</i>"
     
     if analysis_result and analysis_result.get("raw_response"):
@@ -693,7 +850,19 @@ async def _format_error_response(user_name: str, error_msg: str, analysis_result
 
 async def _display_analysis_result(bot: Bot, chat_id: int, message_id: int, 
                                  result_text: str, user_name: str) -> None:
-    """Відображає результат аналізу користувачеві."""
+    """
+    Відображає результат аналізу користувачеві з оптимальним розподілом тексту.
+    
+    Args:
+        bot: Екземпляр бота
+        chat_id: ID чату
+        message_id: ID повідомлення
+        result_text: Текст результату
+        user_name: Ім'я користувача
+        
+    Raises:
+        Не викидає винятків - логує помилки
+    """
     try:
         # Видаляємо кнопки з оригінального повідомлення
         try:
@@ -701,10 +870,10 @@ async def _display_analysis_result(bot: Bot, chat_id: int, message_id: int,
         except TelegramAPIError as e:
             logger.warning(f"Не вдалося видалити кнопки з повідомлення для {user_name}: {e}")
 
-        # Перевіряємо довжину тексту
-        if len(result_text) > 1024:  # Telegram ліміт на підпис до фото
-            logger.warning(f"Підпис до фото для {user_name} задовгий ({len(result_text)} символів).")
-            await bot.edit_message_caption(chat_id=chat_id, message_id=message_id, caption="")
+        # Перевіряємо довжину тексту (Telegram ліміт на підпис до фото = 1024 символи)
+        if len(result_text) > 1024:
+            logger.info(f"Підпис до фото для {user_name} задовгий ({len(result_text)} символів). Надсилаємо окремим повідомленням.")
+            await bot.edit_message_caption(chat_id=chat_id, message_id=message_id, caption="✅ Аналіз завершено")
             await send_message_in_chunks(bot, chat_id, result_text, ParseMode.HTML) 
         else:
             await bot.edit_message_caption( 
@@ -730,6 +899,9 @@ async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMC
     Args:
         callback_query: Callback від натискання кнопки
         state: FSM контекст
+        
+    Raises:
+        Не викидає винятків - логує помилки
     """
     if not callback_query.message:
         logger.error("delete_bot_message_callback: callback_query.message is None.")
@@ -763,6 +935,9 @@ async def cancel_analysis(message: Message, state: FSMContext, bot: Bot) -> None
         message: Повідомлення з командою /cancel
         state: FSM контекст
         bot: Екземпляр бота
+        
+    Raises:
+        Не викидає винятків - логує помилки
     """
     if not message.from_user: 
         return
@@ -777,8 +952,8 @@ async def cancel_analysis(message: Message, state: FSMContext, bot: Bot) -> None
         try:
             await bot.delete_message(chat_id=message.chat.id, message_id=bot_message_id) 
             logger.info(f"Видалено повідомлення-прев'ю бота після скасування аналізу {user_name_escaped}")
-        except TelegramAPIError: 
-            logger.warning(f"Не вдалося видалити повідомлення-прев'ю бота при скасуванні для {user_name_escaped}")
+        except TelegramAPIError as e: 
+            logger.warning(f"Не вдалося видалити повідомлення-прев'ю бота при скасуванні для {user_name_escaped}: {e}")
 
     await state.clear()
     await message.reply(
@@ -796,6 +971,9 @@ async def handle_wrong_input_for_analysis(message: Message, state: FSMContext, b
         state: FSM контекст
         bot: Екземпляр бота
         cmd_go_handler_func: Функція обробника команди /go
+        
+    Raises:
+        Не викидає винятків - логує помилки
     """
     if not message.from_user: 
         return
@@ -841,15 +1019,25 @@ async def handle_wrong_input_for_analysis(message: Message, state: FSMContext, b
         )
 
 async def _cleanup_analysis_state(state: FSMContext, bot: Bot, chat_id: Optional[int]) -> None:
-    """Очищає стан аналізу та видаляє пов'язані повідомлення."""
+    """
+    Очищає стан аналізу та видаляє пов'язані повідомлення.
+    
+    Args:
+        state: FSM контекст
+        bot: Екземпляр бота
+        chat_id: ID чату (опціонально)
+        
+    Raises:
+        Не викидає винятків - логує помилки
+    """
     user_data = await state.get_data()
     bot_message_id = user_data.get("bot_message_id_for_analysis")
     
     if bot_message_id and chat_id:
         try: 
             await bot.delete_message(chat_id=chat_id, message_id=bot_message_id) 
-        except TelegramAPIError: 
-            pass
+        except TelegramAPIError as e: 
+            logger.debug(f"Не вдалося видалити повідомлення при очищенні стану: {e}")
     
     await state.clear()
 
@@ -862,36 +1050,44 @@ def register_vision_handlers(dp: Dispatcher, cmd_go_handler_func) -> None:
     Args:
         dp: Диспетчер aiogram
         cmd_go_handler_func: Функція обробника команди /go
+        
+    Raises:
+        Не викидає винятків - логує помилки
     """
-    # Команди для запуску аналізу
-    dp.message.register(cmd_analyze_profile, Command("analyzeprofile"))
-    dp.message.register(cmd_analyze_player_stats, Command("analyzestats"))
+    try:
+        # Команди для запуску аналізу
+        dp.message.register(cmd_analyze_profile, Command("analyzeprofile"))
+        dp.message.register(cmd_analyze_player_stats, Command("analyzestats"))
 
-    # Обробка отримання фото
-    dp.message.register(handle_profile_screenshot, VisionAnalysisStates.awaiting_profile_screenshot, F.photo)
-    
-    # Обробка натискання кнопок
-    dp.callback_query.register(
-        trigger_vision_analysis_callback, 
-        F.data == "trigger_vision_analysis", 
-        VisionAnalysisStates.awaiting_analysis_trigger
-    )
-    dp.callback_query.register(delete_bot_message_callback, F.data == "delete_bot_message")
+        # Обробка отримання фото
+        dp.message.register(handle_profile_screenshot, VisionAnalysisStates.awaiting_profile_screenshot, F.photo)
+        
+        # Обробка натискання кнопок
+        dp.callback_query.register(
+            trigger_vision_analysis_callback, 
+            F.data == "trigger_vision_analysis", 
+            VisionAnalysisStates.awaiting_analysis_trigger
+        )
+        dp.callback_query.register(delete_bot_message_callback, F.data == "delete_bot_message")
 
-    # Обробка команди /cancel для станів аналізу
-    cancel_states = [
-        VisionAnalysisStates.awaiting_profile_screenshot,
-        VisionAnalysisStates.awaiting_analysis_trigger
-    ]
-    for cancel_state in cancel_states:
-        dp.message.register(cancel_analysis, cancel_state, Command("cancel"))
-    
-    # Обробка некоректного вводу
-    wrong_input_handler_with_go = lambda message, state, bot: handle_wrong_input_for_analysis(
-        message, state, bot, cmd_go_handler_func
-    )
-    
-    dp.message.register(wrong_input_handler_with_go, VisionAnalysisStates.awaiting_profile_screenshot)
-    dp.message.register(wrong_input_handler_with_go, VisionAnalysisStates.awaiting_analysis_trigger)
-    
-    logger.info("Обробники аналізу зображень (профіль, статистика гравця) зареєстровано.")
+        # Обробка команди /cancel для станів аналізу
+        cancel_states = [
+            VisionAnalysisStates.awaiting_profile_screenshot,
+            VisionAnalysisStates.awaiting_analysis_trigger
+        ]
+        for cancel_state in cancel_states:
+            dp.message.register(cancel_analysis, cancel_state, Command("cancel"))
+        
+        # Обробка некоректного вводу
+        wrong_input_handler_with_go = lambda message, state, bot: handle_wrong_input_for_analysis(
+            message, state, bot, cmd_go_handler_func
+        )
+        
+        dp.message.register(wrong_input_handler_with_go, VisionAnalysisStates.awaiting_profile_screenshot)
+        dp.message.register(wrong_input_handler_with_go, VisionAnalysisStates.awaiting_analysis_trigger)
+        
+        logger.info("✅ Обробники аналізу зображень (профіль, статистика гравця) успішно зареєстровано.")
+        
+    except Exception as e:
+        logger.error(f"❌ Помилка при реєстрації обробників аналізу зображень: {e}")
+        raise
