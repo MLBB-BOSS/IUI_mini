@@ -11,18 +11,16 @@ from aiogram.exceptions import TelegramAPIError # Може знадобитис�
 # Імпорти з проєкту
 from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, logger # Використовуємо logger з config
 # Імпортуємо функції реєстрації та сам глобальний обробник помилок
-from handlers.general_handlers import register_general_handlers, error_handler as general_error_handler # Перейменовуємо, щоб уникнути конфлікту імен
+from handlers.general_handlers import register_general_handlers, error_handler as general_error_handler
 from handlers.vision_handlers import register_vision_handlers
 # Імпортуємо cmd_go для передачі в vision_handlers
 from handlers.general_handlers import cmd_go
 
 
-# Головний логер програми тепер налаштовано в config.py
-# logger = logging.getLogger(__name__) # Цей рядок більше не потрібен тут
-
 async def main() -> None:
     """Головна функція запуску бота."""
-    bot_version = "v2.9.1 (рефакторинг, покращена обробка HTML та помилок)" # Можна винести в config
+    # Оновлюємо версію, щоб відобразити нову функціональність
+    bot_version = "v2.10.0 (додано аналіз статистики гравця /analyzestats)" 
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
     # Ініціалізація бота з токеном з конфігурації
@@ -31,15 +29,11 @@ async def main() -> None:
 
     # Реєстрація обробників
     register_general_handlers(dp)
-    # Передаємо функцію cmd_go в register_vision_handlers
+    # Передаємо функцію cmd_go в register_vision_handlers.
+    # register_vision_handlers тепер включає реєстрацію /analyzestats.
     register_vision_handlers(dp, cmd_go_handler_func=cmd_go) 
     
     # Реєстрація глобального обробника помилок
-    # Передаємо bot як аргумент в обробник помилок, якщо він там потрібен
-    # dp.errors.register(general_error_handler) # Тепер error_handler приймає bot
-    # Потрібно використовувати lambda або functools.partial, якщо обробник помилок приймає додаткові аргументи
-    # dp.errors.register(lambda update, exception: general_error_handler(update, exception, bot))
-    # Або краще, якщо error_handler завжди приймає bot:
     @dp.errors()
     async def global_error_handler_wrapper(update_event, exception: Exception):
         # Тепер bot доступний в цьому скоупі
@@ -53,14 +47,21 @@ async def main() -> None:
             try:
                 kyiv_tz = timezone(timedelta(hours=3))
                 launch_time_kyiv = datetime.now(kyiv_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
-                admin_message = (
-                    f"🤖 <b>MLBB IUI mini {bot_version} запущено!</b>\n\n"
-                    f"🆔 @{bot_info.username}\n"
-                    f"⏰ {launch_time_kyiv}\n"
-                    f"🔩 Моделі: Vision: <code>gpt-4o-mini</code>, Текст/Опис: <code>gpt-4.1</code> (жорстко задані)\n"
-                    f"📂 Структура проєкту оновлена (рефакторинг).\n"
-                    f"🟢 Готовий до роботи!"
-                )
+                
+                # Оновлюємо повідомлення для адміна
+                admin_message_lines = [
+                    f"🤖 <b>MLBB IUI mini {bot_version} запущено!</b>",
+                    "",
+                    f"🆔 @{bot_info.username}",
+                    f"⏰ {launch_time_kyiv}",
+                    f"🔩 Моделі: Vision: <code>gpt-4o-mini</code>, Текст/Опис: <code>gpt-4.1-turbo</code> (жорстко задані)",
+                    "✨ <b>Нові функції:</b>",
+                    "  • Додано команду <code>/analyzestats</code> для аналізу скріншотів статистики гравця.",
+                    "📂 Структура проєкту та логіка обробки зображень оновлені.",
+                    "🟢 Готовий до роботи!"
+                ]
+                admin_message = "\n".join(admin_message_lines)
+                
                 await bot.send_message(ADMIN_USER_ID, admin_message, parse_mode=ParseMode.HTML)
                 logger.info(f"Повідомлення про запуск надіслано адміну ID: {ADMIN_USER_ID}")
             except Exception as e:
@@ -76,18 +77,20 @@ async def main() -> None:
         logger.critical(f"Непередбачена критична помилка під час запуску або роботи: {e}", exc_info=True)
     finally:
         logger.info("🛑 Зупинка бота та закриття сесій...")
-        if bot.session and hasattr(bot.session, "close") and not bot.session.closed:
+        # Закриття сесії HTTP клієнта бота (якщо вона була створена і відкрита)
+        # У aiogram 3.x сесія зазвичай керується самим Bot об'єктом і закривається при його видаленні
+        # або при завершенні роботи dp.start_polling.
+        # Явний виклик close() для bot.session може бути корисним для певності.
+        if bot and hasattr(bot, 'session') and bot.session and not bot.session.closed:
             try:
                 await bot.session.close()
                 logger.info("Сесію HTTP клієнта Bot закрито.")
             except Exception as e:
                 logger.error(f"Помилка під час закриття сесії HTTP клієнта Bot: {e}", exc_info=True)
         
-        # Тут можна було б закривати сесію MLBBChatGPT, якби вона була глобальною,
-        # але вона створюється і закривається в контекстному менеджері.
-
         logger.info("👋 Бот остаточно зупинено.")
 
 if __name__ == "__main__":
     # Налаштування логування відбувається при імпорті config.py
+    # (або тут, якщо config.py не імпортується першим або не налаштовує логування глобально)
     asyncio.run(main())
