@@ -1,7 +1,8 @@
 import base64
 import html
 import logging
-import re # Переконаємося, що re імпортовано, оскільки він використовується в trigger_vision_analysis_callback
+import re
+from typing import Dict, Any, Optional # ОСЬ ЦЕЙ ВАЖЛИВИЙ ІМПОРТ
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
@@ -11,11 +12,11 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 
 # Імпорти з проєкту
-from config import OPENAI_API_KEY, logger # logger вже імпортується з config
+from config import OPENAI_API_KEY, logger
 from services.openai_service import (
-    MLBBChatGPT, 
-    PROFILE_SCREENSHOT_PROMPT, 
-    PLAYER_STATS_PROMPT # НОВИЙ ПРОМПТ
+    MLBBChatGPT,
+    PROFILE_SCREENSHOT_PROMPT,
+    PLAYER_STATS_PROMPT
 )
 from states.vision_states import VisionAnalysisStates
 from utils.message_utils import send_message_in_chunks
@@ -25,7 +26,7 @@ from utils.message_utils import send_message_in_chunks
 
 async def cmd_analyze_profile(message: Message, state: FSMContext) -> None:
     """
-    Обробник команди /analyzeprofile. 
+    Обробник команди /analyzeprofile.
     Запитує скріншот профілю гравця для аналізу.
     """
     if not message.from_user:
@@ -37,11 +38,11 @@ async def cmd_analyze_profile(message: Message, state: FSMContext) -> None:
     user_name_escaped = html.escape(user.first_name)
     user_id = user.id
     logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) активував /analyzeprofile.")
-    
+
     await state.update_data(
         analysis_type="profile",
         vision_prompt=PROFILE_SCREENSHOT_PROMPT,
-        original_user_name=user_name_escaped # Зберігаємо ім'я для подальших повідомлень
+        original_user_name=user_name_escaped
     )
     await state.set_state(VisionAnalysisStates.awaiting_profile_screenshot)
     await message.reply(
@@ -64,13 +65,13 @@ async def cmd_analyze_player_stats(message: Message, state: FSMContext) -> None:
     user_name_escaped = html.escape(user.first_name)
     user_id = user.id
     logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) активував /analyzestats.")
-    
+
     await state.update_data(
         analysis_type="player_stats",
         vision_prompt=PLAYER_STATS_PROMPT,
-        original_user_name=user_name_escaped # Зберігаємо ім'я
+        original_user_name=user_name_escaped
     )
-    await state.set_state(VisionAnalysisStates.awaiting_profile_screenshot) # Використовуємо той самий стан
+    await state.set_state(VisionAnalysisStates.awaiting_profile_screenshot)
     await message.reply(
         f"Привіт, <b>{user_name_escaped}</b>! 👋\n"
         "Будь ласка, надішли мені скріншот своєї ігрової статистики (зазвичай розділ \"Statistics\" -> \"All Seasons\" або \"Current Season\").\n"
@@ -86,21 +87,20 @@ async def handle_profile_screenshot(message: Message, state: FSMContext, bot: Bo
     """
     if not message.from_user or not message.chat:
         logger.error("handle_profile_screenshot: відсутній message.from_user або message.chat")
-        # Відповідь користувачеві тут може бути недоречною, якщо невідомо, кому відповідати
         return
 
     user_data_state = await state.get_data()
     user_name_escaped = user_data_state.get("original_user_name", html.escape(message.from_user.first_name if message.from_user else "Гравець"))
     user_id = message.from_user.id
     chat_id = message.chat.id
-    
+
     logger.info(f"Отримано скріншот для аналізу від {user_name_escaped} (ID: {user_id}).")
 
-    if not message.photo: 
+    if not message.photo:
         await message.answer(f"Щось пішло не так, {user_name_escaped}. Будь ласка, надішли саме фото (скріншот).")
         return
 
-    photo_file_id = message.photo[-1].file_id 
+    photo_file_id = message.photo[-1].file_id
 
     try:
         await message.delete()
@@ -108,17 +108,17 @@ async def handle_profile_screenshot(message: Message, state: FSMContext, bot: Bo
     except TelegramAPIError as e:
         logger.warning(f"Не вдалося видалити повідомлення користувача {user_name_escaped} (ID: {user_id}) зі скріншотом: {e}")
 
-    await state.update_data(vision_photo_file_id=photo_file_id) # original_user_name вже в стані
+    await state.update_data(vision_photo_file_id=photo_file_id)
 
     caption_text = "Скріншот отримано.\nНатисніть «🔍 Аналіз», щоб дізнатися більше, або «🗑️ Видалити», щоб скасувати."
 
     analyze_button = InlineKeyboardButton(text="🔍 Аналіз", callback_data="trigger_vision_analysis")
     delete_preview_button = InlineKeyboardButton(text="🗑️ Видалити", callback_data="delete_bot_message")
-    
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[analyze_button, delete_preview_button]])
 
     try:
-        sent_message = await bot.send_photo( 
+        sent_message = await bot.send_photo(
             chat_id=chat_id,
             photo=photo_file_id,
             caption=caption_text,
@@ -152,22 +152,22 @@ def format_profile_result(user_name: str, data: Dict[str, Any]) -> str:
     has_data = False
     for key, readable_name in fields_translation.items():
         value = data.get(key)
-        if value is not None: 
+        if value is not None:
             display_value = str(value)
             if key == "highest_rank_season" and ("★" in display_value or "зірок" in display_value.lower() or "слава" in display_value.lower()):
-                if "★" not in display_value: 
+                if "★" not in display_value:
                         display_value = display_value.replace("зірок", "★").replace("зірки", "★")
-                display_value = re.sub(r'\s+★', '★', display_value) 
+                display_value = re.sub(r'\s+★', '★', display_value)
             response_parts.append(f"<b>{readable_name}:</b> {html.escape(display_value)}")
             has_data = True
         else:
                 response_parts.append(f"<b>{readable_name}:</b> <i>не розпізнано</i>")
-    
-    if not has_data and data.get("raw_response"): 
+
+    if not has_data and data.get("raw_response"):
             response_parts.append(f"\n<i>Не вдалося структурувати дані. Можливо, на скріншоті недостатньо інформації.</i>\nДеталі від ШІ: ...{html.escape(str(data['raw_response'])[-100:])}")
     elif not has_data:
             response_parts.append(f"\n<i>Не вдалося розпізнати дані. Спробуйте чіткіший скріншот.</i>")
-    
+
     return "\n".join(response_parts)
 
 def format_player_stats_result(user_name: str, data: Dict[str, Any]) -> str:
@@ -210,12 +210,12 @@ def format_player_stats_result(user_name: str, data: Dict[str, Any]) -> str:
     parts.append(f"  • Сер. шкода героям/хв: {details.get('avg_hero_dmg_per_min', 'N/A')}")
     parts.append(f"  • Сер. смертей/матч: {details.get('avg_deaths_per_match', 'N/A')}")
     parts.append(f"  • Сер. шкода вежам/матч: {details.get('avg_turret_dmg_per_match', 'N/A')}")
-    
+
     return "\n".join(parts)
 
 # === ОБРОБКА КОЛБЕКІВ (НАТИСКАННЯ КНОПОК) ===
 
-async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state: FSMContext, bot: Bot) -> None: 
+async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     """
     Обробляє натискання кнопки "Аналіз".
     Викликає Vision API для аналізу зображення та надсилає результат користувачеві.
@@ -227,11 +227,11 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
         return
 
     chat_id = callback_query.message.chat.id
-    message_id = callback_query.message.message_id 
+    message_id = callback_query.message.message_id
     user_data = await state.get_data()
-    user_name = user_data.get("original_user_name", "Гравець") 
+    user_name = user_data.get("original_user_name", "Гравець")
     photo_file_id = user_data.get("vision_photo_file_id")
-    vision_prompt = user_data.get("vision_prompt") 
+    vision_prompt = user_data.get("vision_prompt")
     analysis_type = user_data.get("analysis_type")
 
     if not photo_file_id or not vision_prompt or not analysis_type:
@@ -242,57 +242,55 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
         try:
             if callback_query.message and callback_query.message.caption:
                 await callback_query.message.edit_caption(caption=f"Помилка, {user_name}: дані для аналізу втрачено або неповні. Спробуйте надіслати скріншот знову.")
-            else:
+            else: 
                 await bot.send_message(chat_id, f"Помилка, {user_name}: дані для аналізу втрачено або неповні. Спробуйте надіслати скріншот знову, викликавши відповідну команду.")
-        except TelegramAPIError: pass 
+        except TelegramAPIError: pass
         await state.clear()
         return
 
     try:
-        if callback_query.message.caption: 
+        if callback_query.message.caption:
             await callback_query.message.edit_caption(
                 caption=f"⏳ Обробляю ваш скріншот, {user_name}...",
-                reply_markup=None 
+                reply_markup=None
             )
         else: 
-             await callback_query.message.edit_reply_markup(reply_markup=None) # Якщо немає caption, видаляємо кнопки
-        await callback_query.answer("Розпочато аналіз...") 
+             await callback_query.message.edit_reply_markup(reply_markup=None)
+        await callback_query.answer("Розпочато аналіз...")
     except TelegramAPIError as e:
         logger.warning(f"Не вдалося відредагувати повідомлення перед аналізом для {user_name} (ID: {callback_query.from_user.id}): {e}")
 
     final_caption_text = f"Дуже шкода, {user_name}, але сталася непередбачена помилка при обробці зображення."
 
     try:
-        file_info = await bot.get_file(photo_file_id) 
+        file_info = await bot.get_file(photo_file_id)
         if not file_info.file_path:
             raise ValueError("Не вдалося отримати шлях до файлу в Telegram для аналізу.")
 
-        downloaded_file_io = await bot.download_file(file_info.file_path) 
-        if downloaded_file_io is None: 
+        downloaded_file_io = await bot.download_file(file_info.file_path)
+        if downloaded_file_io is None:
             raise ValueError("Не вдалося завантажити файл з Telegram для аналізу (download_file повернув None).")
-        
+
         image_bytes = downloaded_file_io.read()
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
-        async with MLBBChatGPT(OPENAI_API_KEY) as gpt_analyzer: 
+        async with MLBBChatGPT(OPENAI_API_KEY) as gpt_analyzer:
             analysis_result_json = await gpt_analyzer.analyze_image_with_vision(image_base64, vision_prompt)
 
             if analysis_result_json and "error" not in analysis_result_json:
                 logger.info(f"Успішний аналіз ({analysis_type}) для {user_name} (ID: {callback_query.from_user.id}): {str(analysis_result_json)[:300]}...")
-                
+
                 if analysis_type == "profile":
                     structured_data_text = format_profile_result(user_name, analysis_result_json)
-                    # Генерація опису для профілю
                     profile_description_plain = await gpt_analyzer.get_profile_description(user_name, analysis_result_json)
                     final_caption_text = f"{structured_data_text}\n\n{html.escape(profile_description_plain)}"
-                
+
                 elif analysis_type == "player_stats":
                     final_caption_text = format_player_stats_result(user_name, analysis_result_json)
-                    # Тут можна буде додати генерацію опису для статистики, якщо реалізовано:
+                    # Можливе додавання опису статистики тут
                     # stats_description_plain = await gpt_analyzer.get_player_stats_description(user_name, analysis_result_json)
                     # if stats_description_plain and "ще не реалізовано" not in stats_description_plain:
                     #    final_caption_text += f"\n\n{html.escape(stats_description_plain)}"
-                
                 else:
                     logger.warning(f"Невідомий тип аналізу: {analysis_type} для {user_name} (ID: {callback_query.from_user.id})")
                     final_caption_text = f"Не вдалося обробити результати: невідомий тип аналізу, {user_name}."
@@ -309,47 +307,44 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
     except TelegramAPIError as e:
         logger.exception(f"Telegram API помилка під час обробки файлу для {user_name} (ID: {callback_query.from_user.id}): {e}")
         final_caption_text = f"Пробач, {user_name}, виникла проблема з доступом до файлу скріншота в Telegram."
-    except ValueError as e: 
+    except ValueError as e:
         logger.exception(f"Помилка значення під час обробки файлу для {user_name} (ID: {callback_query.from_user.id}): {e}")
         final_caption_text = f"На жаль, {user_name}, не вдалося коректно обробити файл скріншота."
-    except Exception as e: 
+    except Exception as e:
         logger.exception(f"Критична помилка обробки скріншота ({analysis_type}) для {user_name} (ID: {callback_query.from_user.id}): {e}")
-        # final_caption_text вже встановлено на дефолтне повідомлення про помилку
 
     try:
-        if callback_query.message: 
-            # Видаляємо кнопки з оригінального повідомлення з фото, якщо воно ще існує
+        if callback_query.message:
             try:
-                await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None)
+                if callback_query.message.reply_markup:
+                    await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None)
             except TelegramAPIError as e:
                  logger.warning(f"Не вдалося видалити кнопки з повідомлення-прев'ю (ID: {message_id}) для {user_name}: {e}")
 
-            # Надсилаємо результат як нове повідомлення або редагуємо, якщо це було просто текстове повідомлення
-            # Оскільки ми завжди надсилаємо фото з підписом, а потім редагуємо його,
-            # тут краще надсилати результат окремим повідомленням, якщо підпис задовгий для фото.
-            # Або, якщо це було редагування підпису, то намагаємося відредагувати.
-            # Поточна логіка передбачає, що ми редагуємо підпис до фото.
-
-            if len(final_caption_text) > 1024: # Telegram ліміт на підпис до фото
-                logger.warning(f"Підпис до фото для {user_name} задовгий ({len(final_caption_text)} символів). Редагую фото без підпису і надсилаю текст окремо.")
-                await bot.edit_message_caption(chat_id=chat_id, message_id=message_id, caption="") # Очищаємо підпис
-                await send_message_in_chunks(bot, chat_id, final_caption_text, ParseMode.HTML) 
-            else:
-                await bot.edit_message_caption( 
+            if callback_query.message.photo and len(final_caption_text) <= 1024:
+                await bot.edit_message_caption(
                     chat_id=chat_id,
                     message_id=message_id,
                     caption=final_caption_text,
-                    # reply_markup=None, # Вже видалено вище
                     parse_mode=ParseMode.HTML
                 )
-            logger.info(f"Результати аналізу ({analysis_type}) для {user_name} (ID: {callback_query.from_user.id}) відредаговано/надіслано.")
+                logger.info(f"Результати аналізу ({analysis_type}) для {user_name} (ID: {callback_query.from_user.id}) відредаговано в підписі до фото.")
+            elif callback_query.message.photo and len(final_caption_text) > 1024:
+                 logger.warning(f"Підпис до фото для {user_name} задовгий ({len(final_caption_text)} символів). Редагую фото без підпису і надсилаю текст окремо.")
+                 await bot.edit_message_caption(chat_id=chat_id, message_id=message_id, caption="")
+                 await send_message_in_chunks(bot, chat_id, final_caption_text, ParseMode.HTML)
+                 logger.info(f"Результати аналізу ({analysis_type}) для {user_name} (ID: {callback_query.from_user.id}) надіслано окремим повідомленням.")
+            else:
+                logger.info(f"Повідомлення (ID: {message_id}) не є фото з підписом або підпис задовгий. Надсилаю результат аналізу ({analysis_type}) для {user_name} окремим повідомленням.")
+                await send_message_in_chunks(bot, chat_id, final_caption_text, ParseMode.HTML)
+
     except TelegramAPIError as e:
         logger.error(f"Не вдалося відредагувати/надіслати повідомлення з результатами аналізу ({analysis_type}) для {user_name} (ID: {callback_query.from_user.id}): {e}. Спроба надіслати як нове.")
         try:
-            await send_message_in_chunks(bot, chat_id, final_caption_text, ParseMode.HTML) 
+            await send_message_in_chunks(bot, chat_id, final_caption_text, ParseMode.HTML)
         except Exception as send_err:
             logger.error(f"Не вдалося надіслати нове повідомлення з аналізом ({analysis_type}) для {user_name} (ID: {callback_query.from_user.id}): {send_err}")
-            if callback_query.message: 
+            if callback_query.message:
                 try:
                     await bot.send_message(chat_id, f"Вибачте, {user_name}, сталася помилка при відображенні результатів аналізу. Спробуйте пізніше.")
                 except Exception as final_fallback_err:
@@ -359,7 +354,7 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
 
 
 async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
-    """ 
+    """
     Обробляє натискання кнопки "Видалити" на повідомленні-прев'ю скріншота.
     Видаляє повідомлення бота та очищає стан, якщо це був стан очікування аналізу.
     """
@@ -370,9 +365,8 @@ async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMC
     try:
         await callback_query.message.delete()
         await callback_query.answer("Повідомлення видалено.")
-        
+
         current_state_str = await state.get_state()
-        # Перевіряємо, чи був це стан, пов'язаний з очікуванням аналізу
         if current_state_str == VisionAnalysisStates.awaiting_analysis_trigger.state:
             user_data = await state.get_data()
             user_name = user_data.get("original_user_name", f"Користувач (ID: {callback_query.from_user.id})")
@@ -382,35 +376,35 @@ async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMC
             logger.info(f"Повідомлення бота видалено користувачем (ID: {callback_query.from_user.id}). Поточний стан: {current_state_str}")
 
     except TelegramAPIError as e:
-        logger.error(f"Помилка видалення повідомлення бота (ймовірно, прев'ю) для користувача (ID: {callback_query.from_user.id}): {e}")
+        logger.error(f"Помилка видалення повідомлення бота для користувача (ID: {callback_query.from_user.id}): {e}")
         await callback_query.answer("Не вдалося видалити повідомлення.", show_alert=True)
 
 # === ОБРОБКА СКАСУВАННЯ ТА НЕКОРЕКТНОГО ВВЕДЕННЯ ===
 
-async def cancel_analysis(message: Message, state: FSMContext, bot: Bot) -> None: 
+async def cancel_analysis(message: Message, state: FSMContext, bot: Bot) -> None:
     """
     Обробник команди /cancel під час будь-якого етапу аналізу зображення.
     Видаляє повідомлення-прев'ю (якщо є) та очищає стан.
     """
-    if not message.from_user: return # Немає кому відповідати
+    if not message.from_user: return
 
     user_name_escaped = html.escape(message.from_user.first_name)
     logger.info(f"Користувач {user_name_escaped} (ID: {message.from_user.id}) скасував аналіз зображення командою /cancel.")
 
     user_data = await state.get_data()
     bot_message_id = user_data.get("bot_message_id_for_analysis")
-    if bot_message_id and message.chat: 
+    if bot_message_id and message.chat:
         try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=bot_message_id) 
+            await bot.delete_message(chat_id=message.chat.id, message_id=bot_message_id)
             logger.info(f"Видалено повідомлення-прев'ю бота (ID: {bot_message_id}) після скасування аналізу {user_name_escaped} (ID: {message.from_user.id}).")
-        except TelegramAPIError: 
+        except TelegramAPIError:
             logger.warning(f"Не вдалося видалити повідомлення-прев'ю бота (ID: {bot_message_id}) при скасуванні для {user_name_escaped} (ID: {message.from_user.id}).")
 
     await state.clear()
     await message.reply(f"Аналіз зображення скасовано, {user_name_escaped}. Ти можеш продовжити використовувати команду /go або іншу команду аналізу.")
 
 
-async def handle_wrong_input_for_analysis(message: Message, state: FSMContext, bot: Bot, cmd_go_handler_func) -> None: 
+async def handle_wrong_input_for_analysis(message: Message, state: FSMContext, bot: Bot, cmd_go_handler_func) -> None:
     """
     Обробляє некоректне введення під час очікування скріншота або тригера аналізу.
     """
@@ -419,26 +413,24 @@ async def handle_wrong_input_for_analysis(message: Message, state: FSMContext, b
     user_name_escaped = html.escape(message.from_user.first_name)
     user_id = message.from_user.id
 
-    # Обробка /cancel через цю функцію, якщо вона викликана для стану, де /cancel не зареєстрований явно
     if message.text and message.text.lower() == "/cancel":
-        await cancel_analysis(message, state, bot) 
+        await cancel_analysis(message, state, bot)
         return
 
-    # Якщо користувач вводить /go, скасовуємо поточний аналіз та виконуємо /go
     if message.text and message.text.startswith("/go"):
         logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) ввів /go у стані аналізу. Скасовую стан і виконую /go.")
         user_data = await state.get_data()
         bot_message_id = user_data.get("bot_message_id_for_analysis")
         if bot_message_id and message.chat:
-            try: await bot.delete_message(chat_id=message.chat.id, message_id=bot_message_id) 
-            except TelegramAPIError: pass # Ігноруємо, якщо не вдалося видалити
+            try: await bot.delete_message(chat_id=message.chat.id, message_id=bot_message_id)
+            except TelegramAPIError: pass
         await state.clear()
-        await cmd_go_handler_func(message, state) # Передаємо state, хоча він і очищений
-        return 
+        await cmd_go_handler_func(message, state)
+        return
 
     current_state_name = await state.get_state()
     user_data = await state.get_data()
-    analysis_type_display = user_data.get("analysis_type", "невідомого типу") # Для повідомлень
+    analysis_type_display = user_data.get("analysis_type", "невідомого типу")
 
     if current_state_name == VisionAnalysisStates.awaiting_profile_screenshot.state:
         logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) надіслав не фото у стані awaiting_profile_screenshot (для аналізу типу: {analysis_type_display}).")
@@ -446,42 +438,34 @@ async def handle_wrong_input_for_analysis(message: Message, state: FSMContext, b
     elif current_state_name == VisionAnalysisStates.awaiting_analysis_trigger.state:
         logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) надіслав '{html.escape(message.text or 'не текстове повідомлення')}' у стані awaiting_analysis_trigger (для аналізу типу: {analysis_type_display}).")
         await message.reply(f"Очікувалася дія з аналізом (кнопка під фото) або команда /cancel, {user_name_escaped}.")
-    else: 
-        # Цей блок може не знадобитися, якщо всі стани VisionAnalysisStates обробляються
+    else:
         logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) надіслав некоректне введення у непередбаченому стані аналізу ({current_state_name}). Пропоную скасувати.")
         await message.reply(f"Щось пішло не так. Використай /cancel для скасування поточного аналізу, {user_name_escaped}.")
 
 # === РЕЄСТРАЦІЯ ОБРОБНИКІВ ===
 
-def register_vision_handlers(dp: Dispatcher, cmd_go_handler_func) -> None: 
+def register_vision_handlers(dp: Dispatcher, cmd_go_handler_func) -> None:
     """
     Реєструє всі обробники, пов'язані з аналізом зображень.
     """
-    # Команди для запуску аналізу
     dp.message.register(cmd_analyze_profile, Command("analyzeprofile"))
-    dp.message.register(cmd_analyze_player_stats, Command("analyzestats")) # НОВА КОМАНДА
+    dp.message.register(cmd_analyze_player_stats, Command("analyzestats"))
 
-    # Обробка отримання фото (спільний для всіх типів аналізу, що використовують ці стани)
     dp.message.register(handle_profile_screenshot, VisionAnalysisStates.awaiting_profile_screenshot, F.photo)
-    
-    # Обробка натискання кнопок
-    dp.callback_query.register(trigger_vision_analysis_callback, F.data == "trigger_vision_analysis", VisionAnalysisStates.awaiting_analysis_trigger)
-    dp.callback_query.register(delete_bot_message_callback, F.data == "delete_bot_message") # Може бути викликана з будь-якого стану, де є ця кнопка
 
-    # Обробка команди /cancel для станів аналізу
-    # Реєструємо для кожного конкретного стану, де очікується фото або дія
+    dp.callback_query.register(trigger_vision_analysis_callback, F.data == "trigger_vision_analysis", VisionAnalysisStates.awaiting_analysis_trigger)
+    dp.callback_query.register(delete_bot_message_callback, F.data == "delete_bot_message")
+
     cancel_states = [
         VisionAnalysisStates.awaiting_profile_screenshot,
         VisionAnalysisStates.awaiting_analysis_trigger
     ]
     for cancel_state in cancel_states:
         dp.message.register(cancel_analysis, cancel_state, Command("cancel"))
-    
-    # Обробка некоректного вводу для станів аналізу
-    # Використовуємо lambda, щоб передати cmd_go_handler_func
+
     wrong_input_handler_with_go = lambda message, state, bot: handle_wrong_input_for_analysis(message, state, bot, cmd_go_handler_func)
-    
+
     dp.message.register(wrong_input_handler_with_go, VisionAnalysisStates.awaiting_profile_screenshot)
     dp.message.register(wrong_input_handler_with_go, VisionAnalysisStates.awaiting_analysis_trigger)
-    
+
     logger.info("Обробники аналізу зображень (профіль, статистика гравця) зареєстровано.")
