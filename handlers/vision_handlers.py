@@ -1,6 +1,7 @@
 import base64
 import html
 import logging
+import re # <--- ДОДАНО ІМПОРТ МОДУЛЯ re
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
@@ -10,20 +11,11 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 
 # Імпорти з проєкту
-from config import OPENAI_API_KEY, logger # Використовуємо logger з config
+from config import OPENAI_API_KEY, logger 
 from services.openai_service import MLBBChatGPT, PROFILE_SCREENSHOT_PROMPT
 from states.vision_states import VisionAnalysisStates
 from utils.message_utils import send_message_in_chunks
-# from ..config import OPENAI_API_KEY, logger
-# from ..services.openai_service import MLBBChatGPT, PROFILE_SCREENSHOT_PROMPT
-# from ..states.vision_states import VisionAnalysisStates
-# from ..utils.message_utils import send_message_in_chunks
-# Потрібно буде також імпортувати cmd_go, якщо він використовується для переходу
-# from .general_handlers import cmd_go # Або передавати функцію
 
-
-# Ініціалізація логера для цього файлу, якщо не використовується глобальний
-# logger = logging.getLogger(__name__)
 
 async def cmd_analyze_profile(message: Message, state: FSMContext):
     """Обробник команди /analyzeprofile. Запитує скріншот профілю."""
@@ -39,7 +31,7 @@ async def cmd_analyze_profile(message: Message, state: FSMContext):
         "Якщо передумаєш, просто надішли команду /cancel."
     )
 
-async def handle_profile_screenshot(message: Message, state: FSMContext, bot: Bot): # Додано bot
+async def handle_profile_screenshot(message: Message, state: FSMContext, bot: Bot):
     """Обробляє надісланий скріншот профілю."""
     user = message.from_user
     user_name_escaped = html.escape(user.first_name if user else "Гравець")
@@ -47,20 +39,18 @@ async def handle_profile_screenshot(message: Message, state: FSMContext, bot: Bo
     chat_id = message.chat.id
     logger.info(f"Отримано скріншот профілю від {user_name_escaped} (ID: {user_id}).")
 
-    if not message.photo: # Перевірка, чи це дійсно фото
+    if not message.photo: 
         await message.answer("Щось пішло не так. Будь ласка, надішли саме фото (скріншот).")
         return
 
-    photo_file_id = message.photo[-1].file_id # Беремо найбільше фото
+    photo_file_id = message.photo[-1].file_id 
 
     try:
-        # Видаляємо оригінальне повідомлення користувача зі скріншотом, якщо бот має права
         await message.delete()
         logger.info(f"Повідомлення користувача {user_name_escaped} зі скріншотом видалено.")
     except TelegramAPIError as e:
         logger.warning(f"Не вдалося видалити повідомлення користувача {user_name_escaped} зі скріншотом: {e}")
 
-    # Зберігаємо дані для наступного кроку
     await state.update_data(vision_photo_file_id=photo_file_id, original_user_name=user_name_escaped)
 
     caption_text = "Скріншот профілю отримано.\nНатисніть «🔍 Аналіз», щоб дізнатися більше."
@@ -71,8 +61,7 @@ async def handle_profile_screenshot(message: Message, state: FSMContext, bot: Bo
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[analyze_button, delete_preview_button]])
 
     try:
-        # Надсилаємо фото назад користувачу, але вже від імені бота, з кнопками
-        sent_message = await bot.send_photo( # Використовуємо переданий bot
+        sent_message = await bot.send_photo( 
             chat_id=chat_id,
             photo=photo_file_id,
             caption=caption_text,
@@ -90,7 +79,7 @@ async def handle_profile_screenshot(message: Message, state: FSMContext, bot: Bo
         await state.clear()
 
 
-async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state: FSMContext, bot: Bot): # Додано bot
+async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state: FSMContext, bot: Bot): 
     """Обробляє натискання кнопки "Аналіз", викликає Vision API та надсилає результат."""
     if not callback_query.message or not callback_query.message.chat:
         logger.error("trigger_vision_analysis_callback: callback_query.message або callback_query.message.chat is None.")
@@ -99,21 +88,19 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
         return
 
     chat_id = callback_query.message.chat.id
-    message_id = callback_query.message.message_id # ID повідомлення бота з фото та кнопкою
-
+    message_id = callback_query.message.message_id 
     user_data = await state.get_data()
-    user_name = user_data.get("original_user_name", "Гравець") # Отримуємо ім'я користувача зі стану
+    user_name = user_data.get("original_user_name", "Гравець") 
 
     try:
-        # Редагуємо повідомлення, показуючи, що обробка почалася, і видаляємо кнопки
-        if callback_query.message.caption: # Якщо є підпис (має бути)
+        if callback_query.message.caption: 
             await callback_query.message.edit_caption(
                 caption=f"⏳ Обробляю ваш скріншот, {user_name}...",
-                reply_markup=None # Видаляємо клавіатуру
+                reply_markup=None 
             )
-        else: # На випадок, якщо підпису не було (не повинно трапитися)
+        else: 
              await callback_query.message.edit_reply_markup(reply_markup=None)
-        await callback_query.answer("Розпочато аналіз...") # Підтверджуємо натискання кнопки
+        await callback_query.answer("Розпочато аналіз...") 
     except TelegramAPIError as e:
         logger.warning(f"Не вдалося відредагувати повідомлення перед аналізом для {user_name}: {e}")
 
@@ -122,28 +109,27 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
     if not photo_file_id:
         logger.error(f"File_id не знайдено в стані для аналізу для {user_name}.")
         try:
-            if callback_query.message.caption: 
+            if callback_query.message and callback_query.message.caption:  # Перевірка, чи існує повідомлення та підпис
                 await callback_query.message.edit_caption(caption=f"Помилка, {user_name}: дані для аналізу втрачено. Спробуйте надіслати скріншот знову.")
         except TelegramAPIError: pass 
         await state.clear()
         return
 
-    final_caption_text = f"Вибач, {user_name}, сталася непередбачена помилка при генерації відповіді. 😔"
+    final_caption_text = f"Дуже шкода, {user_name}, але сталася непередбачена помилка при обробці зображення." # Змінено дефолтне повідомлення
 
     try:
-        file_info = await bot.get_file(photo_file_id) # Використовуємо переданий bot
+        file_info = await bot.get_file(photo_file_id) 
         if not file_info.file_path:
             raise ValueError("Не вдалося отримати шлях до файлу в Telegram для аналізу.")
 
-        downloaded_file_io = await bot.download_file(file_info.file_path) # Використовуємо переданий bot
+        downloaded_file_io = await bot.download_file(file_info.file_path) 
         if downloaded_file_io is None: 
             raise ValueError("Не вдалося завантажити файл з Telegram для аналізу (download_file повернув None).")
         
         image_bytes = downloaded_file_io.read()
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
-        async with MLBBChatGPT(OPENAI_API_KEY) as gpt_analyzer: # Використовуємо OPENAI_API_KEY з config
-            # Використовуємо PROFILE_SCREENSHOT_PROMPT з openai_service
+        async with MLBBChatGPT(OPENAI_API_KEY) as gpt_analyzer: 
             analysis_result_json = await gpt_analyzer.analyze_image_with_vision(image_base64, PROFILE_SCREENSHOT_PROMPT)
 
             if analysis_result_json and "error" not in analysis_result_json:
@@ -163,7 +149,7 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                         if key == "highest_rank_season" and ("★" in display_value or "зірок" in display_value.lower() or "слава" in display_value.lower()):
                             if "★" not in display_value: 
                                  display_value = display_value.replace("зірок", "★").replace("зірки", "★")
-                            display_value = re.sub(r'\s+★', '★', display_value) 
+                            display_value = re.sub(r'\s+★', '★', display_value) # Тепер re буде доступний
                         response_parts.append(f"<b>{readable_name}:</b> {html.escape(display_value)}")
                         has_data = True
                     else:
@@ -177,7 +163,6 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                 structured_data_text = "\n".join(response_parts)
                 
                 profile_description_plain = await gpt_analyzer.get_profile_description(user_name, analysis_result_json)
-                # Оскільки PROFILE_DESCRIPTION_PROMPT_TEMPLATE вимагає чистого тексту, екрануємо його для HTML
                 final_caption_text = f"{structured_data_text}\n\n{html.escape(profile_description_plain)}"
 
             else:
@@ -189,39 +174,39 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                 elif analysis_result_json and analysis_result_json.get("details"):
                      final_caption_text += f"\nДеталі: {html.escape(str(analysis_result_json.get('details'))[:100])}..."
 
-    except TelegramAPIError as e:
+    except TelegramAPIError as e: # Обробка помилок Telegram API
         logger.exception(f"Telegram API помилка під час обробки файлу для {user_name}: {e}")
         final_caption_text = f"Пробач, {user_name}, виникла проблема з доступом до файлу скріншота в Telegram."
     except ValueError as e: 
         logger.exception(f"Помилка значення під час обробки файлу для {user_name}: {e}")
         final_caption_text = f"На жаль, {user_name}, не вдалося коректно обробити файл скріншота."
-    except Exception as e:
+    except Exception as e: # Загальна обробка інших можливих помилок
         logger.exception(f"Критична помилка обробки скріншота профілю для {user_name}: {e}")
-        final_caption_text = f"Дуже шкода, {user_name}, але сталася непередбачена помилка при обробці зображення."
+        # final_caption_text вже встановлено на дефолтне повідомлення про помилку
+        # final_caption_text = f"Дуже шкода, {user_name}, але сталася непередбачена помилка при обробці зображення." # Можна залишити це
 
 
     try:
         if callback_query.message: 
-            if len(final_caption_text) > 1024: # Ліміт довжини підпису до медіа
+            if len(final_caption_text) > 1024: 
                 logger.warning(f"Підпис до фото для {user_name} задовгий ({len(final_caption_text)} символів). Редагую фото без підпису і надсилаю текст окремо.")
-                await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None) # Видаляємо кнопки з фото
-                await send_message_in_chunks(bot, chat_id, final_caption_text, ParseMode.HTML) # Використовуємо переданий bot
+                await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None) 
+                await send_message_in_chunks(bot, chat_id, final_caption_text, ParseMode.HTML) 
             else:
-                await bot.edit_message_caption( # Використовуємо переданий bot
+                await bot.edit_message_caption( 
                     chat_id=chat_id,
                     message_id=message_id,
                     caption=final_caption_text,
-                    reply_markup=None, # Кнопки вже видалені або видаляються тут
+                    reply_markup=None, 
                     parse_mode=ParseMode.HTML
                 )
             logger.info(f"Результати аналізу для {user_name} відредаговано/надіслано.")
     except TelegramAPIError as e:
         logger.error(f"Не вдалося відредагувати/надіслати повідомлення з результатами аналізу для {user_name}: {e}. Спроба надіслати як нове.")
         try:
-            await send_message_in_chunks(bot, chat_id, final_caption_text, ParseMode.HTML) # Використовуємо переданий bot
+            await send_message_in_chunks(bot, chat_id, final_caption_text, ParseMode.HTML) 
         except Exception as send_err:
             logger.error(f"Не вдалося надіслати нове повідомлення з аналізом для {user_name}: {send_err}")
-            # Остання спроба повідомити користувача про помилку
             if callback_query.message: 
                 try:
                     await bot.send_message(chat_id, f"Вибачте, {user_name}, сталася помилка при відображенні результатів аналізу. Спробуйте пізніше.")
@@ -241,7 +226,6 @@ async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMC
         await callback_query.message.delete()
         await callback_query.answer("Повідомлення видалено.")
         current_state_str = await state.get_state()
-        # Очищаємо стан тільки якщо він був пов'язаний з цим потоком аналізу
         if current_state_str == VisionAnalysisStates.awaiting_analysis_trigger.state:
             user_name = (await state.get_data()).get("original_user_name", "Користувач")
             logger.info(f"Прев'ю аналізу видалено користувачем {user_name}, стан очищено.")
@@ -251,7 +235,7 @@ async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMC
         await callback_query.answer("Не вдалося видалити повідомлення.", show_alert=True)
 
 
-async def cancel_profile_analysis(message: Message, state: FSMContext, bot: Bot): # Додано bot
+async def cancel_profile_analysis(message: Message, state: FSMContext, bot: Bot): 
     """Обробник команди /cancel під час аналізу профілю."""
     user = message.from_user
     user_name_escaped = html.escape(user.first_name if user else "Гравець")
@@ -261,7 +245,7 @@ async def cancel_profile_analysis(message: Message, state: FSMContext, bot: Bot)
     bot_message_id = user_data.get("bot_message_id_for_analysis")
     if bot_message_id and message.chat: 
         try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=bot_message_id) # Використовуємо переданий bot
+            await bot.delete_message(chat_id=message.chat.id, message_id=bot_message_id) 
             logger.info(f"Видалено повідомлення-прев'ю бота (ID: {bot_message_id}) після скасування аналізу {user_name_escaped}.")
         except TelegramAPIError: 
             logger.warning(f"Не вдалося видалити повідомлення-прев'ю бота (ID: {bot_message_id}) при скасуванні для {user_name_escaped}.")
@@ -270,26 +254,24 @@ async def cancel_profile_analysis(message: Message, state: FSMContext, bot: Bot)
     await message.reply(f"Аналіз скріншота скасовано, {user_name_escaped}. Ти можеш продовжити використовувати команду /go.")
 
 
-async def handle_wrong_input_for_profile_screenshot(message: Message, state: FSMContext, bot: Bot, cmd_go_handler): # Додано bot та cmd_go_handler
+async def handle_wrong_input_for_profile_screenshot(message: Message, state: FSMContext, bot: Bot, cmd_go_handler): 
     """Обробляє некоректне введення під час очікування скріншота або тригера аналізу."""
     user = message.from_user
     user_name_escaped = html.escape(user.first_name if user else "Гравець")
 
-    # Явна перевірка на команду /cancel
     if message.text and message.text.lower() == "/cancel":
-        await cancel_profile_analysis(message, state, bot) # Передаємо bot
+        await cancel_profile_analysis(message, state, bot) 
         return
 
-    # Якщо користувач ввів /go, перенаправляємо на обробник /go
     if message.text and message.text.startswith("/go"):
         logger.info(f"Користувач {user_name_escaped} ввів /go у стані аналізу. Скасовую стан і виконую /go.")
         user_data = await state.get_data()
         bot_message_id = user_data.get("bot_message_id_for_analysis")
         if bot_message_id and message.chat:
-            try: await bot.delete_message(chat_id=message.chat.id, message_id=bot_message_id) # Використовуємо переданий bot
+            try: await bot.delete_message(chat_id=message.chat.id, message_id=bot_message_id) 
             except TelegramAPIError: pass
         await state.clear()
-        await cmd_go_handler(message, state, bot) # Викликаємо переданий обробник cmd_go
+        await cmd_go_handler(message, state, bot) 
         return 
 
     current_state_name = await state.get_state()
@@ -303,25 +285,14 @@ async def handle_wrong_input_for_profile_screenshot(message: Message, state: FSM
         logger.info(f"Користувач {user_name_escaped} надіслав некоректне введення у стані аналізу. Пропоную скасувати.")
         await message.reply(f"Щось пішло не так. Використай /cancel для скасування поточного аналізу, {user_name_escaped}.")
 
-# Функція для реєстрації обробників цього файлу
-def register_vision_handlers(dp: Dispatcher, cmd_go_handler_func): # Додано cmd_go_handler_func
+def register_vision_handlers(dp: Dispatcher, cmd_go_handler_func): 
     dp.message.register(cmd_analyze_profile, Command("analyzeprofile"))
-    
-    # Обробник для фотографій у стані awaiting_profile_screenshot
     dp.message.register(handle_profile_screenshot, VisionAnalysisStates.awaiting_profile_screenshot, F.photo)
-    
-    # Обробник для колбеку кнопки "Аналіз"
     dp.callback_query.register(trigger_vision_analysis_callback, F.data == "trigger_vision_analysis", VisionAnalysisStates.awaiting_analysis_trigger)
-    
-    # Обробник для колбеку кнопки "Видалити"
     dp.callback_query.register(delete_bot_message_callback, F.data == "delete_bot_message")
-    
-    # Обробники для команди /cancel у відповідних станах
     dp.message.register(cancel_profile_analysis, VisionAnalysisStates.awaiting_profile_screenshot, Command("cancel"))
     dp.message.register(cancel_profile_analysis, VisionAnalysisStates.awaiting_analysis_trigger, Command("cancel"))
-
-    # Обробники для некоректного вводу у станах (мають бути останніми для цих станів)
-    # Передаємо cmd_go_handler_func в lambda, щоб зафіксувати його для виклику
+    
     dp.message.register(
         lambda message, state, bot: handle_wrong_input_for_profile_screenshot(message, state, bot, cmd_go_handler_func),
         VisionAnalysisStates.awaiting_profile_screenshot
