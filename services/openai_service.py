@@ -181,7 +181,7 @@ PLAYER_STATS_DESCRIPTION_PROMPT_TEMPLATE = """
 # === КЛАС ДЛЯ ВЗАЄМОДІЇ З OPENAI ===
 
 class MLBBChatGPT:
-    TEXT_MODEL = "gpt-4.1-mini" 
+    TEXT_MODEL = "gpt-4.1" 
     VISION_MODEL = "gpt-4.1-mini"
 
     def __init__(self, api_key: str) -> None:
