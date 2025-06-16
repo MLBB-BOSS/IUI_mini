@@ -11,7 +11,7 @@ import aiohttp
 from aiohttp import ClientSession, ClientTimeout
 
 # === ПРОМПТИ ДЛЯ АНАЛІЗУ ЗОБРАЖЕНЬ (VISION API) ===
-
+# ... (PROFILE_SCREENSHOT_PROMPT та PLAYER_STATS_PROMPT залишаються без змін, вони довгі, тому я їх тут скорочую) ...
 PROFILE_SCREENSHOT_PROMPT = """
 Ти — експертний аналітик гри Mobile Legends: Bang Bang.
 Твоє завдання — уважно проаналізувати наданий скріншот профілю гравця.
@@ -102,7 +102,7 @@ PLAYER_STATS_PROMPT = """
 """
 
 # === ПРОМПТИ ДЛЯ ГЕНЕРАЦІЇ ТЕКСТОВИХ ОПИСІВ (GPT-4 Turbo) ===
-
+# ... (PROFILE_DESCRIPTION_PROMPT_TEMPLATE залишається без змін) ...
 PROFILE_DESCRIPTION_PROMPT_TEMPLATE = """
 Ти — харизматичний та дотепний коментатор матчів Mobile Legends, який вміє знайти родзинку в кожному гравцеві. Твоя мета — створити короткий (2-5 речень), але яскравий та персоналізований "вау-ефект" опис для гравця {user_name}, базуючись на даних його профілю. Опис має бути схожим на коментар стрімера під час трансляції.
 
@@ -146,37 +146,43 @@ PLAYER_STATS_DESCRIPTION_PROMPT_TEMPLATE = """
 Ось дані статистики гравця ({stats_filter_type}):
 - Матчів зіграно: {matches_played}
 - Відсоток перемог: {win_rate}%
-- MVP: {mvp_count}
+- MVP: {mvp_count} (з них {mvp_rate_percent}% від усіх матчів)
 - KDA: {kda_ratio}
 - Участь у командних боях: {teamfight_participation_rate}%
 - Середнє золото/хв: {avg_gold_per_min}
-- Легендарних: {legendary_count}, Дикунств: {savage_count}, Маніяків: {maniac_count}
+- Легендарних: {legendary_count}, Дикунств: {savage_count} (приблизно {savage_frequency} на 1000 матчів), Маніяків: {maniac_count}
 - Найбільша серія перемог: {longest_win_streak}
 - Найбільше вбивств за гру: {most_kills_in_one_game}
+- Ефективність золота (шкода/золото): {damage_per_gold_ratio}
+- Частка MVP у перемогах: {mvp_win_share_percent}%
+- Загалом перемог: {total_wins}
 
 ТВОЇ ЗАВДАННЯ:
-1.  **Знайди "родзинку":** На чому можна зробити акцент? Це може бути:
-    *   Високий відсоток перемог або KDA.
-    *   Велика кількість матчів, що свідчить про досвід.
-    *   Вражаюча кількість MVP, Legendary, Savage.
+1.  **Знайди "родзинку":** На чому можна зробити акцент? Використовуй ЯК БАЗОВІ, ТАК І УНІКАЛЬНІ РОЗРАХОВАНІ показники. Це може бути:
+    *   Високий відсоток перемог, KDA, або **MVP Рейтинг ({mvp_rate_percent}%)**.
+    *   Велика кількість матчів ({matches_played}) або **загальна кількість перемог ({total_wins})**.
+    *   Вражаюча кількість MVP, Legendary, Savage (особливо якщо **частота Savage ({savage_frequency})** висока).
+    *   **Ефективність золота ({damage_per_gold_ratio})**: якщо вона висока, це означає, що гравець добре конвертує фарм у шкоду.
+    *   **Частка MVP у перемогах ({mvp_win_share_percent}%)**: високий показник означає, що MVP гравця дійсно ведуть до перемоги.
     *   Висока участь у командних боях або показники золота/шкоди.
-    *   Цікаве співвідношення показників (наприклад, багато MVP при середньому відсотку перемог).
-2.  **Стиль коментаря:** Позитивний, підбадьорливий, з використанням доречного ігрового сленгу. Можеш відзначити сильні сторони гравця.
+    *   Цікаве співвідношення показників.
+2.  **Стиль коментаря:** Позитивний, підбадьорливий, з використанням доречного ігрового сленгу ("тащер", "фармила", "кіберкотлета", "розриває"). Можеш відзначити сильні сторони гравця, базуючись на всіх даних.
 3.  **Структура:** Почни з вітання, якщо доречно, або одразу переходь до суті. Заверши позитивним побажанням або спостереженням.
 4.  **Лаконічність:** Уникай води, говори по суті.
 5.  **ТІЛЬКИ текст коментаря:** Без Markdown/HTML.
 
 ПОГАНИЙ ПРИКЛАД: "Гравець {user_name} зіграв {matches_played} матчів. Його KDA {kda_ratio}."
-ДОБРИЙ ПРИКЛАД: "Ого, {user_name}, твої {matches_played} матчів у режимі '{stats_filter_type}' говорять самі за себе! З таким вінрейтом {win_rate}% та {mvp_count} MVP ти справжня гроза серверу. А {savage_count} дикунств – це просто вишенька на торті! Продовжуй в тому ж дусі, легенда!"
+ДОБРИЙ ПРИКЛАД (з урахуванням нових даних):
+"Ого, {user_name}, твої {matches_played} матчів у '{stats_filter_type}' – це просто космос! Мати {mvp_rate_percent}% MVP-рейт – це сильно! А ефективність золота {damage_per_gold_ratio} показує, що ти справжній економіст на полі бою, що конвертує кожну монетку в чисту шкоду. {savage_count} дикунств, навіть якщо це {savage_frequency} на тисячу ігор, – це завжди епічно! Так тримати, чемпіоне!"
 
-Зроби так, щоб гравець відчув цінність своєї статистики!
+Зроби так, щоб гравець відчув цінність своєї статистики та унікальних розрахунків!
 """
 
 # === КЛАС ДЛЯ ВЗАЄМОДІЇ З OPENAI ===
 
 class MLBBChatGPT:
-    TEXT_MODEL = "gpt-4.1" 
-    VISION_MODEL = "gpt-4.1"
+    TEXT_MODEL = "gpt-4-turbo" 
+    VISION_MODEL = "gpt-4o-mini"
 
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
@@ -200,6 +206,7 @@ class MLBBChatGPT:
             self.class_logger.error(f"Помилка в MLBBChatGPT під час виходу з контексту: {exc_type} {exc_val}", exc_info=True)
 
     def _create_smart_prompt(self, user_name: str, user_query: str) -> str:
+        # ... (код _create_smart_prompt залишається без змін) ...
         try:
             kyiv_tz = timezone(timedelta(hours=3)) 
             current_time_kyiv = datetime.now(kyiv_tz)
@@ -270,6 +277,7 @@ class MLBBChatGPT:
         return system_prompt
         
     def _beautify_response(self, text: str) -> str:
+        # ... (код _beautify_response залишається без змін) ...
         self.class_logger.debug(f"Beautify: Початковий текст (перші 100 символів): '{text[:100]}'")
         header_emojis = {
             "карти": "🗺️", "об'єктів": "🛡️", "тактика": "⚔️", "позиція": "📍", "комунікація": "💬",
@@ -322,6 +330,7 @@ class MLBBChatGPT:
         return text.strip()
 
     async def get_response(self, user_name: str, user_query: str) -> str:
+        # ... (код get_response залишається без змін) ...
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит до GPT (/go) від '{user_name_escaped}': '{user_query[:100]}...'")
         system_prompt = self._create_smart_prompt(user_name, user_query)
@@ -353,6 +362,7 @@ class MLBBChatGPT:
                 self.class_logger.debug("Тимчасову сесію для GPT (/go) закрито.")
 
     async def _execute_openai_request(self, session: ClientSession, payload: Dict[str, Any], user_name_for_error_msg: str) -> str:
+        # ... (код _execute_openai_request залишається без змін) ...
         try:
             async with session.post(
                 "https://api.openai.com/v1/chat/completions", 
@@ -383,6 +393,7 @@ class MLBBChatGPT:
             return f"Не вдалося обробити твій запит, {user_name_for_error_msg} 😕."
 
     async def analyze_image_with_vision(self, image_base64: str, prompt: str) -> Optional[Dict[str, Any]]:
+        # ... (код analyze_image_with_vision залишається без змін) ...
         self.class_logger.info(f"Запит до Vision API. Промпт починається з: '{prompt[:70].replace('\n', ' ')}...'")
         payload = {
             "model": self.VISION_MODEL,
@@ -428,6 +439,7 @@ class MLBBChatGPT:
                 self.class_logger.debug("Тимчасову сесію для Vision API закрито.")
 
     async def _handle_vision_response(self, response: aiohttp.ClientResponse) -> Optional[Dict[str, Any]]:
+        # ... (код _handle_vision_response залишається без змін) ...
         response_text = await response.text()
         try:
             if response.status != 200: 
@@ -470,6 +482,7 @@ class MLBBChatGPT:
             return {"error": "Не вдалося розпарсити JSON відповідь від Vision API (помилка декодування).", "raw_response": content}
 
     async def get_profile_description(self, user_name: str, profile_data: Dict[str, Any]) -> str:
+        # ... (код get_profile_description залишається без змін) ...
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит на генерацію опису профілю для '{user_name_escaped}'.")
         escaped_profile_data = {
@@ -509,6 +522,7 @@ class MLBBChatGPT:
                 self.class_logger.debug("Тимчасову сесію для опису профілю закрито.")
 
     async def _execute_description_request(self, session: ClientSession, payload: Dict[str, Any], user_name_for_error_msg: str) -> str:
+        # ... (код _execute_description_request залишається без змін) ...
         try:
             async with session.post( 
                 "https://api.openai.com/v1/chat/completions", 
@@ -540,56 +554,74 @@ class MLBBChatGPT:
 
     async def get_player_stats_description(self, user_name: str, stats_data: Dict[str, Any]) -> str:
         """
-        Генерує текстовий опис статистики гравця на основі даних від Vision API,
-        використовуючи модель self.TEXT_MODEL.
+        Генерує текстовий опис статистики гравця на основі даних від Vision API
+        та розрахованих унікальних статистик.
         """
         user_name_escaped = html.escape(user_name)
-        self.class_logger.info(f"Запит на генерацію опису статистики для '{user_name_escaped}'.")
+        self.class_logger.info(f"Запит на генерацію опису статистики для '{user_name_escaped}' (з унікальними даними).")
         
+        # Базові дані
         main_ind = stats_data.get("main_indicators", {})
         details_p = stats_data.get("details_panel", {})
         ach_left = stats_data.get("achievements_left_column", {})
         ach_right = stats_data.get("achievements_right_column", {})
+        
+        # Розраховані дані (derived_stats)
+        derived_s = stats_data.get("derived_stats", {}) # Отримуємо словник розрахованих статистик
 
         # Функція для безпечного отримання та форматування значення
-        def get_stat(data_dict: Dict[str, Any], key: str, default_val: Any = "N/A") -> str:
+        def get_value(data_dict: Optional[Dict[str, Any]], key: str, default_val: Any = "N/A", precision: Optional[int] = None) -> str:
+            if data_dict is None:
+                return str(default_val)
             val = data_dict.get(key)
-            return html.escape(str(val)) if val is not None else str(default_val)
+            if val is None:
+                return str(default_val)
+            if precision is not None:
+                try:
+                    return f"{float(val):.{precision}f}"
+                except (ValueError, TypeError):
+                    return html.escape(str(val)) # Якщо не вдалося форматувати як float
+            return html.escape(str(val))
 
         template_data = {
             "user_name": user_name_escaped,
-            "stats_filter_type": get_stat(stats_data, 'stats_filter_type'),
-            "matches_played": get_stat(main_ind, 'matches_played'),
-            "win_rate": get_stat(main_ind, 'win_rate'),
-            "mvp_count": get_stat(main_ind, 'mvp_count'),
-            "kda_ratio": get_stat(details_p, 'kda_ratio'),
-            "teamfight_participation_rate": get_stat(details_p, 'teamfight_participation_rate'),
-            "avg_gold_per_min": get_stat(details_p, 'avg_gold_per_min'),
-            "legendary_count": get_stat(ach_left, 'legendary_count'),
-            "savage_count": get_stat(ach_right, 'savage_count'),
-            "maniac_count": get_stat(ach_left, 'maniac_count'),
-            "longest_win_streak": get_stat(ach_left, 'longest_win_streak'),
-            "most_kills_in_one_game": get_stat(ach_left, 'most_kills_in_one_game')
+            "stats_filter_type": get_value(stats_data, 'stats_filter_type'),
+            "matches_played": get_value(main_ind, 'matches_played'),
+            "win_rate": get_value(main_ind, 'win_rate'),
+            "mvp_count": get_value(main_ind, 'mvp_count'),
+            "kda_ratio": get_value(details_p, 'kda_ratio', precision=2),
+            "teamfight_participation_rate": get_value(details_p, 'teamfight_participation_rate'),
+            "avg_gold_per_min": get_value(details_p, 'avg_gold_per_min'),
+            "legendary_count": get_value(ach_left, 'legendary_count'),
+            "savage_count": get_value(ach_right, 'savage_count'),
+            "maniac_count": get_value(ach_left, 'maniac_count'),
+            "longest_win_streak": get_value(ach_left, 'longest_win_streak'),
+            "most_kills_in_one_game": get_value(ach_left, 'most_kills_in_one_game'),
+            # Додаємо розраховані статистики
+            "total_wins": get_value(derived_s, 'total_wins', default_val="не розраховано"),
+            "mvp_rate_percent": get_value(derived_s, 'mvp_rate_percent', default_val="N/A", precision=2),
+            "savage_frequency": get_value(derived_s, 'savage_frequency_per_1000_matches', default_val="N/A", precision=2),
+            "damage_per_gold_ratio": get_value(derived_s, 'damage_per_gold_ratio', default_val="N/A", precision=2),
+            "mvp_win_share_percent": get_value(derived_s, 'mvp_win_share_percent', default_val="N/A", precision=2),
         }
         
         try:
             system_prompt_text = PLAYER_STATS_DESCRIPTION_PROMPT_TEMPLATE.format(**template_data)
         except KeyError as e:
             self.class_logger.error(f"Помилка форматування PLAYER_STATS_DESCRIPTION_PROMPT_TEMPLATE: відсутній ключ {e}. Дані: {template_data}")
-            return f"<i>Помилка підготовки даних для опису статистики ({user_name_escaped}).</i>"
+            return f"<i>Помилка підготовки даних для опису статистики ({user_name_escaped}). Ключ: {e}</i>"
 
         payload = {
             "model": self.TEXT_MODEL, 
             "messages": [{"role": "system", "content": system_prompt_text}],
-            "max_tokens": 400, 
-            "temperature": 0.72, # Трохи креативності для стрімерського стилю
+            "max_tokens": 450, # Трохи більше токенів для потенційно довших описів з новими даними
+            "temperature": 0.73, 
             "top_p": 0.9,
             "presence_penalty": 0.15,
             "frequency_penalty": 0.15
         }
-        self.class_logger.debug(f"Параметри для опису статистики: модель={payload['model']}, temp={payload['temperature']}, max_tokens={payload['max_tokens']}")
+        self.class_logger.debug(f"Параметри для опису статистики (з derived): модель={payload['model']}, temp={payload['temperature']}, max_tokens={payload['max_tokens']}")
         
-        # Використовуємо поточну сесію або створюємо тимчасову, якщо потрібно
         current_session = self.session
         temp_session_created = False
         if not current_session or current_session.closed:
