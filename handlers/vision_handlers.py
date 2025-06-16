@@ -100,7 +100,6 @@ def calculate_derived_stats(stats_data: Dict[str, Any]) -> Dict[str, Union[str, 
         elif kda_ratio is not None: derived['avg_impact_score_per_match'] = round(kda_ratio, 2)
         else: derived['avg_impact_score_per_match'] = None
     else: derived['avg_impact_score_per_match'] = None
-    # logger.info(f"Розраховано унікальні статистики: {derived}") # Можна розкоментувати для детального логування
     return derived
 
 # === ОБРОБНИКИ КОМАНД (без змін) ===
@@ -253,48 +252,65 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
     vision_prompt = user_data.get("vision_prompt")
     analysis_type = user_data.get("analysis_type")
     
-    # bot_message_id_for_analysis тепер є cq_msg.message_id
-    # Ми будемо редагувати саме cq_msg
-
     if not all([photo_file_id, vision_prompt, analysis_type]):
         logger.error(f"Недостатньо даних у стані для аналізу для {user_name_original} (ID: {callback_query.from_user.id}).")
         error_text = f"Помилка, {user_name_escaped}: дані для аналізу втрачено. Спробуйте надіслати скріншот знову."
         try:
             if cq_msg.reply_markup: await bot.edit_message_reply_markup(chat_id, cq_msg.message_id, reply_markup=None)
-            if cq_msg.photo and cq_msg.caption is not None : # Редагуємо підпис, якщо він є і це фото
+            if cq_msg.photo and cq_msg.caption is not None :
                  await bot.edit_message_caption(chat_id=chat_id, message_id=cq_msg.message_id, caption=error_text)
-            else: # Якщо це не повідомлення з фото або без підпису, надсилаємо нове
+            else: 
                  await bot.send_message(chat_id, error_text)
         except TelegramAPIError as e_clear:
             logger.warning(f"Помилка при спробі оновити повідомлення про втрату даних для {user_name_original}: {e_clear}")
         await state.clear()
         return
 
-    # --- Початкове оновлення повідомлення на "Обробляю..." ---
-    last_edit_time = 0 # Для запобігання занадто частим редагуванням
+    last_edit_time = 0 
     current_loop = asyncio.get_event_loop()
 
-    async def edit_caption_if_needed(new_caption: str):
+    async def edit_caption_if_needed(new_caption: str, is_final: bool = False):
         nonlocal last_edit_time
+        # Для фінального повідомлення можна не чекати, або чекати менше
+        min_interval = 0.5 if is_final else 1.5 
         now = current_loop.time()
-        if now - last_edit_time < 1.5: # Не редагувати частіше ніж раз на 1.5 секунди
-            await asyncio.sleep(1.5 - (now - last_edit_time))
+        
+        if now - last_edit_time < min_interval and not is_final:
+            await asyncio.sleep(min_interval - (now - last_edit_time))
+        
+        # Перевіряємо, чи повідомлення все ще існує і є фото
+        # Це важливо, оскільки користувач міг видалити повідомлення або щось могло піти не так
         try:
-            if cq_msg.photo: # Редагуємо тільки якщо це все ще фото-повідомлення
-                await bot.edit_message_caption(chat_id, cq_msg.message_id, caption=new_caption)
-                last_edit_time = current_loop.time()
-        except TelegramBadRequest as e: # Помилка, якщо повідомлення не змінилося або інша проблема
-            logger.warning(f"Не вдалося оновити підпис на '{new_caption[:30]}...': {e}")
-        except TelegramAPIError as e: # Інші помилки API
-            logger.error(f"API помилка при оновленні підпису на '{new_caption[:30]}...': {e}")
+            # Отримуємо актуальний стан повідомлення перед редагуванням
+            current_cq_msg_state = await bot.edit_message_caption(chat_id=chat_id, message_id=cq_msg.message_id, caption=new_caption) # Пробна зміна, щоб перевірити чи повідомлення існує
+            if not current_cq_msg_state.photo: # Якщо раптом це вже не фото
+                 logger.warning(f"Цільове повідомлення {cq_msg.message_id} більше не є фото. Неможливо оновити підпис.")
+                 return False # Повертаємо False, якщо редагування неможливе
+            # Якщо все ок, редагуємо на актуальний new_caption
+            # (попередня edit_message_caption вже зробила зміну, якщо текст відрізнявся)
+            # Якщо текст той самий, TelegramBadRequest буде оброблено
+            if current_cq_msg_state.caption != new_caption: # Додатково перевіряємо чи текст дійсно змінився
+                 await bot.edit_message_caption(chat_id=chat_id, message_id=cq_msg.message_id, caption=new_caption)
 
+            last_edit_time = current_loop.time()
+            return True # Редагування успішне або не потрібне (текст той самий)
+        except TelegramBadRequest as e: 
+            if "message is not modified" in str(e).lower():
+                logger.debug(f"Підпис не змінено (той самий текст): '{new_caption[:30]}...'")
+                last_edit_time = current_loop.time() # Оновлюємо час, щоб наступне редагування не чекало зайвого
+                return True # Вважаємо успішним, бо текст вже такий
+            logger.warning(f"Не вдалося оновити підпис на '{new_caption[:30]}...': {e} (BadRequest)")
+            return False
+        except TelegramAPIError as e: 
+            logger.error(f"API помилка при оновленні підпису на '{new_caption[:30]}...': {e}")
+            return False # Помилка редагування
 
     try:
         initial_processing_text = f"⏳ {random.choice(PROCESSING_MESSAGES)} {user_name_escaped}..."
         if cq_msg.photo and cq_msg.caption is not None:
             await bot.edit_message_caption(chat_id, cq_msg.message_id, caption=initial_processing_text, reply_markup=None)
             last_edit_time = current_loop.time()
-        elif cq_msg.reply_markup: # Якщо немає підпису, але є кнопки
+        elif cq_msg.reply_markup: 
              await bot.edit_message_reply_markup(chat_id, cq_msg.message_id, reply_markup=None)
         await callback_query.answer("Розпочато аналіз...")
     except TelegramAPIError as e:
@@ -303,10 +319,13 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
         except TelegramAPIError: pass
 
     full_analysis_text_parts = []
-    default_error_text = f"😔 Вибач, {user_name_escaped}, сталася непередбачена помилка при обробці зображення."
+    default_error_text = f"😔 Вибач, {user_name_escaped}, сталася непередбачена помилка під час обробки зображення."
+    can_edit_cq_msg = True # Прапорець, чи можемо ми ще редагувати cq_msg
 
     try:
-        await edit_caption_if_needed(f"🖼️ Завантажую скріншот, {user_name_escaped}...")
+        can_edit_cq_msg = await edit_caption_if_needed(f"🖼️ Завантажую скріншот, {user_name_escaped}...")
+        if not can_edit_cq_msg: raise ValueError("Початкове повідомлення для редагування недоступне.")
+
         file_info = await bot.get_file(photo_file_id)
         if not file_info.file_path: raise ValueError("Не вдалося отримати шлях до файлу.")
         downloaded_file_io = await bot.download_file(file_info.file_path)
@@ -344,7 +363,8 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                         else: full_analysis_text_parts.append(commentary_raw)
                     
                     unique_analytics_formatted = format_unique_analytics_text(user_name_original, derived_stats)
-                    if unique_analytics_formatted and "недостатньо даних" not in unique_analytics_formatted.lower() and "не вдалося розрахувати" not in unique_analy[...]
+                    # ВИПРАВЛЕНО РЯДОК:
+                    if unique_analytics_formatted and "недостатньо даних" not in unique_analytics_formatted.lower() and "не вдалося розрахувати" not in unique_analytics_formatted.lower():
                         full_analysis_text_parts.append(f"\n\n{unique_analytics_formatted}")
                     
                     detailed_stats_formatted = format_detailed_stats_text(user_name_original, analysis_result_json)
@@ -362,13 +382,16 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
     
     except TelegramAPIError as e: 
         logger.exception(f"Telegram API помилка під час обробки або оновлення повідомлення для {user_name_original}: {e}")
+        can_edit_cq_msg = False # Якщо була помилка API, скоріш за все, редагувати вже не вийде
         if not full_analysis_text_parts:
             full_analysis_text_parts.append(f"Пробач, {user_name_escaped}, виникла проблема з Telegram під час обробки.")
-    except ValueError as e:
+    except ValueError as e: # Ця помилка може виникнути, якщо can_edit_cq_msg став False
         logger.exception(f"Помилка значення для {user_name_original}: {e}")
+        can_edit_cq_msg = False
         full_analysis_text_parts.append(f"На жаль, {user_name_escaped}, не вдалося обробити файл скріншота. {html.escape(str(e))}")
     except Exception as e:
         logger.exception(f"Критична помилка обробки ({analysis_type}) для {user_name_original}: {e}")
+        can_edit_cq_msg = False
         if not full_analysis_text_parts: 
              full_analysis_text_parts.append(default_error_text)
 
@@ -377,19 +400,29 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
         final_text_to_send = default_error_text 
 
     try:
-        if cq_msg and cq_msg.photo: 
+        # Намагаємося редагувати cq_msg, якщо це можливо і воно все ще фото
+        # Оновлюємо cq_msg, щоб отримати його актуальний стан, якщо він змінювався
+        refreshed_cq_msg = None
+        if cq_msg: # Перевіряємо, чи cq_msg взагалі існує
+            try:
+                # Це "порожнє" редагування може оновити стан cq_msg або викликати помилку, якщо повідомлення видалено
+                await bot.edit_message_reply_markup(chat_id=chat_id, message_id=cq_msg.message_id, reply_markup=None)
+                # Якщо ми тут, повідомлення існує. Оновимо змінну cq_msg, хоча edit_message_reply_markup повертає True/False або Message
+                # Краще покладатись на те, що cq_msg.message_id валідний, якщо не було помилки
+            except TelegramAPIError: # Якщо повідомлення вже немає або не можна редагувати
+                can_edit_cq_msg = False
+
+
+        if can_edit_cq_msg and cq_msg and cq_msg.photo: 
             if len(final_text_to_send) <= MAX_TELEGRAM_MESSAGE_LENGTH:
-                await bot.edit_message_caption(chat_id, cq_msg.message_id, caption=final_text_to_send, parse_mode=ParseMode.HTML)
+                await edit_caption_if_needed(final_text_to_send, is_final=True)
                 logger.info(f"Результати аналізу ({analysis_type}) для {user_name_original} ВІДРЕДАГОВАНО в підписі до фото (ID: {cq_msg.message_id}).")
             else: 
                 logger.warning(f"Підпис до фото ({analysis_type}) для {user_name_original} задовгий. Оновлюю підпис фото на 'Деталі нижче' і надсилаю текст окремо.")
-                try: 
-                    await bot.edit_message_caption(chat_id, cq_msg.message_id, caption=f"✅ Аналіз завершено, {user_name_escaped}! Деталі нижче 👇") 
-                except TelegramAPIError as e_short_cap: 
-                    logger.warning(f"Не вдалося оновити підпис на короткий перед надсиланням довгого тексту: {e_short_cap}")
+                await edit_caption_if_needed(f"✅ Аналіз завершено, {user_name_escaped}! Деталі нижче 👇", is_final=True)
                 await send_message_in_chunks(bot, chat_id, final_text_to_send, ParseMode.HTML)
         else: 
-            logger.info(f"Повідомлення (ID: {cq_msg.message_id if cq_msg else 'N/A'}), яке мало бути фото, не знайдено або не є фото. Надсилаю результат ({analysis_type}) для {user_name_original} окремим повідомленням.")
+            logger.info(f"Повідомлення (ID: {cq_msg.message_id if cq_msg else 'N/A'}), яке мало бути фото, не вдалося фінально відредагувати або воно не є фото. Надсилаю результат ({analysis_type}) для {user_name_original} окремим повідомленням.")
             await send_message_in_chunks(bot, chat_id, final_text_to_send, ParseMode.HTML)
     except TelegramAPIError as e: 
         logger.error(f"Не вдалося ВІДРЕДАГУВАТИ фінальне повідомлення ({analysis_type}) для {user_name_original} (ID: {cq_msg.message_id if cq_msg else 'N/A'}): {e}. Спроба надіслати новим.")
