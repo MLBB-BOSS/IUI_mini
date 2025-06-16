@@ -470,7 +470,7 @@ class MLBBChatGPT:
         self.class_logger.info(f"Запит до Vision API. Промпт починається з: '{prompt[:70].replace('\n', ' ')}...'")
         
         payload = {
-            "model": "gpt-4o-mini", 
+            "model": "gpt-4o", 
             "messages": [
                 {
                     "role": "user",
@@ -593,7 +593,7 @@ class MLBBChatGPT:
             squad_name=escaped_profile_data.get("squad_name", "Немає"),
         )
         payload = {
-            "model": "gpt-4.1-turbo", 
+            "model": "gpt-4.1", 
             "messages": [{"role": "system", "content": system_prompt_text}],
             "max_tokens": 350, 
             "temperature": 0.75, # Трохи вища температура для креативності
