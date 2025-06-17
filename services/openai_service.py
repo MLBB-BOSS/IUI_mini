@@ -129,7 +129,7 @@ OPTIMIZED_SYSTEM_PROMPT_TEMPLATE = """# MLBB ЕКСПЕРТ IUI 🎮
     *   `<code>тех.терміни</code>` доречно.
     *   Емодзі: для візуалізації та настрою (див. нижче).
     *   Структура: чіткі <b>Заголовки з емодзі</b>, списки (• Основний пункт,  ◦ Підпункт).
-3.  **Зміст:** Точність, актуальність, глибина. Пояснюй складне просто. Будь проактивним: якщо запит нечіткий, запропонуй варіанти.
+3.  **Зміст:** Точність, актуальність, глибина. Пояснюй складне просто. Будь проактивним: якщо запит нечіткий, запропонуй варіанти. **Говорячи про актуальність інформації, не згадуй конкретні роки свого останнього оновлення знань (наприклад, уникай фраз типу 'станом на 2024 рік' або 'в червні 2024'). Посилайся на інформацію як на "поточну" або "загальновідому" без прив'язки до конкретних дат твого навчання.**
 4.  **Персоналізація:** Звертайся до користувача на ім'я.
 
 **Спеціалізація (Теми):**
@@ -179,12 +179,15 @@ class MLBBChatGPT:
         user_name_escaped = html.escape(user_name)
         user_query_escaped = html.escape(user_query)
         try:
-            kyiv_tz = timezone(timedelta(hours=3))
-            current_time_kyiv = datetime.now(kyiv_tz)
-            current_hour = current_time_kyiv.hour
-            time_str = current_time_kyiv.strftime('%H:%M')
+            # Використовуємо UTC для універсальності, оскільки рік не важливий для відображення
+            current_time_utc = datetime.now(timezone.utc)
+            current_hour = current_time_utc.hour
+            # Формат часу без року
+            time_str = current_time_utc.strftime('%H:%M (%Z)')
 
-            if 5 <= current_hour < 12:
+
+            # Привітання на основі UTC часу, якщо локалізація не критична для цього елементу
+            if 5 <= current_hour < 12: # Години для UTC
                 greeting = "Доброго ранку"
             elif 12 <= current_hour < 17:
                 greeting = "Доброго дня"
@@ -193,10 +196,10 @@ class MLBBChatGPT:
             else:
                 greeting = "Доброї ночі"
         except Exception as e:
-            self.class_logger.warning(f"Не вдалося визначити київський час для оптимізованого промпту, використовую UTC: {e}")
-            current_time_utc = datetime.now(timezone.utc)
-            greeting = "Вітаю" # Neutral greeting
-            time_str = current_time_utc.strftime('%H:%M UTC')
+            self.class_logger.warning(f"Не вдалося визначити час для оптимізованого промпту, використовую стандартне привітання: {e}")
+            greeting = "Вітаю"
+            time_str = "не визначено"
+
 
         system_prompt = OPTIMIZED_SYSTEM_PROMPT_TEMPLATE.format(
             user_name_escaped=user_name_escaped,
@@ -207,19 +210,14 @@ class MLBBChatGPT:
         self.class_logger.debug(f"Згенеровано оптимізований системний промпт. Довжина: {len(system_prompt)} символів.")
         return system_prompt
 
-    # Оригінальна функція _create_smart_prompt може бути залишена для порівняння або видалена,
-    # оскільки get_response тепер використовує _create_smart_prompt_optimized
     def _create_smart_prompt(self, user_name: str, user_query: str) -> str:
-        # ... (код оригінального _create_smart_prompt залишається тут, якщо потрібно) ...
-        # Або можна його видалити, якщо він більше не потрібен.
-        # Для цього завдання я залишу його закомментованим, щоб показати, що він був замінений.
         self.class_logger.warning("_create_smart_prompt викликано, але _create_smart_prompt_optimized є рекомендованим.")
         try:
-            kyiv_tz = timezone(timedelta(hours=3)) 
+            kyiv_tz = timezone(timedelta(hours=3))
             current_time_kyiv = datetime.now(kyiv_tz)
             current_hour = current_time_kyiv.hour
-            time_str = current_time_kyiv.strftime('%H:%M')
-            
+            time_str = current_time_kyiv.strftime('%H:%M') # Без року
+
             if 5 <= current_hour < 12:
                 greeting = "Доброго ранку"
             elif 12 <= current_hour < 17:
@@ -231,57 +229,22 @@ class MLBBChatGPT:
         except Exception as e:
             self.class_logger.warning(f"Не вдалося визначити київський час, використовую UTC: {e}")
             current_time_utc = datetime.now(timezone.utc)
-            greeting = "Вітаю" 
-            time_str = current_time_utc.strftime('%H:%M UTC')
+            greeting = "Вітаю"
+            time_str = current_time_utc.strftime('%H:%M UTC') # Без року
 
+        # Старий довгий промпт (скорочено для прикладу)
         system_prompt = f"""# СИСТЕМА: MLBB ЕКСПЕРТ IUI v2.4 🎮
-## ПРОФІЛЬ АСИСТЕНТА
-Ти - IUI (Intelligent User Interface), висококваліфікований AI-експерт та аналітик гри Mobile Legends: Bang Bang (MLBB). Твоя місія – надава[...]
-
+...
 ## КОНТЕКСТ СПІЛКУВАННЯ
 - **Ім'я користувача:** {html.escape(user_name)}
-- **Поточний час:** {greeting.lower()} ({time_str})
-- **Платформа:** Telegram-бот
-
-## ОСНОВНІ ПРИНЦИПИ ТА СТАНДАРТИ ВІДПОВІДІ
-1.  **Точність та Актуальність:** Інформація повинна бути максимально точною та відповідати поточній версії гр[...]
-2.  **Глибина та Деталізація:** Надавай розгорнуті відповіді, пояснюй складні концепції простими словами. Не об[...]
-3.  **Структурованість:** Використовуй чітку структуру: заголовки (виділені жирним та з відповідним емодзі), спи[...]
-4.  **HTML-форматування:** Твої відповіді повинні використовувати базове HTML-форматування для кращої читабельност[...]
-    *   `<b>жирний текст</b>` для заголовків, ключових термінів.
-    *   `<i>курсив</i>` для акцентів або назв (наприклад, <i>Winter Truncheon</i>).
-    *   `<code>кодовий стиль</code>` для ID предметів, специфічних ігрових команд або технічних термінів, якщо доречно.
-    *   Використовуй емодзі для візуального збагачення та передачі настрою (див. розділ "Емодзі").
-    *   Переконуйся, що всі HTML-теги правильно закриті.
-5.  **Проактивність та Повнота:** Якщо запит користувача нечіткий, спробуй уточнити його або надай декілька вар[...]
-6.  **Індивідуальний Підхід:** Звертайся до користувача на ім'я ({html.escape(user_name)}). Адаптуй стиль відповіді під конт[...]
-7.  **Безпека та Етика:** Не надавай шкідливих порад, не використовуй образливу лексику. Дотримуйся етичних норм[...]
-8.  **Мова:** Відповідай українською мовою, дотримуючись граматичних та стилістичних норм.
-
-## СПЕЦІАЛІЗАЦІЯ ТА ТЕМИ
-Ти експерт у таких темах:
-- **Герої:** Детальний аналіз навичок, збірок предметів, контр-піків, синергій, ролі в команді, тактики гри за ко[...]
-- **Предмети:** Опис ефектів, ситуативне застосування, оптимальні збірки для різних ролей та героїв.
-- **Ігрові Механіки:** Фарм, ротації, контроль карти, об'єктиви (Лорд, Черепаха), пуш ліній, захист бази, командні [...]
-- **Мета-гра:** Аналіз поточної мети, популярні герої та стратегії на різних рангах.
-- **Стратегії та Тактики:** Драфт, лайнінг, ганки, макро- та мікро-гра.
-- **Рангова Система:** Поради щодо підняття рангу, особливості гри на різних етапах.
-- **Кіберспорт:** Аналіз професійних матчів (якщо є дані), турнірні стратегії.
-
-## ЕМОДЗІ-ГАЙД (використовуй доречно)
-- Загальні: 💡 (ідея, порада), 🎯 (ціль, стратегія), ⚔️ (бій, тактика), 🛡️ (захист, предмети), 💰 (фарм, золото), 📈 ([...]
-- Специфічні для ролей: 🏹 (Стрілець), 🗡️ (Вбивця), 🧙 (Маг), 💪 (Боєць), 🛡️ (Танк), ❤️ (Підтримка).
-
-## ФОРМАТ ВІДПОВІДІ НА ЗАПИТ КОРИСТУВАЧА
-Починай відповідь з короткого вітання або підтвердження теми, якщо доречно.
-Далі структуруй інформацію, використовуючи заголовки та списки.
-Завершуй відповідь позитивним побажанням або пропозицією допомогти ще.
-
+- **Поточний час:** {greeting.lower()} ({time_str}) 
+...
 ## ЗАПИТ ВІД {html.escape(user_name)}: "{html.escape(user_query)}"
 Твоя експертна та детальна відповідь (ПАМ'ЯТАЙ ПРО HTML, ЕМОДЗІ ТА СТРУКТУРУ):
 """
-        self.class_logger.debug(f"Згенеровано системний промпт для /go. Довжина: {len(system_prompt)} символів.")
+        self.class_logger.debug(f"Згенеровано СТАРИЙ системний промпт для /go. Довжина: {len(system_prompt)} символів.")
         return system_prompt
+
 
     def _beautify_response(self, text: str) -> str:
         self.class_logger.debug(f"Beautify: Початковий текст (перші 100 символів): '{text[:100]}'")
@@ -297,8 +260,8 @@ class MLBBChatGPT:
         def replace_header(match: re.Match) -> str:
             header_text = match.group(1).strip(": ").capitalize()
             specific_keys = ["героїв", "героя", "комбінації", "синергія", "ключові поради", "поточна мета", "предмет", "збірка"]
-            best_emoji = "💡" 
-            
+            best_emoji = "💡"
+
             found_specific = False
             for key in specific_keys:
                 if key in header_text.lower():
@@ -313,10 +276,10 @@ class MLBBChatGPT:
             return f"\n\n{best_emoji} <b>{header_text}</b>:"
 
         text = re.sub(r"^(?:##|###)\s*(.+)", replace_header, text, flags=re.MULTILINE)
-        text = re.sub(r"^\s*[\-\*]\s+", "• ", text, flags=re.MULTILINE) 
+        text = re.sub(r"^\s*[\-\*]\s+", "• ", text, flags=re.MULTILINE)
         text = re.sub(r"^\s*•\s+[\-\*]\s+", "  ◦ ", text, flags=re.MULTILINE)
         text = re.sub(r"\n{3,}", "\n\n", text)
-        
+
         tags_to_balance = ["b", "i", "code"]
         for tag in tags_to_balance:
             open_tag_pattern = re.compile(re.escape(f"<{tag}>"))
@@ -336,28 +299,27 @@ class MLBBChatGPT:
         return text.strip()
 
     async def get_response(self, user_name: str, user_query: str) -> str:
-        user_name_escaped = html.escape(user_name) # For logging
-        user_query_for_payload = html.escape(user_query) # For user message in payload
+        user_name_escaped = html.escape(user_name)
+        user_query_for_payload = html.escape(user_query)
 
         self.class_logger.info(f"Запит до GPT (/go) від '{user_name_escaped}': '{user_query[:100]}...' (використовується оптимізований промпт)")
-        
-        # Використовуємо нову функцію для генерації оптимізованого системного промпту
+
         system_prompt = self._create_smart_prompt_optimized(user_name, user_query)
-        
+
         payload = {
             "model": self.TEXT_MODEL,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_query_for_payload} # Передаємо екранований запит користувача
+                {"role": "user", "content": user_query_for_payload}
             ],
             "max_tokens": 1500,
             "temperature": 0.6,
-            "top_p": 0.9,      
-            "presence_penalty": 0.2, 
-            "frequency_penalty": 0.1 
+            "top_p": 0.9,
+            "presence_penalty": 0.2,
+            "frequency_penalty": 0.1
         }
         self.class_logger.debug(f"Параметри для GPT (/go) з оптимізованим промптом: модель={payload['model']}, temperature={payload['temperature']}, max_tokens={payload['max_tokens']}")
-        
+
         current_session = self.session
         temp_session_created = False
         if not current_session or current_session.closed:
@@ -374,11 +336,11 @@ class MLBBChatGPT:
     async def _execute_openai_request(self, session: ClientSession, payload: Dict[str, Any], user_name_for_error_msg: str) -> str:
         try:
             async with session.post(
-                "https://api.openai.com/v1/chat/completions", 
+                "https://api.openai.com/v1/chat/completions",
                 json=payload,
             ) as response:
-                response_data = await response.json() 
-                if response.status != 200: 
+                response_data = await response.json()
+                if response.status != 200:
                     error_details = response_data.get("error", {}).get("message", str(response_data))
                     self.class_logger.error(f"OpenAI API HTTP помилка: {response.status} - {error_details}")
                     return f"Вибач, {user_name_for_error_msg}, виникли технічні проблеми з доступом до ШІ 😔 (код: {response.status})."
@@ -387,17 +349,17 @@ class MLBBChatGPT:
                 if not content:
                     self.class_logger.error(f"OpenAI API помилка: несподівана структура або порожній контент - {response_data}")
                     return f"Вибач, {user_name_for_error_msg}, ШІ повернув несподівану відповідь 🤯."
-                
+
                 self.class_logger.info(f"Сира відповідь від GPT (перші 100): '{content[:100]}'")
                 return self._beautify_response(content)
-        
-        except aiohttp.ClientConnectionError as e: 
+
+        except aiohttp.ClientConnectionError as e:
             self.class_logger.error(f"OpenAI API помилка з'єднання: {e}", exc_info=True)
             return f"Вибач, {user_name_for_error_msg}, не вдалося з'єднатися з сервісом ШІ 🌐. Спробуй пізніше."
-        except asyncio.TimeoutError: 
+        except asyncio.TimeoutError:
             self.class_logger.error(f"OpenAI API Timeout для запиту.")
             return f"Вибач, {user_name_for_error_msg}, запит до ШІ зайняв забагато часу ⏳."
-        except Exception as e: 
+        except Exception as e:
             self.class_logger.exception(f"Загальна помилка GPT: {e}")
             return f"Не вдалося обробити твій запит, {user_name_for_error_msg} 😕."
 
@@ -410,14 +372,14 @@ class MLBBChatGPT:
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {"type": "image_url", 
+                        {"type": "image_url",
                          "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
                         }
                     ]
                 }
             ],
-            "max_tokens": 2500, # Залишаємо як є, бо JSON може бути об'ємним
-            "temperature": 0.15 # Залишаємо як є для точності Vision
+            "max_tokens": 2500,
+            "temperature": 0.15
         }
         self.class_logger.debug(f"Параметри для Vision API: модель={payload['model']}, max_tokens={payload['max_tokens']}, temperature={payload['temperature']}")
         current_session = self.session
@@ -427,7 +389,7 @@ class MLBBChatGPT:
             current_session = ClientSession(timeout=ClientTimeout(total=90), headers={"Authorization": f"Bearer {self.api_key}"})
             temp_session_created = True
         try:
-            async with current_session.post( 
+            async with current_session.post(
                 "https://api.openai.com/v1/chat/completions",
                 json=payload,
             ) as response:
@@ -442,26 +404,26 @@ class MLBBChatGPT:
             self.class_logger.exception(f"Загальна помилка під час виклику Vision API: {e}")
             return {"error": f"Загальна помилка при аналізі зображення: {str(e)}"}
         finally:
-            if temp_session_created and current_session and not current_session.closed: 
-                await current_session.close() 
+            if temp_session_created and current_session and not current_session.closed:
+                await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для Vision API закрито.")
 
     async def _handle_vision_response(self, response: aiohttp.ClientResponse) -> Optional[Dict[str, Any]]:
         response_text = await response.text()
         try:
-            if response.status != 200: 
+            if response.status != 200:
                 self.class_logger.error(f"Vision API HTTP помилка: {response.status} - {response_text[:300]}")
-                try: 
+                try:
                     error_data = json.loads(response_text)
                     error_message = error_data.get("error", {}).get("message", response_text)
                 except json.JSONDecodeError:
                     error_message = response_text
                 return {"error": f"Помилка Vision API: {response.status}", "details": error_message[:200]}
             result = json.loads(response_text)
-        except json.JSONDecodeError: 
+        except json.JSONDecodeError:
             self.class_logger.error(f"Vision API відповідь не є валідним JSON. Статус: {response.status}. Відповідь: {response_text[:300]}")
             return {"error": "Vision API повернуло не JSON відповідь.", "raw_response": response_text}
-        
+
         content = result.get("choices", [{}])[0].get("message", {}).get("content")
         if not content:
             self.class_logger.error(f"Vision API відповідь без контенту: {result}")
@@ -469,12 +431,10 @@ class MLBBChatGPT:
 
         self.class_logger.info(f"Vision API сира відповідь отримана (перші 150 символів): {content[:150].replace('\n', ' ')}")
         json_str = content.strip()
-        # Покращений пошук JSON, включаючи випадки без ```json ```
         match = re.search(r"```json\s*(\{.*?\})\s*```", json_str, re.DOTALL)
         if match:
             json_str = match.group(1)
         else:
-            # Спроба знайти JSON, якщо він не обрамлений ```json ```
             start_brace = json_str.find("{")
             end_brace = json_str.rfind("}")
             if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
@@ -494,13 +454,12 @@ class MLBBChatGPT:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит на генерацію опису профілю для '{user_name_escaped}'.")
         escaped_profile_data = {
-            # Забезпечуємо, що всі ключі з шаблону присутні, навіть якщо їх немає в profile_data
-            k: html.escape(str(v)) if v is not None else "Не вказано" 
+            k: html.escape(str(v)) if v is not None else "Не вказано"
             for k, v in profile_data.items()
         }
-        
+
         template_payload = {
-            "user_name": user_name_escaped, # Не використовується в новому промпті, але для консистентності
+            "user_name": user_name_escaped,
             "game_nickname": escaped_profile_data.get("game_nickname", "Не вказано"),
             "highest_rank_season": escaped_profile_data.get("highest_rank_season", "Не вказано"),
             "matches_played": escaped_profile_data.get("matches_played", "N/A"),
@@ -510,11 +469,11 @@ class MLBBChatGPT:
         }
 
         system_prompt_text = PROFILE_DESCRIPTION_PROMPT_TEMPLATE.format(**template_payload)
-        
+
         payload = {
             "model": self.TEXT_MODEL,
             "messages": [{"role": "system", "content": system_prompt_text}],
-            "max_tokens": 200, # Скорочено для 2-4 речень
+            "max_tokens": 200,
             "temperature": 0.75,
             "top_p": 0.9,
             "presence_penalty": 0.1,
@@ -530,14 +489,14 @@ class MLBBChatGPT:
         try:
             return await self._execute_description_request(current_session, payload, user_name_escaped)
         finally:
-            if temp_session_created and current_session and not current_session.closed: 
-                await current_session.close() 
+            if temp_session_created and current_session and not current_session.closed:
+                await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для опису профілю закрито.")
 
     async def _execute_description_request(self, session: ClientSession, payload: Dict[str, Any], user_name_for_error_msg: str) -> str:
         try:
-            async with session.post( 
-                "https://api.openai.com/v1/chat/completions", 
+            async with session.post(
+                "https://api.openai.com/v1/chat/completions",
                 json=payload,
             ) as response:
                 response_data = await response.json()
@@ -545,15 +504,15 @@ class MLBBChatGPT:
                     error_details = response_data.get("error", {}).get("message", str(response_data))
                     self.class_logger.error(f"OpenAI API HTTP помилка (опис): {response.status} - {error_details}")
                     return f"<i>Не вдалося згенерувати опис для {user_name_for_error_msg} (код: {response.status}).</i>"
-                
+
                 content = response_data.get("choices", [{}])[0].get("message", {}).get("content")
                 if not content:
                     self.class_logger.error(f"OpenAI API помилка (опис): порожній контент - {response_data}")
                     return f"<i>Не вдалося отримати опис від ШІ для {user_name_for_error_msg}.</i>"
-                
+
                 self.class_logger.info(f"Згенеровано опис (перші 100): '{content[:100]}'")
-                return content.strip() # Повертаємо чистий текст без додаткової обробки HTML тут
-        
+                return content.strip()
+
         except aiohttp.ClientConnectionError as e:
             self.class_logger.error(f"OpenAI API помилка з'єднання (опис): {e}", exc_info=True)
             return f"<i>Не вдалося з'єднатися з сервісом ШІ для генерації опису ({user_name_for_error_msg}).</i>"
@@ -567,7 +526,7 @@ class MLBBChatGPT:
     async def get_player_stats_description(self, user_name: str, stats_data: Dict[str, Any]) -> str:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит на генерацію опису статистики для '{user_name_escaped}' (з унікальними даними).")
-        
+
         main_ind = stats_data.get("main_indicators", {})
         details_p = stats_data.get("details_panel", {})
         ach_left = stats_data.get("achievements_left_column", {})
@@ -584,7 +543,7 @@ class MLBBChatGPT:
                 try:
                     return f"{float(val):.{precision}f}"
                 except (ValueError, TypeError):
-                    return html.escape(str(val)) 
+                    return html.escape(str(val))
             return html.escape(str(val))
 
         template_data = {
@@ -607,7 +566,7 @@ class MLBBChatGPT:
             "damage_per_gold_ratio": get_value(derived_s, 'damage_per_gold_ratio', default_val="N/A", precision=2),
             "mvp_win_share_percent": get_value(derived_s, 'mvp_win_share_percent', default_val="N/A", precision=2),
         }
-        
+
         try:
             system_prompt_text = PLAYER_STATS_DESCRIPTION_PROMPT_TEMPLATE.format(**template_data)
         except KeyError as e:
@@ -615,23 +574,23 @@ class MLBBChatGPT:
             return f"<i>Помилка підготовки даних для опису статистики ({user_name_escaped}). Ключ: {e}</i>"
 
         payload = {
-            "model": self.TEXT_MODEL, 
+            "model": self.TEXT_MODEL,
             "messages": [{"role": "system", "content": system_prompt_text}],
-            "max_tokens": 250, # Скорочено для 3-5 речень
-            "temperature": 0.73, 
+            "max_tokens": 250,
+            "temperature": 0.73,
             "top_p": 0.9,
             "presence_penalty": 0.15,
             "frequency_penalty": 0.15
         }
         self.class_logger.debug(f"Параметри для опису статистики (з derived): модель={payload['model']}, temp={payload['temperature']}, max_tokens={payload['max_tokens']}")
-        
+
         current_session = self.session
         temp_session_created = False
         if not current_session or current_session.closed:
             self.class_logger.warning("Aiohttp сесія для опису статистики була закрита або відсутня. Створюю тимчасову сесію.")
             current_session = ClientSession(timeout=ClientTimeout(total=90), headers={"Authorization": f"Bearer {self.api_key}"})
             temp_session_created = True
-        
+
         try:
             return await self._execute_description_request(current_session, payload, user_name_escaped)
         finally:
