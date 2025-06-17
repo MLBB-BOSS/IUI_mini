@@ -152,7 +152,7 @@ OPTIMIZED_SYSTEM_PROMPT_TEMPLATE = """# MLBB ЕКСПЕРТ IUI 🎮
 
 class MLBBChatGPT:
     TEXT_MODEL = "gpt-4.1"
-    VISION_MODEL = "gpt-4.1-mini"
+    VISION_MODEL = "gpt-4.1"
 
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
