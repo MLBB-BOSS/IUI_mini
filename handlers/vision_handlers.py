@@ -21,7 +21,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton,
 
 from config import OPENAI_API_KEY # logger тепер має бути з logging
 from services.openai_service import (MLBBChatGPT, PLAYER_STATS_PROMPT,
-                                     PROFILE_SCREENSHOT_PROMPT)
+                                     PROFILE_SCREENSHOT_PROMPT, KESTER_TEXT_EXTRACTION_PROMPT) # <--- НОВИЙ ІМПОРТ
 from states.vision_states import VisionAnalysisStates
 from utils.message_utils import (MAX_TELEGRAM_MESSAGE_LENGTH,
                                  send_message_in_chunks)
@@ -194,6 +194,37 @@ async def cmd_analyze_player_stats(message: Message, state: FSMContext) -> None:
         "Якщо передумаєш, просто надішли команду /cancel."
     )
     await message.reply(reply_text, parse_mode=ParseMode.HTML)
+
+# +++ НОВИЙ ОБРОБНИК КОМАНДИ /Kester +++
+async def cmd_kester_text_extraction(message: Message, state: FSMContext) -> None:
+    """
+    Ініціює процес витягнення та перекладу тексту зі скріншота.
+    Спеціальна команда для допомоги другу 'Dark Moon'.
+    """
+    if not message.from_user:
+        logger.warning("Команда /Kester викликана без інформації про користувача.")
+        await message.reply("Не вдалося отримати інформацію про користувача.")
+        return
+
+    user_first_name = message.from_user.first_name
+    user_name_escaped = html.escape(user_first_name)
+
+    await state.update_data(
+        analysis_type="kester_extraction",
+        vision_prompt=KESTER_TEXT_EXTRACTION_PROMPT,
+        original_user_name=user_first_name
+    )
+    await state.set_state(VisionAnalysisStates.awaiting_profile_screenshot)
+    
+    reply_text = (
+        f"Привіт, <b>{user_name_escaped}</b>! 👋\n"
+        "Це персональна команда для допомоги <b>Dark Moon</b> (та його друзям 😉).\n\n"
+        "Надішли мені скріншот, і я витягну з нього весь текст та перекладу його українською.\n"
+        "Для скасування введи /cancel."
+    )
+    await message.reply(reply_text, parse_mode=ParseMode.HTML)
+# +++ КІНЕЦЬ НОВОГО ОБРОБНИКА +++
+
 
 async def handle_profile_screenshot(message: Message, state: FSMContext, bot: Bot) -> None:
     """
@@ -386,6 +417,33 @@ def format_unique_analytics_text(user_name: str, derived_data: Optional[Dict[str
         return f"Для гравця {user_name_escaped} недостатньо даних для розрахунку унікальної аналітики."
     return "\n".join(parts)
 
+# +++ НОВА ФУНКЦІЯ ФОРМАТУВАННЯ ДЛЯ /Kester +++
+def format_kester_result(user_name: str, data: Dict[str, Any]) -> str:
+    """
+    Форматує результат витягнення та перекладу тексту для команди /Kester.
+    """
+    user_name_escaped = html.escape(user_name)
+    
+    if not data or not isinstance(data, dict):
+        return f"Не вдалося отримати відповідь від сервісу аналізу для {user_name_escaped}."
+
+    translated_text = data.get("translated_text")
+
+    if translated_text is None:
+        raw_response = data.get("raw_response", str(data))
+        logger.warning(f"Ключ 'translated_text' відсутній у відповіді для {user_name_escaped}. Відповідь: {raw_response}")
+        return (f"На жаль, {user_name_escaped}, не вдалося витягнути перекладений текст.\n"
+                f"<i>Схоже, сервіс повернув неочікувану відповідь.</i>")
+    
+    if not translated_text.strip():
+        return f"Не вдалося знайти текст на зображенні, {user_name_escaped}."
+
+    # Використовуємо ім'я Dark Moon у відповіді для персоналізації
+    return (f"<b>Для Dark Moon (від {user_name_escaped})! Ось текст зі скріншота:</b>\n\n"
+            f"<i>{html.escape(translated_text)}</i>")
+# +++ КІНЕЦЬ НОВОЇ ФУНКЦІЇ +++
+
+
 # === ОСНОВНИЙ ОБРОБНИК АНАЛІЗУ ЗОБРАЖЕННЯ ===
 
 async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state: FSMContext, bot: Bot) -> None:
@@ -506,7 +564,7 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
              return
         await callback_query.answer("Розпочато аналіз...")
     except TelegramAPIError as e: # Ловимо помилки від edit_message_reply_markup або першого _edit_caption_robust
-        logger.error(f"Не вдалося ініціалізувати аналіз (видалити кнопки або встановити перший підпис) для {user_name_original}: {e}", exc_info=True)
+        logger.error(f"Не вдалося ініціалізувати аналіз (видалити кнопки або встановити перший підпис) для {user_name_original}: {e}")
         try: await callback_query.answer("Помилка ініціалізації аналізу. Спробуйте ще раз.", show_alert=True)
         except TelegramAPIError: pass 
         await state.clear()
@@ -589,6 +647,17 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                     
                     detailed_stats_formatted = format_detailed_stats_text(user_name_original, analysis_result_json)
                     full_analysis_text_parts.append(f"\n\n{detailed_stats_formatted}")
+                
+                # +++ НОВА ЛОГІКА ДЛЯ /Kester +++
+                elif analysis_type == "kester_extraction":
+                    if not await _edit_caption_robust(f"📝 Витягую та перекладаю текст, {user_name_escaped}..."):
+                        can_edit_cq_msg_flag = False
+                        raise ValueError("Повідомлення недоступне перед форматуванням результату Kester.")
+                    
+                    formatted_text = format_kester_result(user_name_original, analysis_result_json)
+                    full_analysis_text_parts.append(formatted_text)
+                # +++ КІНЕЦЬ НОВОЇ ЛОГІКИ +++
+
                 else: 
                     logger.warning(f"Невідомий тип аналізу: '{analysis_type}' для {user_name_original}.")
                     full_analysis_text_parts.append(f"Не вдалося обробити результати: невідомий тип аналізу, {user_name_escaped}.")
@@ -599,7 +668,7 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
         if not full_analysis_text_parts: # Якщо помилка сталася до формування тексту
             full_analysis_text_parts.append(f"Пробач, {user_name_escaped}, виникла проблема з доступом до файлу або OpenAI.")
     except ValueError as e: # Ловить помилки від наших перевірок або неможливості обробки даних
-        logger.warning(f"Помилка значення для {user_name_original} (можливо, повідомлення для редагування недоступне або дані некоректні): {e}", exc_info=True)
+        logger.warning(f"Помилка значення для {user_name_original} (можливо, повідомлення для редагування недоступне або дані некоректні): {e}")
         can_edit_cq_msg_flag = False 
         if not full_analysis_text_parts: 
             full_analysis_text_parts.append(f"На жаль, {user_name_escaped}, не вдалося коректно обробити запит. {html.escape(str(e))}")
@@ -626,7 +695,7 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
                     await send_message_in_chunks(bot, chat_id_from_cq, final_text_to_send, ParseMode.HTML, reply_to_message_id=message_id_from_cq) 
             else: 
                 # Текст ЗАДОВГИЙ.
-                logger.warning(f"Підпис до фото ({analysis_type}) для {user_name_original} задовгий ({len(final_text_to_send)} симв.). Оновлюю підпис фото і надсилаю текст окремо.")
+                logger.warning(f"Підпис до фото ({analysis_type}) для {user_name_original} задовгий ({len(final_text_to_send)} симв.). Оновлюю підпис фото і надсилаю деталі окремо.")
                 final_caption_for_photo = f"✅ Аналіз завершено, {user_name_escaped}! Деталі нижче 👇"
                 await _edit_caption_robust(final_caption_for_photo, is_final_edit=True) # Встановлюємо короткий підпис
                 # Надсилаємо повний довгий текст окремим повідомленням, ВІДПОВІДАЮЧИ на фото-повідомлення
@@ -675,7 +744,7 @@ async def delete_bot_message_callback(callback_query: CallbackQuery, state: FSMC
         else:
             logger.info(f"Повідомлення бота (ID: {callback_query.message.message_id}) видалено користувачем (ID: {callback_query.from_user.id}). Поточний стан: {current_state_name}")
     except TelegramAPIError as e:
-        logger.error(f"Помилка видалення повідомлення бота (ID: {callback_query.message.message_id}) для користувача (ID: {callback_query.from_user.id}): {e}", exc_info=True)
+        logger.error(f"Помилка видалення повідомлення бота (ID: {callback_query.message.message_id}) для користувача (ID: {callback_query.from_user.id}): {e}")
         await callback_query.answer("Не вдалося видалити повідомлення. Спробуйте ще раз.", show_alert=True)
 
 async def cancel_analysis(message: Message, state: FSMContext, bot: Bot) -> None:
@@ -704,7 +773,7 @@ async def cancel_analysis(message: Message, state: FSMContext, bot: Bot) -> None
                 f"при скасуванні для {user_name_escaped}: {e}"
             )
     await state.clear()
-    await message.reply(f"Аналіз зображення скасовано, {user_name_escaped}. Ти можеш продовжити використовувати команду /go або іншу.", parse_mode=ParseMode.HTML)
+    await message.reply(f"Аналіз зображення скасовано, {user_name_escaped}. Ти можеш продовжити використовувати команду /go або інші команди.")
 
 async def handle_wrong_input_for_analysis(
     message: Message, 
@@ -788,6 +857,8 @@ def register_vision_handlers(
     # Команди для початку аналізу
     dp.message.register(cmd_analyze_profile, Command("analyzeprofile"))
     dp.message.register(cmd_analyze_player_stats, Command("analyzestats"))
+    # +++ РЕЄСТРАЦІЯ НОВОЇ КОМАНДИ +++
+    dp.message.register(cmd_kester_text_extraction, Command("Kester"))
     
     # Обробка отримання фото у відповідному стані
     dp.message.register(handle_profile_screenshot, VisionAnalysisStates.awaiting_profile_screenshot, F.photo)
@@ -820,4 +891,4 @@ def register_vision_handlers(
     dp.message.register(wrong_input_wrapper, VisionAnalysisStates.awaiting_profile_screenshot)
     dp.message.register(wrong_input_wrapper, VisionAnalysisStates.awaiting_analysis_trigger)
     
-    logger.info("Обробники аналізу зображень (профіль, статистика гравця) успішно зареєстровано.")
+    logger.info("Обробники аналізу зображень (профіль, статистика, витягнення тексту) успішно зареєстровано.")
