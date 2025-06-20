@@ -20,6 +20,7 @@ from config import (
     CONVERSATIONAL_TRIGGERS, MAX_CHAT_HISTORY_LENGTH, CONVERSATIONAL_COOLDOWN_SECONDS,
     PARTY_TRIGGER_PHRASES, PARTY_LOBBY_ROLES, PARTY_LOBBY_COOLDOWN_SECONDS
 )
+# Переконуємось, що всі необхідні клавіатури імпортуються
 from keyboards.inline_keyboards import (
     create_party_confirmation_keyboard, create_role_selection_keyboard,
     create_party_lobby_keyboard
@@ -43,7 +44,6 @@ general_router = Router()
 # 1. Обробники команд (найвищий пріоритет)
 @general_router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
-    # ... (код з попередньої версії)
     await state.clear()
     user = message.from_user
     user_name_escaped = html.escape(user.first_name if user else "Гравець")
@@ -63,7 +63,6 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 
 @general_router.message(Command("go"))
 async def cmd_go(message: Message, state: FSMContext, bot: Bot):
-    # ... (код з попередньої версії)
     await state.clear()
     user = message.from_user
     user_name_escaped = html.escape(user.first_name if user else "Гравець")
@@ -88,7 +87,7 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
 # 2. Обробник текстових повідомлень (ловить все, що не є командою)
 @general_router.message(F.text)
 async def handle_text_messages(message: Message, bot: Bot, state: FSMContext):
-    # ... (код з попередньої версії)
+    if not message.text or message.text.startswith('/') or not message.from_user: return
     text_lower = message.text.lower()
     if any(phrase in text_lower for phrase in PARTY_TRIGGER_PHRASES):
         await handle_party_request(message, bot, state)
@@ -96,9 +95,8 @@ async def handle_text_messages(message: Message, bot: Bot, state: FSMContext):
         await handle_conversational_triggers(message, bot)
 
 
-# === БЛОК ЛОГІКИ "ПАТІ-МЕНЕДЖЕРА 2.0" (з попередньої версії) ===
+# === БЛОК ЛОГІКИ "ПАТІ-МЕНЕДЖЕРА 2.0" ===
 async def handle_party_request(message: Message, bot: Bot, state: FSMContext):
-    # ... (код з попередньої версії)
     chat_id = message.chat.id
     cooldown_key = f"party_{chat_id}"
     if chat_id in active_lobbies:
@@ -113,14 +111,12 @@ async def handle_party_request(message: Message, bot: Bot, state: FSMContext):
 
 @general_router.callback_query(F.data == "party_create_no")
 async def on_party_creation_no(callback_query: CallbackQuery):
-    # ... (код з попередньої версії)
     await callback_query.message.edit_text("Гаразд, звертайся, якщо передумаєш! 😉")
     await callback_query.answer()
 
 
 @general_router.callback_query(F.data == "party_create_yes")
 async def on_party_creation_yes(callback_query: CallbackQuery, state: FSMContext):
-    # ... (код з попередньої версії)
     await callback_query.message.edit_text(
         "Супер! Обері свою роль, щоб я міг створити лобі:",
         reply_markup=create_role_selection_keyboard(PARTY_LOBBY_ROLES)
@@ -131,7 +127,6 @@ async def on_party_creation_yes(callback_query: CallbackQuery, state: FSMContext
 
 @general_router.callback_query(PartyCreation.waiting_for_initiator_role, F.data.startswith("party_role_select_"))
 async def on_initiator_role_select(callback_query: CallbackQuery, state: FSMContext, bot: Bot):
-    # ... (код з попередньої версії)
     await state.clear()
     user = callback_query.from_user
     chat_id = callback_query.message.chat.id
@@ -162,7 +157,6 @@ async def on_initiator_role_select(callback_query: CallbackQuery, state: FSMCont
 
 @general_router.callback_query(F.data == "join_party")
 async def on_join_party(callback_query: CallbackQuery, state: FSMContext):
-    # ... (код з попередньої версії)
     user = callback_query.from_user
     chat_id = callback_query.message.chat.id
     lobby = active_lobbies.get(chat_id)
@@ -185,7 +179,6 @@ async def on_join_party(callback_query: CallbackQuery, state: FSMContext):
 
 @general_router.callback_query(PartyCreation.waiting_for_joiner_role, F.data.startswith("party_role_select_"))
 async def on_joiner_role_select(callback_query: CallbackQuery, state: FSMContext, bot: Bot):
-    # ... (код з попередньої версії)
     user = callback_query.from_user
     chat_id = callback_query.message.chat.id
     selected_role = callback_query.data.split("party_role_select_")[1]
@@ -229,7 +222,6 @@ async def on_joiner_role_select(callback_query: CallbackQuery, state: FSMContext
 
 
 async def handle_conversational_triggers(message: Message, bot: Bot):
-    # ... (код з попередньої версії)
     text_lower = message.text.lower()
     chat_id = message.chat.id
     user_name = message.from_user.first_name
@@ -264,6 +256,36 @@ async def handle_conversational_triggers(message: Message, bot: Bot):
         except Exception as e:
             logger.exception(f"Помилка генерації адаптивної відповіді в чаті {chat_id}: {e}")
 
+# === ВІДНОВЛЕНИЙ ГЛОБАЛЬНИЙ ОБРОБНИК ПОМИЛОК ===
+async def error_handler(event: types.ErrorEvent, bot: Bot):
+    """
+    Глобальний обробник помилок. Логує помилку та надсилає повідомлення користувачу.
+    """
+    logger.error(f"Глобальна помилка: {event.exception}", exc_info=event.exception)
+    
+    chat_id: Optional[int] = None
+    user_name: str = "друже"
+    update = event.update
+
+    if update.message and update.message.chat:
+        chat_id = update.message.chat.id
+        if update.message.from_user:
+            user_name = html.escape(update.message.from_user.first_name or "Гравець")
+    elif update.callback_query and update.callback_query.message and update.callback_query.message.chat:
+        chat_id = update.callback_query.message.chat.id
+        if update.callback_query.from_user:
+            user_name = html.escape(update.callback_query.from_user.first_name or "Гравець")
+        try:
+            # Намагаємось відповісти на колбек, щоб він не "зависав"
+            await update.callback_query.answer("Сталася помилка...", show_alert=True)
+        except TelegramAPIError:
+            pass
+
+    if chat_id:
+        try:
+            await bot.send_message(chat_id, f"Вибач, {user_name}, сталася непередбачена системна помилка 😔")
+        except TelegramAPIError as e:
+            logger.error(f"Не вдалося надіслати повідомлення про системну помилку в чат {chat_id}: {e}")
 
 def register_general_handlers(dp: Dispatcher):
     """Реєструє всі загальні обробники у головному диспетчері."""
