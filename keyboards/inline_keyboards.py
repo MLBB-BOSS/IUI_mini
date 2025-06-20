@@ -1,33 +1,51 @@
+"""
+Модуль для створення всіх інлайн-клавіатур, що використовуються в боті.
+Повністю асинхронний та оптимізований для aiogram 3.x.
+"""
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from typing import List, Dict, Optional
 
-# --- НОВА КЛАВІАТУРА ПІДТВЕРДЖЕННЯ ---
 def create_party_confirmation_keyboard() -> InlineKeyboardMarkup:
-    """Створює клавіатуру для підтвердження дії створення паті."""
+    """
+    Створює клавіатуру для підтвердження наміру користувача створити паті.
+    Використовується на першому кроці FSM.
+    """
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Так, допомогти", callback_data="party_create_confirm")
     builder.button(text="❌ Ні, я сам", callback_data="party_create_cancel")
     return builder.as_markup()
 
 def create_role_selection_keyboard(available_roles: List[str]) -> InlineKeyboardMarkup:
-    """Створює клавіатуру для вибору ролі."""
+    """
+    Створює клавіатуру для вибору ролі ініціатором паті.
+
+    Args:
+        available_roles: Список доступних ролей для вибору.
+    """
     builder = InlineKeyboardBuilder()
+    # Карта емодзі для візуального покращення
+    role_emoji_map = {
+        "Танк/Підтримка": "🛡️", "Лісник": "🌳", "Маг (мід)": "🧙",
+        "Стрілець (золото)": "🏹", "Боєць (досвід)": "⚔️"
+    }
     for role in available_roles:
-        # Додамо емодзі для краси
-        role_emoji_map = {
-            "Танк/Підтримка": "🛡️", "Лісник": "🌳", "Маг (мід)": "🧙",
-            "Стрілець (золото)": "🏹", "Боєць (досвід)": "⚔️"
-        }
         emoji = role_emoji_map.get(role, "🔹")
         builder.button(text=f"{emoji} {role}", callback_data=f"party_role_select_{role}")
-    builder.adjust(1) # По одній кнопці в ряд для кращої читабельності
+    builder.adjust(1)  # По одній кнопці в ряд для максимальної зручності на мобільних
     return builder.as_markup()
 
-# --- Клавіатура лобі (без змін, але буде використовуватись по-новому) ---
+
 def create_dynamic_lobby_keyboard(lobby_id: str, user_id: int, lobby_data: Dict) -> InlineKeyboardMarkup:
     """
-    Створює динамічну клавіатуру для лобі, враховуючи роль користувача.
+    Створює динамічну клавіатуру для активного лобі.
+    Кнопки змінюються залежно від того, чи є користувач лідером, учасником,
+    чи стороннім спостерігачем.
+
+    Args:
+        lobby_id: Унікальний ідентифікатор лобі.
+        user_id: ID користувача, для якого генерується клавіатура.
+        lobby_data: Словник з даними про лобі.
     """
     builder = InlineKeyboardBuilder()
     players = lobby_data.get("players", {})
@@ -43,8 +61,28 @@ def create_dynamic_lobby_keyboard(lobby_id: str, user_id: int, lobby_data: Dict)
 
     # Кнопка "Скасувати" видима тільки для лідера паті
     if user_id == leader_id:
-        builder.button(text="🚫 Скасувати лобі", callback_data=f"party_cancel:{lobby_id}")
+        builder.button(text="🚫 Скасувати лобі", callback_data=f"party_cancel_lobby:{lobby_id}")
 
     return builder.as_markup()
 
-# ... решта клавіатур без змін ...
+# --- Існуючі клавіатури ---
+def create_party_size_keyboard() -> InlineKeyboardMarkup:
+    """Створює клавіатуру для вибору формату паті."""
+    builder = InlineKeyboardBuilder()
+    sizes = {"Фулл (5)": 5, "Квадро (4)": 4, "Тріо (3)": 3, "Дуо (2)": 2}
+    for text, size in sizes.items():
+        builder.button(text=text, callback_data=f"party_size_{size}")
+    builder.adjust(2)
+    return builder.as_markup()
+
+def create_lobby_lifetime_keyboard() -> InlineKeyboardMarkup:
+    """Створює клавіатуру для вибору часу життя лобі."""
+    builder = InlineKeyboardBuilder()
+    lifetimes = {
+        "30 хвилин": 1800, "1 година": 3600, "3 години": 10800,
+        "6 годин": 21600, "12 годин": 43200
+    }
+    for text, seconds in lifetimes.items():
+        builder.button(text=text, callback_data=f"party_lifetime_{seconds}")
+    builder.adjust(2)
+    return builder.as_markup()
