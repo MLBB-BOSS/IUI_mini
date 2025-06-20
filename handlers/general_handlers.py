@@ -2,9 +2,10 @@ import html
 import logging
 import time
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Dict, Deque, List
+from collections import defaultdict
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, Update
@@ -12,23 +13,29 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 
-
 # Імпорти з проєкту
-# Потрібно буде налаштувати правильні шляхи після остаточної структури
-from config import ADMIN_USER_ID, WELCOME_IMAGE_URL, OPENAI_API_KEY, logger # Використовуємо logger з config
+from config import (
+    ADMIN_USER_ID, WELCOME_IMAGE_URL, OPENAI_API_KEY, logger,
+    CONVERSATIONAL_TRIGGERS, MAX_CHAT_HISTORY_LENGTH
+)
 from services.openai_service import MLBBChatGPT
 from utils.message_utils import send_message_in_chunks
-# from ..config import ADMIN_USER_ID, WELCOME_IMAGE_URL, OPENAI_API_KEY, logger # Приклад відносного імпорту
-# from ..services.openai_service import MLBBChatGPT
-# from ..utils.message_utils import send_message_in_chunks
+
+# === СХОВИЩЕ ІСТОРІЇ ДІАЛОГІВ ===
+# Використовуємо defaultdict для автоматичного створення deque для нових чатів.
+# deque з maxlen - ефективна структура для зберігання останніх N повідомлень.
+chat_histories: Dict[int, Deque[Dict[str, str]]] = defaultdict(
+    lambda: deque(maxlen=MAX_CHAT_HISTORY_LENGTH)
+)
+
+# Створюємо роутер для загальних обробників
+general_router = Router()
 
 
-# Ініціалізація логера для цього файлу, якщо не використовується глобальний
-# logger = logging.getLogger(__name__)
-
-async def cmd_start(message: Message, state: FSMContext, bot: Bot): # Додано bot для використання в send_message_in_chunks
+@general_router.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     """Обробник команди /start. Надсилає вітальне повідомлення з зображенням."""
-    await state.clear() # Очищаємо стан, якщо він був
+    await state.clear()
     user = message.from_user
     user_name_escaped = html.escape(user.first_name if user else "Гравець")
     user_id = user.id if user else "невідомий"
@@ -64,7 +71,6 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot): # Додан
 """
 
     try:
-        # Використовуємо bot переданий в аргументах або bot з message.bot
         await message.answer_photo(
             photo=WELCOME_IMAGE_URL,
             caption=welcome_caption,
@@ -73,7 +79,6 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot): # Додан
         logger.info(f"Привітання з зображенням для {user_name_escaped} надіслано.")
     except TelegramAPIError as e:
         logger.error(f"Не вдалося надіслати привітальне фото для {user_name_escaped}: {e}. Спроба надіслати текст.")
-        # Формуємо резервний текст без фото
         fallback_text = f"""{greeting_msg}, <b>{user_name_escaped}</b>! {emoji}
 Ласкаво просимо до <b>MLBB IUI mini</b>! 🎮
 Я твій AI-помічник для всього, що стосується світу Mobile Legends.
@@ -90,13 +95,13 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot): # Додан
             logger.error(f"Не вдалося надіслати навіть резервне текстове привітання для {user_name_escaped}: {e_text}")
 
 
-async def cmd_go(message: Message, state: FSMContext, bot: Bot): # Додано bot для send_message_in_chunks
+@general_router.message(Command("go"))
+async def cmd_go(message: Message, state: FSMContext, bot: Bot):
     """Обробник команди /go. Надсилає запит до GPT та відповідь частинами, якщо потрібно."""
-    await state.clear() # Очищаємо стан, якщо він був
+    await state.clear()
     user = message.from_user
     user_name_escaped = html.escape(user.first_name if user else "Гравець")
     user_id = user.id if user else "невідомий"
-    # Вилучаємо команду /go та зайві пробіли
     user_query = message.text.replace("/go", "", 1).strip() if message.text else ""
 
     logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) зробив запит з /go: '{user_query}'")
@@ -110,7 +115,6 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot): # Додано 
         )
         return
 
-    # Повідомлення про обробку
     thinking_messages = [
         f"🤔 {user_name_escaped}, аналізую твій запит...",
         f"🧠 Обробляю інформацію, {user_name_escaped}, щоб дати кращу пораду!",
@@ -124,28 +128,25 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot): # Додано 
         logger.error(f"Не вдалося надіслати 'thinking_msg' для {user_name_escaped}: {e}")
 
     start_time = time.time()
-    response_text = f"Вибач, {user_name_escaped}, сталася непередбачена помилка при генерації відповіді. 😔" # Default error
+    response_text = f"Вибач, {user_name_escaped}, сталася непередбачена помилка при генерації відповіді. 😔"
     try:
-        # Використовуємо OPENAI_API_KEY з конфігурації
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
             response_text = await gpt.get_response(user_name_escaped, user_query)
     except Exception as e:
         logger.exception(f"Критична помилка MLBBChatGPT для '{user_query}' від {user_name_escaped}: {e}")
-        # response_text вже встановлено на повідомлення про помилку
 
     processing_time = time.time() - start_time
     logger.info(f"Час обробки /go для '{user_query}' від {user_name_escaped}: {processing_time:.2f}с")
 
     admin_info = ""
-    # Використовуємо ADMIN_USER_ID з конфігурації
     if user_id == ADMIN_USER_ID:
-        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | v2.8 GPT (gpt-4.1)</i>" # Версію можна також винести в конфіг
+        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | v2.8 GPT (gpt-4.1)</i>"
 
     full_response_to_send = f"{response_text}{admin_info}"
 
     try:
         await send_message_in_chunks(
-            bot_instance=bot, # Використовуємо переданий екземпляр бота
+            bot_instance=bot,
             chat_id=message.chat.id,
             text=full_response_to_send,
             parse_mode=ParseMode.HTML,
@@ -154,26 +155,68 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot): # Додано 
         logger.info(f"Відповідь /go для {user_name_escaped} успішно надіслано (можливо, частинами).")
     except Exception as e:
         logger.error(f"Не вдалося надіслати відповідь /go для {user_name_escaped} навіть частинами: {e}", exc_info=True)
-        try:
-            final_error_msg = f"Вибач, {user_name_escaped}, сталася критична помилка при відправці відповіді. Спробуйте пізніше. (Код: GO_SEND_FAIL)"
-            if thinking_msg:
-                 try:
-                    await thinking_msg.edit_text(final_error_msg, parse_mode=None)
-                 except TelegramAPIError: 
-                    await message.reply(final_error_msg, parse_mode=None)
-            else: 
-                await message.reply(final_error_msg, parse_mode=None)
-        except Exception as final_err_send:
-            logger.error(f"Зовсім не вдалося надіслати фінальне повідомлення про помилку для {user_name_escaped}: {final_err_send}")
+        # Спроба надіслати фінальне повідомлення про помилку
+        pass
 
-async def error_handler(update_event: Update, exception: Exception, bot: Bot): # Додано bot
+
+@general_router.message(F.text)
+async def handle_trigger_messages(message: Message, bot: Bot):
+    """
+    Обробляє звичайні текстові повідомлення, шукає в них тригери
+    і генерує контекстну відповідь від AI.
+    """
+    if not message.text or message.text.startswith('/'):
+        return # Ігноруємо команди та порожні повідомлення
+
+    text_lower = message.text.lower()
+    chat_id = message.chat.id
+    user = message.from_user
+    user_name = user.first_name if user else "Друже"
+
+    # Завжди оновлюємо історію поточним повідомленням для повноти контексту
+    chat_histories[chat_id].append({"role": "user", "content": message.text})
+
+    # Шукаємо відповідний тригер
+    matched_trigger_mood = None
+    for trigger, mood in CONVERSATIONAL_TRIGGERS.items():
+        if trigger in text_lower:
+            matched_trigger_mood = mood
+            logger.info(f"В чаті {chat_id} знайдено тригер '{trigger}' від '{user_name}'.")
+            break # Знайшли перший, виходимо
+
+    if matched_trigger_mood:
+        try:
+            # Передаємо копію історії в сервіс, щоб уникнути race conditions
+            history_for_api = list(chat_histories[chat_id])
+
+            async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+                reply_text = await gpt.generate_conversational_reply(
+                    user_name=user_name,
+                    chat_history=history_for_api,
+                    trigger_mood=matched_trigger_mood
+                )
+
+            if reply_text and "<i>" not in reply_text: # Проста перевірка на повідомлення про помилку від сервісу
+                # Додаємо відповідь бота в історію
+                chat_histories[chat_id].append({"role": "assistant", "content": reply_text})
+                await message.reply(reply_text)
+                logger.info(f"Надіслано розмовну відповідь в чат {chat_id}.")
+            elif reply_text:
+                 logger.warning(f"Сервіс повернув повідомлення, схоже на помилку, для чату {chat_id}: {reply_text}")
+            else:
+                 logger.error(f"Сервіс повернув порожню відповідь для чату {chat_id}.")
+
+        except Exception as e:
+            logger.exception(f"Помилка під час обробки тригерного повідомлення в чаті {chat_id}: {e}")
+
+
+async def error_handler(update_event: Update, exception: Exception, bot: Bot):
     """Глобальний обробник помилок."""
     logger.error(f"Глобальна помилка в error_handler: {exception} для update: {update_event.model_dump_json(exclude_none=True)}", exc_info=True)
 
     chat_id: Optional[int] = None
-    user_name: str = "друже" # Default user name
+    user_name: str = "друже"
 
-    # Спробуємо отримати chat_id та user_name з різних типів апдейтів
     if update_event.message and update_event.message.chat:
         chat_id = update_event.message.chat.id
         if update_event.message.from_user:
@@ -183,25 +226,24 @@ async def error_handler(update_event: Update, exception: Exception, bot: Bot): #
         if update_event.callback_query.from_user:
             user_name = html.escape(update_event.callback_query.from_user.first_name or "Гравець")
         try:
-            # Підтверджуємо отримання колбеку, щоб прибрати "завантаження" у клієнта
             await update_event.callback_query.answer("Сталася помилка...", show_alert=False)
-        except Exception: pass # Ігноруємо, якщо відповідь на колбек не вдалася
+        except Exception: pass
 
-    error_message_text = f"Вибач, {user_name}, сталася непередбачена системна помилка 😔\nСпробуй, будь ласка, ще раз через хвилину або дві."
+    error_message_text = f"Вибач, {user_name}, сталася непередбачена системна помилка 😔\nСпробуй, будь ласка, ще раз через хвилину."
 
     if chat_id:
         try:
-            # Використовуємо переданий екземпляр бота
-            await bot.send_message(chat_id, error_message_text, parse_mode=None) # Надсилаємо як простий текст
+            await bot.send_message(chat_id, error_message_text, parse_mode=None)
         except Exception as e:
             logger.error(f"Не вдалося надіслати повідомлення про системну помилку в чат {chat_id}: {e}")
     else:
         logger.warning("Системна помилка, але не вдалося визначити chat_id для відповіді користувачу.")
 
-# Функція для реєстрації обробників цього файлу
+
 def register_general_handlers(dp: Dispatcher):
-    dp.message.register(cmd_start, CommandStart())
-    dp.message.register(cmd_go, Command("go"))
-    # Глобальний обробник помилок реєструється в dp.errors.register
-    # dp.errors.register(error_handler) # Це буде зроблено в main.py
-    logger.info("Загальні обробники зареєстровано.")
+    """
+    Реєструє всі загальні обробники команд та повідомлень.
+    """
+    # Підключаємо роутер до головного диспетчера
+    dp.include_router(general_router)
+    logger.info("Загальні обробники (команди та тригери) зареєстровано.")
