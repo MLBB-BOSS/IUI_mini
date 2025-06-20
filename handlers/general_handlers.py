@@ -1,11 +1,12 @@
 import html
 import logging
+import re
 import time
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Deque, List
-from collections import defaultdict, deque # <--- ВИПРАВЛЕННЯ №1: Додано імпорт deque
+from typing import Optional, Dict, Deque
+from collections import defaultdict, deque
 
-from aiogram import Bot, Dispatcher, F, Router, types # <--- Додано types для ErrorEvent
+from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, Update
@@ -16,23 +17,30 @@ from aiogram.fsm.context import FSMContext
 # Імпорти з проєкту
 from config import (
     ADMIN_USER_ID, WELCOME_IMAGE_URL, OPENAI_API_KEY, logger,
-    CONVERSATIONAL_TRIGGERS, MAX_CHAT_HISTORY_LENGTH
+    CONVERSATIONAL_TRIGGERS, MAX_CHAT_HISTORY_LENGTH,
+    BOT_NAMES, CONVERSATIONAL_COOLDOWN_SECONDS
 )
 from services.openai_service import MLBBChatGPT
 from utils.message_utils import send_message_in_chunks
 
-# === СХОВИЩЕ ІСТОРІЇ ДІАЛОГІВ ===
+
+# === СХОВИЩА ДАНИХ ДЛЯ КЕРУВАННЯ СТАНОМ ===
+# Словник для зберігання історії повідомлень для кожного чату
 chat_histories: Dict[int, Deque[Dict[str, str]]] = defaultdict(
     lambda: deque(maxlen=MAX_CHAT_HISTORY_LENGTH)
 )
+# Словник для відстеження часу останньої пасивної відповіді в кожному чаті
+chat_cooldowns: Dict[int, float] = {}
 
-# Створюємо роутер для загальних обробників
+# Створюємо роутер для всіх загальних обробників
 general_router = Router()
-
 
 @general_router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
-    """Обробник команди /start. Надсилає вітальне повідомлення з зображенням."""
+    """
+    Обробник команди /start.
+    Надсилає вітальне повідомлення з зображенням та описом функціоналу.
+    """
     await state.clear()
     user = message.from_user
     user_name_escaped = html.escape(user.first_name if user else "Гравець")
@@ -95,7 +103,10 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 
 @general_router.message(Command("go"))
 async def cmd_go(message: Message, state: FSMContext, bot: Bot):
-    """Обробник команди /go. Надсилає запит до GPT та відповідь частинами, якщо потрібно."""
+    """
+    Обробник команди /go.
+    Надсилає запит до GPT та повертає структуровану відповідь.
+    """
     await state.clear()
     user = message.from_user
     user_name_escaped = html.escape(user.first_name if user else "Гравець")
@@ -153,40 +164,78 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
         logger.info(f"Відповідь /go для {user_name_escaped} успішно надіслано (можливо, частинами).")
     except Exception as e:
         logger.error(f"Не вдалося надіслати відповідь /go для {user_name_escaped} навіть частинами: {e}", exc_info=True)
-        # Спроба надіслати фінальне повідомлення про помилку
-        pass
+        try:
+            final_error_msg = f"Вибач, {user_name_escaped}, сталася критична помилка при відправці відповіді. Спробуйте пізніше."
+            if thinking_msg:
+                 try:
+                    await thinking_msg.edit_text(final_error_msg, parse_mode=None)
+                 except TelegramAPIError: 
+                    await message.reply(final_error_msg, parse_mode=None)
+            else: 
+                await message.reply(final_error_msg, parse_mode=None)
+        except Exception as final_err_send:
+            logger.error(f"Зовсім не вдалося надіслати фінальне повідомлення про помилку для {user_name_escaped}: {final_err_send}")
 
 
 @general_router.message(F.text)
 async def handle_trigger_messages(message: Message, bot: Bot):
     """
-    Обробляє звичайні текстові повідомлення, шукає в них тригери
-    і генерує контекстну відповідь від AI.
+    Обробляє текстові повідомлення за "Стратегією Адаптивної Присутності",
+    щоб бот поводився як розумний учасник чату, а не спамер.
     """
-    if not message.text or message.text.startswith('/'):
-        return # Ігноруємо команди та порожні повідомлення
+    if not message.text or message.text.startswith('/') or not message.from_user:
+        return
 
+    # --- 1. Збір даних для аналізу ---
     text_lower = message.text.lower()
     chat_id = message.chat.id
-    user = message.from_user
-    user_name = user.first_name if user else "Друже"
+    user_name = message.from_user.first_name
+    current_time = time.time()
+    bot_info = await bot.get_me()
 
-    # Завжди оновлюємо історію поточним повідомленням для повноти контексту
-    chat_histories[chat_id].append({"role": "user", "content": message.text})
+    # --- 2. Визначення умов для відповіді (Рівні Пріоритету) ---
+    is_explicit_mention = f"@{bot_info.username.lower()}" in text_lower
+    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
+    is_name_mention = any(re.search(r'\b' + name + r'\b', text_lower) for name in BOT_NAMES)
 
-    # Шукаємо відповідний тригер
+    # --- 3. Пошук тригера ---
     matched_trigger_mood = None
     for trigger, mood in CONVERSATIONAL_TRIGGERS.items():
-        if trigger in text_lower:
+        # Використовуємо регулярні вирази для пошуку цілих слів/фраз
+        if re.search(r'\b' + re.escape(trigger) + r'\b', text_lower):
             matched_trigger_mood = mood
-            logger.info(f"В чаті {chat_id} знайдено тригер '{trigger}' від '{user_name}'.")
-            break # Знайшли перший, виходимо
+            break
+    
+    # Якщо це відповідь на повідомлення бота, але без конкретного тригера,
+    # встановлюємо загальний "настрій" для продовження розмови.
+    if is_reply_to_bot and not matched_trigger_mood:
+        matched_trigger_mood = "Користувач відповів на твоє повідомлення. Підтримай розмову."
 
-    if matched_trigger_mood:
+    # Якщо немає жодного тригера для реакції, виходимо.
+    if not matched_trigger_mood:
+        return
+
+    # --- 4. Логіка прийняття фінального рішення про відповідь ---
+    should_respond = False
+    # Рівень 1 і 2: Пряме звернення або згадка імені - відповідаємо завжди.
+    if is_explicit_mention or is_reply_to_bot or is_name_mention:
+        should_respond = True
+        logger.info(f"Прийнято рішення відповісти: пряме звернення в чаті {chat_id}.")
+    # Рівень 3: Пасивний тригер - перевіряємо кулдаун.
+    else:
+        last_response_time = chat_cooldowns.get(chat_id, 0)
+        if (current_time - last_response_time) > CONVERSATIONAL_COOLDOWN_SECONDS:
+            should_respond = True
+            chat_cooldowns[chat_id] = current_time  # Важливо: оновлюємо час останньої відповіді
+            logger.info(f"Прийнято рішення відповісти: пасивний тригер в чаті {chat_id} (кулдаун пройшов).")
+        else:
+            logger.info(f"Рішення проігнорувати: пасивний тригер в чаті {chat_id} (активний кулдаун).")
+
+    # --- 5. Генерація та відправка відповіді ---
+    if should_respond:
+        chat_histories[chat_id].append({"role": "user", "content": message.text})
         try:
-            # Передаємо копію історії в сервіс, щоб уникнути race conditions
             history_for_api = list(chat_histories[chat_id])
-
             async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
                 reply_text = await gpt.generate_conversational_reply(
                     user_name=user_name,
@@ -194,25 +243,20 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                     trigger_mood=matched_trigger_mood
                 )
 
-            if reply_text and "<i>" not in reply_text: # Проста перевірка на повідомлення про помилку від сервісу
-                # Додаємо відповідь бота в історію
+            if reply_text and "<i>" not in reply_text:
                 chat_histories[chat_id].append({"role": "assistant", "content": reply_text})
                 await message.reply(reply_text)
-                logger.info(f"Надіслано розмовну відповідь в чат {chat_id}.")
-            elif reply_text:
-                 logger.warning(f"Сервіс повернув повідомлення, схоже на помилку, для чату {chat_id}: {reply_text}")
+                logger.info(f"Адаптивну відповідь успішно надіслано в чат {chat_id}.")
             else:
-                 logger.error(f"Сервіс повернув порожню відповідь для чату {chat_id}.")
-
+                logger.error(f"Сервіс повернув порожню або помилкову відповідь для чату {chat_id}.")
         except Exception as e:
-            logger.exception(f"Помилка під час обробки тригерного повідомлення в чаті {chat_id}: {e}")
+            logger.exception(f"Критична помилка під час генерації адаптивної відповіді в чаті {chat_id}: {e}")
 
 
-# <--- ВИПРАВЛЕННЯ №2: Оновлено сигнатуру error_handler ---
 async def error_handler(event: types.ErrorEvent, bot: Bot):
     """
     Глобальний обробник помилок, сумісний з aiogram 3.x.
-    Логує помилку та надсилає повідомлення користувачу.
+    Логує помилку та надсилає повідомлення користувачу, якщо можливо.
     """
     logger.error(
         f"Глобальна помилка: {event.exception} для update: {event.update.model_dump_json(exclude_none=True, indent=2)}",
@@ -233,7 +277,7 @@ async def error_handler(event: types.ErrorEvent, bot: Bot):
             user_name = html.escape(update.callback_query.from_user.first_name or "Гравець")
         try:
             await update.callback_query.answer("Сталася помилка...", show_alert=False)
-        except Exception:
+        except TelegramAPIError:
             pass
 
     error_message_text = f"Вибач, {user_name}, сталася непередбачена системна помилка 😔\nСпробуй, будь ласка, ще раз через хвилину."
@@ -241,7 +285,7 @@ async def error_handler(event: types.ErrorEvent, bot: Bot):
     if chat_id:
         try:
             await bot.send_message(chat_id, error_message_text, parse_mode=None)
-        except Exception as e:
+        except TelegramAPIError as e:
             logger.error(f"Не вдалося надіслати повідомлення про системну помилку в чат {chat_id}: {e}")
     else:
         logger.warning("Системна помилка, але не вдалося визначити chat_id для відповіді користувачу.")
@@ -249,8 +293,7 @@ async def error_handler(event: types.ErrorEvent, bot: Bot):
 
 def register_general_handlers(dp: Dispatcher):
     """
-    Реєструє всі загальні обробники команд та повідомлень.
+    Реєструє всі загальні обробники команд та повідомлень у головному диспетчері.
     """
-    # Підключаємо роутер до головного диспетчера
     dp.include_router(general_router)
-    logger.info("Загальні обробники (команди та тригери) зареєстровано.")
+    logger.info("Загальні обробники (команди та адаптивні тригери) успішно зареєстровано.")
