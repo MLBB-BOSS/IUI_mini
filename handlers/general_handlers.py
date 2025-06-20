@@ -105,7 +105,11 @@ def get_lobby_message_text(lobby_data: dict) -> str:
     available_section = "\n\n<b>Вільні ролі:</b>\n" + "\n".join(available_roles_list) if available_roles_list else "\n\n✅ <b>Команда зібрана!</b>"
     return f"{header}\n{players_section}{available_section}"
 
-@party_router.message(F.text & F.func(lambda msg: re.search(r'\b(паті|пати|команду)\b', msg.text.lower()) and re.search(r'\b(збира|го|шукаю|+\?)\b', msg.text.lower())))
+# --- ОСЬ ВИПРАВЛЕННЯ ---
+@party_router.message(F.text & F.func(lambda msg: 
+    re.search(r'\b(паті|пати|команду)\b', msg.text.lower()) and 
+    re.search(r'\b(збир|го|шука|грат|зібра)\w*\b|\+', msg.text.lower())
+))
 async def ask_for_party_creation(message: Message, state: FSMContext):
     """
     Крок 0: Перехоплює повідомлення про пошук паті та запускає діалог,
