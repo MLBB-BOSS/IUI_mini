@@ -26,8 +26,6 @@ from keyboards.inline_keyboards import (
     create_dynamic_lobby_keyboard
 )
 from services.openai_service import MLBBChatGPT
-# --- ВИРІШЕННЯ ПРОБЛЕМИ TypeError ---
-# Імпортуємо нашу нову, надійну функцію
 from utils.message_utils import send_message_in_chunks
 
 general_router = Router()
@@ -36,7 +34,6 @@ class ConversationalFSM(StatesGroup):
     """Стан для ведення безперервного діалогу з користувачем."""
     chatting = State()
 
-# ... (Код FSM для Паті та інші функції залишаються без змін) ...
 class PartyFSM(StatesGroup):
     """Стани для процесу створення ігрового лобі."""
     waiting_for_size = State()
@@ -47,7 +44,7 @@ class PartyFSM(StatesGroup):
 conversational_cooldown_cache: Dict[int, float] = defaultdict(float)
 
 async def format_lobby_message(lobby_data: Dict[str, Any]) -> str:
-    # Ця функція залишається без змін
+    """Форматує текстове представлення ігрового лобі."""
     players = lobby_data.get("players", {})
     party_size = lobby_data.get("party_size", 5)
     player_lines = [f"✅ <b>{html.escape(p['full_name'])}</b> — <i>{p['role']}</i>" for p in players.values()]
@@ -60,7 +57,7 @@ async def format_lobby_message(lobby_data: Dict[str, Any]) -> str:
             f"<b>Вільні ролі:</b>\n{roles_text}")
 
 async def update_lobby_message(bot: Bot, chat_id: int, user_id: int | None = None):
-    # Ця функція залишається без змін
+    """Оновлює існуюче повідомлення лобі з актуальними даними."""
     lobby_data = database.get_lobby(chat_id)
     if not lobby_data: return
     try:
@@ -77,23 +74,9 @@ async def update_lobby_message(bot: Bot, chat_id: int, user_id: int | None = Non
         else:
             logger.error(f"Не вдалося оновити повідомлення лобі в чаті {chat_id}: {e}")
 
-# ... (Всі обробники для Паті-менеджера залишаються без змін) ...
-@general_router.message(F.text.lower().in_(PARTY_TRIGGER_PHRASES))
-async def on_party_trigger(message: types.Message, state: FSMContext):
-    if database.get_lobby(message.chat.id):
-        await message.reply("☝️ В цьому чаті вже йде активний пошук паті. Приєднуйтесь!")
-        return
-    await message.reply("Бачу, ти хочеш зібрати паті. Допомогти тобі створити лобі?",
-                        reply_markup=create_party_confirmation_keyboard())
-    await state.clear()
-
-# ... (інші обробники party)
-
 @general_router.message(Command("go"))
 async def cmd_go(message: types.Message, bot: Bot):
-    """
-    Обробляє команду /go, використовуючи OpenAI для відповіді на запит.
-    """
+    """Обробляє команду /go, використовуючи OpenAI для відповіді на запит."""
     user_name = html.escape(message.from_user.first_name)
     query = message.text.replace("/go", "").strip()
 
@@ -105,9 +88,6 @@ async def cmd_go(message: types.Message, bot: Bot):
     try:
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
             response = await gpt.get_response(user_name, query)
-        
-        # --- ВИРІШЕННЯ ПРОБЛЕМИ TypeError: Крок 1 ---
-        # Тепер ми передаємо обов'язковий `parse_mode`.
         await send_message_in_chunks(
             bot=bot,
             chat_id=message.chat.id,
@@ -119,32 +99,20 @@ async def cmd_go(message: types.Message, bot: Bot):
         logger.error(f"Помилка в обробнику cmd_go: {e}", exc_info=True)
         await thinking_msg.edit_text("На жаль, сталася помилка під час обробки вашого запиту. 😔")
 
-
-# =============================================================================
-# ====================== CONVERSATIONAL AI HANDLERS ===========================
-# =============================================================================
-
-# --- ВИРІШЕННЯ ПРОБЛЕМИ NameError: Крок 2 ---
-# Створюємо асинхронний фільтр. aiogram автоматично передасть сюди
-# об'єкт `bot_info`, який ми поклали в диспетчер у `main.py`.
 async def is_bot_mentioned_or_private(message: types.Message, bot_info: types.User) -> bool:
     """
     Фільтр, що перевіряє, чи є чат приватним, або чи згадали бота в груповому чаті.
-    Працює ефективно, не викликаючи `get_me()` на кожне повідомлення.
     """
     if message.chat.type == 'private':
         return True
     if message.text:
         bot_username = f"@{bot_info.username}"
-        # Перевірка згадки за @username або за іменем зі списку BOT_NAMES
         return bot_username in message.text or any(
             name.lower() in message.text.lower() for name in BOT_NAMES
         )
     return False
 
 @general_router.message(
-    # --- ВИРІШЕННЯ ПРОБЛЕМИ NameError: Крок 3 ---
-    # Використовуємо наш новий, надійний фільтр.
     is_bot_mentioned_or_private,
     F.text,
     ~F.text.lower().in_(PARTY_TRIGGER_PHRASES),
@@ -175,13 +143,17 @@ async def on_conversational_trigger(message: types.Message, state: FSMContext, b
     thinking_msg = await message.reply("🤔 Думаю...")
     try:
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
-            response_text = await gpt.get_response_with_history(history)
+            # === ФІНАЛЬНЕ ВИПРАВЛЕННЯ: AttributeError ===
+            # Тепер ми передаємо не тільки історію, а й ім'я користувача,
+            # як того вимагає наш оновлений сервіс для персоналізації відповіді.
+            response_text = await gpt.get_response_with_history(
+                history=history,
+                user_name=message.from_user.full_name
+            )
         
         history.append({"role": "assistant", "content": response_text})
         await state.update_data(history=history)
 
-        # --- ВИРІШЕННЯ ПРОБЛЕМИ TypeError: Крок 2 ---
-        # Також додаємо parse_mode і тут.
         await send_message_in_chunks(
             bot=bot,
             chat_id=message.chat.id,
@@ -197,20 +169,26 @@ async def on_conversational_trigger(message: types.Message, state: FSMContext, b
         await thinking_msg.edit_text("Ой, щось пішло не так. Спробуйте ще раз трохи пізніше.")
         await state.clear()
 
-
-# ... (Решта файлу: error_handler, register_general_handlers, cmd_start, логіка паті) ...
-# Вони залишаються без змін, але для повноти я їх додам.
 @general_router.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext):
+    """Обробляє команду /start, вітаючи користувача."""
     await state.clear()
     user_name = html.escape(message.from_user.first_name)
-    welcome_text = f"""Привіт, <b>{user_name}</b>! Я твій AI-помічник для всього, що стосується світу Mobile Legends.\n\n<b>Що я можу:</b>\n• Створювати ігрові лобі (напиши 'го паті' в чаті).\n• Відповідати на твої запитання про гру (команда /go або просто згадай мене в чаті).\n• Аналізувати скріншоти профілю та статистики.\n\nПросто почни спілкування, і я допоможу!"""
+    welcome_text = (
+        f"Привіт, <b>{user_name}</b>! Я твій AI-помічник для всього, що стосується світу Mobile Legends.\n\n"
+        "<b>Що я можу:</b>\n"
+        "• Створювати ігрові лобі (напиши 'го паті' в чаті).\n"
+        "• Відповідати на твої запитання про гру (команда /go або просто згадай мене в чаті).\n"
+        "• Аналізувати скріншоти профілю та статистики.\n\n"
+        "Просто почни спілкування, і я допоможу!"
+    )
     try:
         await message.answer_photo(WELCOME_IMAGE_URL, caption=welcome_text)
     except TelegramAPIError:
         await message.answer(welcome_text)
 
 async def error_handler(event: types.ErrorEvent, bot: Bot):
+    """Глобальний обробник помилок. Логує винятки та повідомляє користувача."""
     logger.error(f"Глобальна помилка: {event.exception}", exc_info=True)
     chat_id = None
     if event.update.callback_query:
@@ -224,5 +202,6 @@ async def error_handler(event: types.ErrorEvent, bot: Bot):
         await bot.send_message(chat_id, "😔 Вибачте, сталася непередбачена системна помилка. Я вже сповістив розробників.")
 
 def register_general_handlers(dp: Dispatcher):
+    """Реєструє всі загальні обробники в головному диспетчері."""
     dp.include_router(general_router)
-    logger.info("✅ Загальні обробники (v3.2 - Stability) успішно зареєстровано.")
+    logger.info("✅ Загальні обробники (v3.3 - Final Fix) успішно зареєстровано.")
