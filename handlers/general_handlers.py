@@ -20,7 +20,6 @@ from config import (
     CONVERSATIONAL_TRIGGERS, MAX_CHAT_HISTORY_LENGTH, CONVERSATIONAL_COOLDOWN_SECONDS,
     PARTY_TRIGGER_PHRASES, PARTY_LOBBY_ROLES, PARTY_LOBBY_COOLDOWN_SECONDS
 )
-# Переконуємось, що всі необхідні клавіатури імпортуються
 from keyboards.inline_keyboards import (
     create_party_confirmation_keyboard, create_role_selection_keyboard,
     create_party_lobby_keyboard
@@ -71,20 +70,23 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
     if not user_query:
         await message.reply(f"Привіт, <b>{user_name_escaped}</b>! 👋\nНапиши своє питання після <code>/go</code>.")
         return
+    
     thinking_msg = await message.reply(f"🤔 {user_name_escaped}, аналізую твій запит...")
+    response_text = f"Вибач, {user_name_escaped}, сталася помилка."
     start_time = time.time()
     try:
-        async with MLBBChatGPT() as gpt:
+        # --- FIX: Передаємо OPENAI_API_KEY при ініціалізації ---
+        async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
             response_text = await gpt.get_response(user_name_escaped, user_query)
     except Exception as e:
         logger.exception(f"Помилка MLBBChatGPT для '{user_query}': {e}")
-        response_text = f"Вибач, {user_name_escaped}, сталася помилка."
+    
     processing_time = time.time() - start_time
     admin_info = f"\n\n<i>⏱ {processing_time:.2f}с</i>" if user_id == ADMIN_USER_ID else ""
     await send_message_in_chunks(bot, message.chat.id, f"{response_text}{admin_info}", parse_mode=ParseMode.HTML, initial_message_to_edit=thinking_msg)
 
 
-# 2. Обробник текстових повідомлень (ловить все, що не є командою)
+# 2. Обробник текстових повідомлень
 @general_router.message(F.text)
 async def handle_text_messages(message: Message, bot: Bot, state: FSMContext):
     if not message.text or message.text.startswith('/') or not message.from_user: return
@@ -133,23 +135,17 @@ async def on_initiator_role_select(callback_query: CallbackQuery, state: FSMCont
     selected_role = callback_query.data.split("party_role_select_")[1]
     
     logger.info(f"Ініціатор {user.full_name} обрав роль '{selected_role}' в чаті {chat_id}.")
-
     roles_left = PARTY_LOBBY_ROLES.copy()
     roles_left.remove(selected_role)
-    
     players_data = {user.id: {"user": user, "role": selected_role}}
-    
     players_text = f"✅ <b>{html.escape(user.full_name)}</b> — <i>{selected_role}</i>"
     roles_text = "\n".join([f"• {role}" for role in roles_left])
-
     lobby_message_text = (f"🔥 <b>Збираємо паті!</b>\n\n"
                           f"<b>Гравці в паті (1/5):</b>\n{players_text}\n\n"
                           f"<b>Вільні ролі:</b>\n{roles_text}")
-    
     await callback_query.message.edit_text("✅ Лобі створено!")
     lobby_message = await bot.send_message(chat_id, lobby_message_text,
                                            reply_markup=create_party_lobby_keyboard(), parse_mode=ParseMode.HTML)
-
     active_lobbies[chat_id] = {"message_id": lobby_message.message_id, "players": players_data, "roles_left": roles_left}
     chat_cooldowns[f"party_{chat_id}"] = time.time()
     await callback_query.answer()
@@ -160,18 +156,15 @@ async def on_join_party(callback_query: CallbackQuery, state: FSMContext):
     user = callback_query.from_user
     chat_id = callback_query.message.chat.id
     lobby = active_lobbies.get(chat_id)
-
     if not lobby:
         await callback_query.answer("На жаль, це лобі вже неактивне.", show_alert=True); return
     if user.id in lobby["players"]:
         await callback_query.answer("Ви вже у цьому паті!", show_alert=True); return
     if not lobby["roles_left"]:
         await callback_query.answer("Всі місця вже зайняті!", show_alert=True); return
-
     role_request_msg = await callback_query.message.reply(
         f"<a href='tg://user?id={user.id}'>{html.escape(user.first_name)}</a>, обери свою роль:",
         reply_markup=create_role_selection_keyboard(lobby['roles_left']), parse_mode=ParseMode.HTML)
-    
     await state.set_state(PartyCreation.waiting_for_joiner_role)
     await state.update_data(role_request_message_id=role_request_msg.message_id)
     await callback_query.answer()
@@ -182,34 +175,26 @@ async def on_joiner_role_select(callback_query: CallbackQuery, state: FSMContext
     user = callback_query.from_user
     chat_id = callback_query.message.chat.id
     selected_role = callback_query.data.split("party_role_select_")[1]
-    
     data = await state.get_data()
     await state.clear()
-
     if role_request_message_id := data.get("role_request_message_id"):
         try: await bot.delete_message(chat_id, role_request_message_id)
         except TelegramAPIError: logger.warning("Не вдалося видалити повідомлення із запитом ролі.")
-
     lobby = active_lobbies.get(chat_id)
     if not lobby or user.id in lobby["players"] or selected_role not in lobby["roles_left"]:
-        await callback_query.answer("Щось пішло не так або ця роль вже зайнята. Спробуйте ще раз.", show_alert=True); return
-
+        await callback_query.answer("Щось пішло не так або ця роль вже зайнята.", show_alert=True); return
     logger.info(f"Гравець {user.full_name} приєднався до паті в чаті {chat_id} з роллю '{selected_role}'.")
     lobby["players"][user.id] = {"user": user, "role": selected_role}
     lobby["roles_left"].remove(selected_role)
-    
     players_text = "\n".join([f"✅ <b>{html.escape(p['user'].full_name)}</b> — <i>{p['role']}</i>" for p in lobby["players"].values()])
     roles_text = "\n".join([f"• {role}" for role in lobby["roles_left"]]) if lobby["roles_left"] else "<i>Всі ролі зайняті!</i>"
-    
     updated_text = (f"🔥 <b>Збираємо паті!</b>\n\n"
                     f"<b>Гравці в паті ({len(lobby['players'])}/5):</b>\n{players_text}\n\n"
                     f"<b>Вільні ролі:</b>\n{roles_text}")
-
     if not lobby["roles_left"]:
         logger.info(f"Паті в чаті {chat_id} повністю зібрано!")
         await bot.edit_message_text(f"{updated_text}\n\n<b>✅ Паті зібрано! Готуйтесь до бою!</b>",
                                     chat_id, lobby["message_id"], reply_markup=None, parse_mode=ParseMode.HTML)
-        
         final_call_text = (f"⚔️ <b>Команда зібрана! Всі в лобі!</b>\n\n" +
                            " ".join([f"<a href='tg://user?id={p['user'].id}'>{html.escape(p['user'].first_name)}</a>" for p in lobby['players'].values()]) +
                            f"\n\nGL HF! 🚀")
@@ -242,13 +227,14 @@ async def handle_conversational_triggers(message: Message, bot: Bot):
     if is_explicit_mention or is_reply_to_bot or is_name_mention:
         should_respond = True
     else:
-        if (current_time - chat_cooldowns.get(cooldown_key, 0)) > CONVERSATIONAL_COOLDOWN_SECONDS:
+        if (time.time() - chat_cooldowns.get(cooldown_key, 0)) > CONVERSATIONAL_COOLDOWN_SECONDS:
             should_respond = True
             chat_cooldowns[cooldown_key] = current_time
     if should_respond:
         chat_histories[chat_id].append({"role": "user", "content": message.text})
         try:
-            async with MLBBChatGPT() as gpt:
+            # --- FIX: Передаємо OPENAI_API_KEY при ініціалізації ---
+            async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
                 reply_text = await gpt.generate_conversational_reply(user_name, list(chat_histories[chat_id]), matched_trigger_mood)
             if reply_text and "<i>" not in reply_text:
                 chat_histories[chat_id].append({"role": "assistant", "content": reply_text})
@@ -256,17 +242,13 @@ async def handle_conversational_triggers(message: Message, bot: Bot):
         except Exception as e:
             logger.exception(f"Помилка генерації адаптивної відповіді в чаті {chat_id}: {e}")
 
+
 # === ВІДНОВЛЕНИЙ ГЛОБАЛЬНИЙ ОБРОБНИК ПОМИЛОК ===
 async def error_handler(event: types.ErrorEvent, bot: Bot):
-    """
-    Глобальний обробник помилок. Логує помилку та надсилає повідомлення користувачу.
-    """
     logger.error(f"Глобальна помилка: {event.exception}", exc_info=event.exception)
-    
     chat_id: Optional[int] = None
     user_name: str = "друже"
     update = event.update
-
     if update.message and update.message.chat:
         chat_id = update.message.chat.id
         if update.message.from_user:
@@ -276,11 +258,8 @@ async def error_handler(event: types.ErrorEvent, bot: Bot):
         if update.callback_query.from_user:
             user_name = html.escape(update.callback_query.from_user.first_name or "Гравець")
         try:
-            # Намагаємось відповісти на колбек, щоб він не "зависав"
             await update.callback_query.answer("Сталася помилка...", show_alert=True)
-        except TelegramAPIError:
-            pass
-
+        except TelegramAPIError: pass
     if chat_id:
         try:
             await bot.send_message(chat_id, f"Вибач, {user_name}, сталася непередбачена системна помилка 😔")
@@ -288,6 +267,5 @@ async def error_handler(event: types.ErrorEvent, bot: Bot):
             logger.error(f"Не вдалося надіслати повідомлення про системну помилку в чат {chat_id}: {e}")
 
 def register_general_handlers(dp: Dispatcher):
-    """Реєструє всі загальні обробники у головному диспетчері."""
     dp.include_router(general_router)
     logger.info("✅ Загальні обробники (команди, паті-менеджер 2.0 та адаптивні тригери) успішно зареєстровано.")
