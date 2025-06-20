@@ -9,8 +9,9 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 from config import logger
 
-# Максимальна довжина повідомлення, встановлена Telegram API
-TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+# Максимальна довжина повідомлення, встановлена Telegram API.
+# ВИРІШЕННЯ ПРОБЛЕМИ: Ім'я константи уніфіковано для сумісності з іншими модулями (vision_handlers).
+MAX_TELEGRAM_MESSAGE_LENGTH = 4096
 
 async def send_message_in_chunks(
     bot: Bot,
@@ -45,25 +46,22 @@ async def send_message_in_chunks(
     # Розбиваємо текст на частини, враховуючи межі речень для кращої читабельності
     chunks = []
     while len(text) > 0:
-        if len(text) <= TELEGRAM_MAX_MESSAGE_LENGTH:
+        if len(text) <= MAX_TELEGRAM_MESSAGE_LENGTH:
             chunks.append(text)
             break
         
-        # Знаходимо найкраще місце для розриву
-        chunk = text[:TELEGRAM_MAX_MESSAGE_LENGTH]
+        chunk = text[:MAX_TELEGRAM_MESSAGE_LENGTH]
         last_newline = chunk.rfind('\n')
         last_space = chunk.rfind(' ')
 
-        # Надаємо перевагу розриву по новому рядку
         split_pos = last_newline if last_newline > 0 else last_space
-        if split_pos == -1 or split_pos < TELEGRAM_MAX_MESSAGE_LENGTH / 2:
-            split_pos = TELEGRAM_MAX_MESSAGE_LENGTH
+        if split_pos == -1 or split_pos < MAX_TELEGRAM_MESSAGE_LENGTH / 2:
+            split_pos = MAX_TELEGRAM_MESSAGE_LENGTH
         
         chunks.append(text[:split_pos])
         text = text[split_pos:].lstrip()
 
     try:
-        # Першу частину або редагуємо, або надсилаємо
         first_chunk = chunks.pop(0)
         if initial_message_to_edit:
             await bot.edit_message_text(
@@ -82,20 +80,17 @@ async def send_message_in_chunks(
             )
         logger.info(f"Надіслано/відредаговано першу частину повідомлення для chat_id {chat_id}. Довжина: {len(first_chunk)}")
 
-        # Решту частин надсилаємо новими повідомленнями
         for chunk in chunks:
-            await asyncio.sleep(0.5)  # Невелике затримання, щоб уникнути флуду
+            await asyncio.sleep(0.5)
             await bot.send_message(chat_id=chat_id, text=chunk, parse_mode=parse_mode, **kwargs)
             logger.info(f"Надіслано наступну частину повідомлення для chat_id {chat_id}. Довжина: {len(chunk)}")
 
     except TelegramAPIError as e:
         logger.error(f"Не вдалося надіслати повідомлення в чат {chat_id}: {e}", exc_info=True)
-        # Якщо навіть перша частина не відправилась, надсилаємо повідомлення про помилку
         try:
             await bot.send_message(
                 chat_id,
-                "😔 Вибачте, сталася помилка під час відправки відповіді. "
-                "Спробуйте, будь ласка, ще раз."
+                "😔 Вибачте, сталася помилка під час відправки відповіді."
             )
         except TelegramAPIError:
             logger.critical(f"Не вдалося надіслати навіть повідомлення про помилку в чат {chat_id}.")
