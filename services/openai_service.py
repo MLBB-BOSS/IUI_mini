@@ -178,7 +178,6 @@ CONVERSATIONAL_PROMPT_TEMPLATE = """
 Історія чату надана для контексту. Твоя відповідь має логічно її продовжувати.
 """
 
-
 # === КЛАС ДЛЯ ВЗАЄМОДІЇ З OPENAI ===
 
 class MLBBChatGPT:
@@ -225,7 +224,9 @@ class MLBBChatGPT:
             else:
                 greeting = "Доброї ночі"
         except Exception as e:
-            self.class_logger.warning(f"Не вдалося визначити київський час для оптимізованого промпту, використовую UTC та стан[...]
+            # === ВИПРАВЛЕННЯ ПОМИЛКИ ===
+            # Закрито f-string, щоб уникнути SyntaxError
+            self.class_logger.warning(f"Не вдалося визначити київський час для оптимізованого промпту, використовую UTC та стандартний грітінг: {e}")
             current_time_utc_fallback = datetime.now(timezone.utc)
             greeting = "Вітаю"
             time_str = current_time_utc_fallback.strftime('%H:%M (UTC)')
@@ -237,7 +238,7 @@ class MLBBChatGPT:
             time_str=time_str,
             user_query_escaped=user_query_escaped
         )
-        self.class_logger.debug(f"Згенеровано оптимізований системний промпт (Версія 4.1 - Мікро-тюнінг стилю). Довжина: {len(system[...]
+        self.class_logger.debug(f"Згенеровано оптимізований системний промпт (Версія 4.1 - Мікро-тюнінг стилю). Довжина: {len(system_prompt)}")
         return system_prompt
 
     def _create_smart_prompt(self, user_name: str, user_query: str) -> str:
@@ -264,7 +265,7 @@ class MLBBChatGPT:
             
             best_emoji = "💡" 
             
-            priority_keys = ["скріншот", "унікальність", "можливості", "фішка", "прикол", "інсайт", "висновок", "запитання", "відпо[...]
+            priority_keys = ["скріншот", "унікальність", "можливості", "фішка", "прикол", "інсайт", "висновок", "запитання", "відповідь", "порада"]
             
             found_specific = False
             for key in priority_keys:
@@ -307,7 +308,7 @@ class MLBBChatGPT:
         user_name_escaped = html.escape(user_name)
         user_query_for_payload = html.escape(user_query)
 
-        self.class_logger.info(f"Запит до GPT (/go) від '{user_name_escaped}': '{user_query[:100]}...' (використовується оптимізований промпт Версія [...]
+        self.class_logger.info(f"Запит до GPT (/go) від '{user_name_escaped}': '{user_query[:100]}...' (використовується оптимізований промпт Версія 4.1)")
 
         system_prompt = self._create_smart_prompt_optimized(user_name, user_query)
 
@@ -323,7 +324,7 @@ class MLBBChatGPT:
             "presence_penalty": 0.3, 
             "frequency_penalty": 0.2  
         }
-        self.class_logger.debug(f"Параметри для GPT (/go) з оптимізованим промптом (Версія 4.1 - Мікро-тюнінг стилю): модель={payload['mod[...]
+        self.class_logger.debug(f"Параметри для GPT (/go) з оптимізованим промптом (Версія 4.1 - Мікро-тюнінг стилю): модель={payload['model']}")
 
         current_session = self.session
         temp_session_created = False
@@ -348,7 +349,7 @@ class MLBBChatGPT:
                 if response.status != 200:
                     error_details = response_data.get("error", {}).get("message", str(response_data))
                     self.class_logger.error(f"OpenAI API HTTP помилка: {response.status} - {error_details}")
-                    return f"Сорян, {user_name_for_error_msg}, трабл з доступом до AI 😔 (код: {response.status}). Спробуй ще раз трохи пізніше, мо[...]
+                    return f"Сорян, {user_name_for_error_msg}, трабл з доступом до AI 😔 (код: {response.status}). Спробуй ще раз трохи пізніше, може, пройде."
 
                 content = response_data.get("choices", [{}])[0].get("message", {}).get("content")
                 if not content:
@@ -360,10 +361,10 @@ class MLBBChatGPT:
 
         except aiohttp.ClientConnectionError as e:
             self.class_logger.error(f"OpenAI API помилка з'єднання: {e}", exc_info=True)
-            return f"Блін, {user_name_for_error_msg}, не можу достукатися до серваків AI 🌐. Походу, інтернет вирішив взяти вихідний.[...]
+            return f"Блін, {user_name_for_error_msg}, не можу достукатися до серваків AI 🌐. Походу, інтернет вирішив взяти вихідний."
         except asyncio.TimeoutError:
             self.class_logger.error(f"OpenAI API Timeout для запиту.")
-            return f"Ай-ай-ай, {user_name_for_error_msg}, AI задумався так сильно, що аж час вийшов ⏳. Може, спробуєш ще раз, тільки пр[...]
+            return f"Ай-ай-ай, {user_name_for_error_msg}, AI задумався так сильно, що аж час вийшов ⏳. Може, спробуєш ще раз, тільки простіше?"
         except Exception as e:
             self.class_logger.exception(f"Загальна помилка GPT: {e}")
             return f"Щось пішло не так, {user_name_for_error_msg} 😕. Вже розбираюся, в чому прикол. А поки спробуй ще раз!"
@@ -594,7 +595,7 @@ class MLBBChatGPT:
             "presence_penalty": 0.15,
             "frequency_penalty": 0.15
         }
-        self.class_logger.debug(f"Параметри для опису статистики (з derived): модель={payload['model']}, temp={payload['temperature']}, max_tokens={payload['max_token[...]
+        self.class_logger.debug(f"Параметри для опису статистики (з derived): модель={payload['model']}, temp={payload['temperature']}, max_tokens={payload['max_tokens']}")
 
         current_session = self.session
         temp_session_created = False
