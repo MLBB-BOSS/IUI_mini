@@ -16,7 +16,7 @@ from aiogram.exceptions import TelegramAPIError
 
 # Імпорти з проєкту
 from config import (
-    ADMIN_USER_ID, OPENAI_API_KEY, logger, BOT_NAMES,
+    ADMIN_USER_ID, WELCOME_IMAGE_URL, OPENAI_API_KEY, logger, BOT_NAMES,
     CONVERSATIONAL_TRIGGERS, MAX_CHAT_HISTORY_LENGTH, CONVERSATIONAL_COOLDOWN_SECONDS,
     PARTY_TRIGGER_PHRASES, PARTY_LOBBY_ROLES, PARTY_LOBBY_COOLDOWN_SECONDS
 )
@@ -38,19 +38,67 @@ class PartyCreation(StatesGroup):
 
 general_router = Router()
 
-# === ГОЛОВНИЙ МАРШРУТИЗАТОР ТЕКСТОВИХ ПОВІДОМЛЕНЬ ===
+# === РЕЄСТРАЦІЯ ОБРОБНИКІВ В ПРАВИЛЬНОМУ ПОРЯДКУ ===
+
+# 1. Обробники команд (найвищий пріоритет)
+@general_router.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext, bot: Bot):
+    # ... (код з попередньої версії)
+    await state.clear()
+    user = message.from_user
+    user_name_escaped = html.escape(user.first_name if user else "Гравець")
+    logger.info(f"Користувач {user_name_escaped} (ID: {user.id}) запустив бота.")
+    kyiv_tz = timezone(timedelta(hours=3))
+    current_time_kyiv = datetime.now(kyiv_tz)
+    current_hour = current_time_kyiv.hour
+    greeting_msg = "Доброго ранку" if 5 <= current_hour < 12 else "Доброго дня" if 12 <= current_hour < 17 else "Доброго вечора" if 17 <= current_hour < 22 else "Доброї ночі"
+    emoji = "🌅" if 5 <= current_hour < 12 else "☀️" if 12 <= current_hour < 17 else "🌆" if 17 <= current_hour < 22 else "🌙"
+    welcome_caption = f"""{greeting_msg}, <b>{user_name_escaped}</b>! {emoji}\n\nЛаскаво просимо до <b>MLBB IUI mini</b>! 🎮\nЯ твій AI-помічник для всього, що стосується світу Mobile Legends.\n\nГотовий допомогти тобі стати справжньою легендою!\n\n<b>Що я можу для тебе зробити:</b>\n🔸 Проаналізувати скріншот твого ігрового профілю.\n🔸 Відповісти на запитання по грі.\n\n👇 Для початку роботи, використай одну з команд:\n• <code>/analyzeprofile</code> – для аналізу скріншота.\n• <code>/go &lt;твоє питання&gt;</code> – для консультації (наприклад, <code>/go найкращий танк</code>)."""
+    try:
+        await message.answer_photo(photo=WELCOME_IMAGE_URL, caption=welcome_caption, parse_mode=ParseMode.HTML)
+    except TelegramAPIError as e:
+        logger.error(f"Не вдалося надіслати фото для {user_name_escaped}: {e}. Відправка тексту.")
+        await message.answer(welcome_caption, parse_mode=ParseMode.HTML)
+
+
+@general_router.message(Command("go"))
+async def cmd_go(message: Message, state: FSMContext, bot: Bot):
+    # ... (код з попередньої версії)
+    await state.clear()
+    user = message.from_user
+    user_name_escaped = html.escape(user.first_name if user else "Гравець")
+    user_id = user.id if user else "невідомий"
+    user_query = message.text.replace("/go", "", 1).strip() if message.text else ""
+    if not user_query:
+        await message.reply(f"Привіт, <b>{user_name_escaped}</b>! 👋\nНапиши своє питання після <code>/go</code>.")
+        return
+    thinking_msg = await message.reply(f"🤔 {user_name_escaped}, аналізую твій запит...")
+    start_time = time.time()
+    try:
+        async with MLBBChatGPT() as gpt:
+            response_text = await gpt.get_response(user_name_escaped, user_query)
+    except Exception as e:
+        logger.exception(f"Помилка MLBBChatGPT для '{user_query}': {e}")
+        response_text = f"Вибач, {user_name_escaped}, сталася помилка."
+    processing_time = time.time() - start_time
+    admin_info = f"\n\n<i>⏱ {processing_time:.2f}с</i>" if user_id == ADMIN_USER_ID else ""
+    await send_message_in_chunks(bot, message.chat.id, f"{response_text}{admin_info}", parse_mode=ParseMode.HTML, initial_message_to_edit=thinking_msg)
+
+
+# 2. Обробник текстових повідомлень (ловить все, що не є командою)
 @general_router.message(F.text)
 async def handle_text_messages(message: Message, bot: Bot, state: FSMContext):
-    if not message.text or message.text.startswith('/') or not message.from_user: return
+    # ... (код з попередньої версії)
     text_lower = message.text.lower()
     if any(phrase in text_lower for phrase in PARTY_TRIGGER_PHRASES):
         await handle_party_request(message, bot, state)
     else:
         await handle_conversational_triggers(message, bot)
 
-# === БЛОК ЛОГІКИ "ПАТІ-МЕНЕДЖЕРА 2.0" ===
+
+# === БЛОК ЛОГІКИ "ПАТІ-МЕНЕДЖЕРА 2.0" (з попередньої версії) ===
 async def handle_party_request(message: Message, bot: Bot, state: FSMContext):
-    """Крок 1: Пропонує допомогу у створенні паті."""
+    # ... (код з попередньої версії)
     chat_id = message.chat.id
     cooldown_key = f"party_{chat_id}"
     if chat_id in active_lobbies:
@@ -62,15 +110,17 @@ async def handle_party_request(message: Message, bot: Bot, state: FSMContext):
     await message.reply("Бачу, ти хочеш зібрати паті. Допомогти тобі створити лобі?",
                         reply_markup=create_party_confirmation_keyboard())
 
+
 @general_router.callback_query(F.data == "party_create_no")
 async def on_party_creation_no(callback_query: CallbackQuery):
-    """Обробляє відмову від створення лобі."""
+    # ... (код з попередньої версії)
     await callback_query.message.edit_text("Гаразд, звертайся, якщо передумаєш! 😉")
     await callback_query.answer()
 
+
 @general_router.callback_query(F.data == "party_create_yes")
 async def on_party_creation_yes(callback_query: CallbackQuery, state: FSMContext):
-    """Крок 2: Запитує роль у ініціатора."""
+    # ... (код з попередньої версії)
     await callback_query.message.edit_text(
         "Супер! Обері свою роль, щоб я міг створити лобі:",
         reply_markup=create_role_selection_keyboard(PARTY_LOBBY_ROLES)
@@ -78,9 +128,10 @@ async def on_party_creation_yes(callback_query: CallbackQuery, state: FSMContext
     await state.set_state(PartyCreation.waiting_for_initiator_role)
     await callback_query.answer()
 
+
 @general_router.callback_query(PartyCreation.waiting_for_initiator_role, F.data.startswith("party_role_select_"))
 async def on_initiator_role_select(callback_query: CallbackQuery, state: FSMContext, bot: Bot):
-    """Крок 3: Створює лобі після вибору ролі ініціатором."""
+    # ... (код з попередньої версії)
     await state.clear()
     user = callback_query.from_user
     chat_id = callback_query.message.chat.id
@@ -108,9 +159,10 @@ async def on_initiator_role_select(callback_query: CallbackQuery, state: FSMCont
     chat_cooldowns[f"party_{chat_id}"] = time.time()
     await callback_query.answer()
 
+
 @general_router.callback_query(F.data == "join_party")
 async def on_join_party(callback_query: CallbackQuery, state: FSMContext):
-    """Крок 4: Запитує роль у гравця, що хоче приєднатися."""
+    # ... (код з попередньої версії)
     user = callback_query.from_user
     chat_id = callback_query.message.chat.id
     lobby = active_lobbies.get(chat_id)
@@ -130,9 +182,10 @@ async def on_join_party(callback_query: CallbackQuery, state: FSMContext):
     await state.update_data(role_request_message_id=role_request_msg.message_id)
     await callback_query.answer()
 
+
 @general_router.callback_query(PartyCreation.waiting_for_joiner_role, F.data.startswith("party_role_select_"))
 async def on_joiner_role_select(callback_query: CallbackQuery, state: FSMContext, bot: Bot):
-    """Крок 5: Додає гравця в лобі після вибору ролі та оновлює повідомлення."""
+    # ... (код з попередньої версії)
     user = callback_query.from_user
     chat_id = callback_query.message.chat.id
     selected_role = callback_query.data.split("party_role_select_")[1]
@@ -140,7 +193,6 @@ async def on_joiner_role_select(callback_query: CallbackQuery, state: FSMContext
     data = await state.get_data()
     await state.clear()
 
-    # Видаляємо тимчасове повідомлення із запитом ролі
     if role_request_message_id := data.get("role_request_message_id"):
         try: await bot.delete_message(chat_id, role_request_message_id)
         except TelegramAPIError: logger.warning("Не вдалося видалити повідомлення із запитом ролі.")
@@ -160,7 +212,7 @@ async def on_joiner_role_select(callback_query: CallbackQuery, state: FSMContext
                     f"<b>Гравці в паті ({len(lobby['players'])}/5):</b>\n{players_text}\n\n"
                     f"<b>Вільні ролі:</b>\n{roles_text}")
 
-    if not lobby["roles_left"]: # Паті зібрано
+    if not lobby["roles_left"]:
         logger.info(f"Паті в чаті {chat_id} повністю зібрано!")
         await bot.edit_message_text(f"{updated_text}\n\n<b>✅ Паті зібрано! Готуйтесь до бою!</b>",
                                     chat_id, lobby["message_id"], reply_markup=None, parse_mode=ParseMode.HTML)
@@ -170,56 +222,14 @@ async def on_joiner_role_select(callback_query: CallbackQuery, state: FSMContext
                            f"\n\nGL HF! 🚀")
         await bot.send_message(chat_id, final_call_text, parse_mode=ParseMode.HTML)
         del active_lobbies[chat_id]
-    else: # Паті ще збирається
+    else:
         await bot.edit_message_text(updated_text, chat_id, lobby["message_id"],
                                     reply_markup=create_party_lobby_keyboard(), parse_mode=ParseMode.HTML)
     await callback_query.answer()
 
-# === ІНШІ ОБРОБНИКИ (без суттєвих змін) ===
-# ... (Код cmd_start, cmd_go, handle_conversational_triggers, error_handler, register_general_handlers) ...
-
-# Повний код решти обробників для цілісності файлу
-@general_router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext, bot: Bot):
-    await state.clear()
-    user = message.from_user
-    user_name_escaped = html.escape(user.first_name if user else "Гравець")
-    logger.info(f"Користувач {user_name_escaped} (ID: {user.id}) запустив бота.")
-    kyiv_tz = timezone(timedelta(hours=3))
-    current_time_kyiv = datetime.now(kyiv_tz)
-    current_hour = current_time_kyiv.hour
-    greeting_msg = "Доброго ранку" if 5 <= current_hour < 12 else "Доброго дня" if 12 <= current_hour < 17 else "Доброго вечора" if 17 <= current_hour < 22 else "Доброї ночі"
-    emoji = "🌅" if 5 <= current_hour < 12 else "☀️" if 12 <= current_hour < 17 else "🌆" if 17 <= current_hour < 22 else "🌙"
-    welcome_caption = f"""{greeting_msg}, <b>{user_name_escaped}</b>! {emoji}\n\nЛаскаво просимо до <b>MLBB IUI mini</b>! 🎮\nЯ твій AI-помічник для всього, що стосується світу Mobile Legends.\n\nГотовий допомогти тобі стати справжньою легендою!\n\n<b>Що я можу для тебе зробити:</b>\n🔸 Проаналізувати скріншот твого ігрового профілю.\n🔸 Відповісти на запитання по грі.\n\n👇 Для початку роботи, використай одну з команд:\n• <code>/analyzeprofile</code> – для аналізу скріншота.\n• <code>/go &lt;твоє питання&gt;</code> – для консультації (наприклад, <code>/go найкращий танк</code>)."""
-    try:
-        await message.answer_photo(photo=WELCOME_IMAGE_URL, caption=welcome_caption, parse_mode=ParseMode.HTML)
-    except TelegramAPIError as e:
-        logger.error(f"Не вдалося надіслати фото для {user_name_escaped}: {e}. Відправка тексту.")
-        await message.answer(welcome_caption, parse_mode=ParseMode.HTML)
-
-@general_router.message(Command("go"))
-async def cmd_go(message: Message, state: FSMContext, bot: Bot):
-    await state.clear()
-    user = message.from_user
-    user_name_escaped = html.escape(user.first_name if user else "Гравець")
-    user_id = user.id if user else "невідомий"
-    user_query = message.text.replace("/go", "", 1).strip() if message.text else ""
-    if not user_query:
-        await message.reply(f"Привіт, <b>{user_name_escaped}</b>! 👋\nНапиши своє питання після <code>/go</code>.")
-        return
-    thinking_msg = await message.reply(f"🤔 {user_name_escaped}, аналізую твій запит...")
-    start_time = time.time()
-    try:
-        async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
-            response_text = await gpt.get_response(user_name_escaped, user_query)
-    except Exception as e:
-        logger.exception(f"Помилка MLBBChatGPT для '{user_query}': {e}")
-        response_text = f"Вибач, {user_name_escaped}, сталася помилка."
-    processing_time = time.time() - start_time
-    admin_info = f"\n\n<i>⏱ {processing_time:.2f}с</i>" if user_id == ADMIN_USER_ID else ""
-    await send_message_in_chunks(bot, message.chat.id, f"{response_text}{admin_info}", ParseMode.HTML, thinking_msg)
 
 async def handle_conversational_triggers(message: Message, bot: Bot):
+    # ... (код з попередньої версії)
     text_lower = message.text.lower()
     chat_id = message.chat.id
     user_name = message.from_user.first_name
@@ -246,7 +256,7 @@ async def handle_conversational_triggers(message: Message, bot: Bot):
     if should_respond:
         chat_histories[chat_id].append({"role": "user", "content": message.text})
         try:
-            async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+            async with MLBBChatGPT() as gpt:
                 reply_text = await gpt.generate_conversational_reply(user_name, list(chat_histories[chat_id]), matched_trigger_mood)
             if reply_text and "<i>" not in reply_text:
                 chat_histories[chat_id].append({"role": "assistant", "content": reply_text})
@@ -254,23 +264,8 @@ async def handle_conversational_triggers(message: Message, bot: Bot):
         except Exception as e:
             logger.exception(f"Помилка генерації адаптивної відповіді в чаті {chat_id}: {e}")
 
-async def error_handler(event: types.ErrorEvent, bot: Bot):
-    logger.error(f"Глобальна помилка: {event.exception}", exc_info=event.exception)
-    chat_id: Optional[int] = None
-    user_name = "друже"
-    update = event.update
-    if update.message and update.message.chat:
-        chat_id = update.message.chat.id
-        if update.message.from_user: user_name = html.escape(update.message.from_user.first_name or "Гравець")
-    elif update.callback_query and update.callback_query.message and update.callback_query.message.chat:
-        chat_id = update.callback_query.message.chat.id
-        if update.callback_query.from_user: user_name = html.escape(update.callback_query.from_user.first_name or "Гравець")
-        try: await update.callback_query.answer("Сталася помилка...", show_alert=True)
-        except TelegramAPIError: pass
-    if chat_id:
-        try: await bot.send_message(chat_id, f"Вибач, {user_name}, сталася непередбачена системна помилка 😔")
-        except TelegramAPIError: pass
 
 def register_general_handlers(dp: Dispatcher):
+    """Реєструє всі загальні обробники у головному диспетчері."""
     dp.include_router(general_router)
     logger.info("✅ Загальні обробники (команди, паті-менеджер 2.0 та адаптивні тригери) успішно зареєстровано.")
