@@ -3,9 +3,9 @@ import logging
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Deque, List
-from collections import defaultdict
+from collections import defaultdict, deque # <--- ВИПРАВЛЕННЯ №1: Додано імпорт deque
 
-from aiogram import Bot, Dispatcher, F, Router
+from aiogram import Bot, Dispatcher, F, Router, types # <--- Додано types для ErrorEvent
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, Update
@@ -22,8 +22,6 @@ from services.openai_service import MLBBChatGPT
 from utils.message_utils import send_message_in_chunks
 
 # === СХОВИЩЕ ІСТОРІЇ ДІАЛОГІВ ===
-# Використовуємо defaultdict для автоматичного створення deque для нових чатів.
-# deque з maxlen - ефективна структура для зберігання останніх N повідомлень.
 chat_histories: Dict[int, Deque[Dict[str, str]]] = defaultdict(
     lambda: deque(maxlen=MAX_CHAT_HISTORY_LENGTH)
 )
@@ -210,24 +208,33 @@ async def handle_trigger_messages(message: Message, bot: Bot):
             logger.exception(f"Помилка під час обробки тригерного повідомлення в чаті {chat_id}: {e}")
 
 
-async def error_handler(update_event: Update, exception: Exception, bot: Bot):
-    """Глобальний обробник помилок."""
-    logger.error(f"Глобальна помилка в error_handler: {exception} для update: {update_event.model_dump_json(exclude_none=True)}", exc_info=True)
+# <--- ВИПРАВЛЕННЯ №2: Оновлено сигнатуру error_handler ---
+async def error_handler(event: types.ErrorEvent, bot: Bot):
+    """
+    Глобальний обробник помилок, сумісний з aiogram 3.x.
+    Логує помилку та надсилає повідомлення користувачу.
+    """
+    logger.error(
+        f"Глобальна помилка: {event.exception} для update: {event.update.model_dump_json(exclude_none=True, indent=2)}",
+        exc_info=event.exception
+    )
 
     chat_id: Optional[int] = None
     user_name: str = "друже"
 
-    if update_event.message and update_event.message.chat:
-        chat_id = update_event.message.chat.id
-        if update_event.message.from_user:
-            user_name = html.escape(update_event.message.from_user.first_name or "Гравець")
-    elif update_event.callback_query and update_event.callback_query.message and update_event.callback_query.message.chat:
-        chat_id = update_event.callback_query.message.chat.id
-        if update_event.callback_query.from_user:
-            user_name = html.escape(update_event.callback_query.from_user.first_name or "Гравець")
+    update = event.update
+    if update.message and update.message.chat:
+        chat_id = update.message.chat.id
+        if update.message.from_user:
+            user_name = html.escape(update.message.from_user.first_name or "Гравець")
+    elif update.callback_query and update.callback_query.message and update.callback_query.message.chat:
+        chat_id = update.callback_query.message.chat.id
+        if update.callback_query.from_user:
+            user_name = html.escape(update.callback_query.from_user.first_name or "Гравець")
         try:
-            await update_event.callback_query.answer("Сталася помилка...", show_alert=False)
-        except Exception: pass
+            await update.callback_query.answer("Сталася помилка...", show_alert=False)
+        except Exception:
+            pass
 
     error_message_text = f"Вибач, {user_name}, сталася непередбачена системна помилка 😔\nСпробуй, будь ласка, ще раз через хвилину."
 
