@@ -811,4 +811,96 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     if not matched_trigger_mood:
         return
 
-    # --- 4. Логіка прийняття фінального рішення про
+    # --- 4. Логіка прийняття фінального рішення про відповідь ---
+    should_respond = False
+    if is_explicit_mention or is_reply_to_bot or is_name_mention:
+        should_respond = True
+        logger.info(f"Прийнято рішення відповісти: пряме звернення в чаті {chat_id} від {current_user_name}.")
+    else:
+        last_response_time = chat_cooldowns.get(chat_id, 0)
+        if (current_time - last_response_time) > CONVERSATIONAL_COOLDOWN_SECONDS:
+            should_respond = True
+            chat_cooldowns[chat_id] = current_time
+            logger.info(f"Прийнято рішення відповісти: пасивний тригер в чаті {chat_id} від {current_user_name} (кулдаун пройшов).")
+        else:
+            logger.info(f"Рішення проігнорувати: пасивний тригер в чаті {chat_id} від {current_user_name} (активний кулдаун).")
+
+    # --- 5. Генерація та відправка відповіді ---
+    if should_respond:
+        # Додаємо повідомлення користувача до історії з актуальним іменем
+        chat_histories[chat_id].append({"role": "user", "content": message.text})
+        
+        try:
+            history_for_api = list(chat_histories[chat_id])
+            async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+                # 🎯 ПЕРЕДАЄМО АКТУАЛЬНЕ ІМ'Я В GPT
+                reply_text = await gpt.generate_conversational_reply(
+                    user_name=current_user_name,  # Тепер завжди актуальне ім'я!
+                    chat_history=history_for_api,
+                    trigger_mood=matched_trigger_mood
+                )
+
+            if reply_text and "<i>" not in reply_text:
+                chat_histories[chat_id].append({"role": "assistant", "content": reply_text})
+                await message.reply(reply_text)
+                logger.info(f"Адаптивну відповідь успішно надіслано в чат {chat_id} для {current_user_name}.")
+            else:
+                logger.error(f"Сервіс повернув порожню або помилкову відповідь для чату {chat_id} користувача {current_user_name}.")
+        except Exception as e:
+            logger.exception(f"Критична помилка під час генерації адаптивної відповіді в чаті {chat_id} для {current_user_name}: {e}")
+
+
+async def error_handler(event: types.ErrorEvent, bot: Bot):
+    """
+    Глобальний обробник помилок. Логує помилку та надсилає повідомлення користувачу.
+    
+    🔧 ПОКРАЩЕНИЙ: Більш детальна обробка різних типів помилок.
+    """
+    logger.error(
+        f"Глобальна помилка: {event.exception} для update: {event.update.model_dump_json(exclude_none=True, indent=2)}",
+        exc_info=event.exception
+    )
+
+    chat_id: Optional[int] = None
+    user_name: str = "друже"
+
+    update = event.update
+    if update.message and update.message.chat:
+        chat_id = update.message.chat.id
+        user_name = get_user_display_name(update.message.from_user)  # Використовуємо безпечну функцію
+    elif update.callback_query and update.callback_query.message and update.callback_query.message.chat:
+        chat_id = update.callback_query.message.chat.id
+        user_name = get_user_display_name(update.callback_query.from_user)  # Також тут
+        try:
+            await update.callback_query.answer("Сталася помилка...", show_alert=False)
+        except TelegramAPIError:
+            pass
+
+    # Більш інформативні повідомлення залежно від типу помилки
+    if "AttributeError" in str(event.exception) and "NoneType" in str(event.exception):
+        error_message_text = f"Вибач, {user_name}, виникла технічна проблема з обробкою повідомлення 🔧\nВже виправляємо!"
+    elif "TelegramAPIError" in str(event.exception):
+        error_message_text = f"Упс, {user_name}, проблема з Telegram API 📡\nСпробуй ще раз через хвилинку."
+    else:
+        error_message_text = f"Вибач, {user_name}, сталася непередбачена системна помилка 😔\nСпробуй, будь ласка, ще раз через хвилинку."
+
+    if chat_id:
+        try:
+            await bot.send_message(chat_id, error_message_text, parse_mode=None)
+        except TelegramAPIError as e:
+            logger.error(f"Не вдалося надіслати повідомлення про системну помилку в чат {chat_id}: {e}")
+    else:
+        logger.warning("Системна помилка, але не вдалося визначити chat_id для відповіді користувачу.")
+
+
+# === ФУНКЦІЯ РЕЄСТРАЦІЇ ОБРОБНИКІВ ===
+def register_general_handlers(dp: Dispatcher):
+    """
+    Реєструє всі обробники в головному диспетчері.
+
+    КЛЮЧОВА ЗМІНА: реєструє `party_router` ПЕРЕД `general_router`,
+    щоб специфічна логіка паті мала вищий пріоритет.
+    """
+    dp.include_router(party_router)
+    dp.include_router(general_router)
+    logger.info("🚀 Обробники для паті (FSM), тригерів та 🆕 універсального Vision модуля успішно зареєстровано в правильному порядку.")
