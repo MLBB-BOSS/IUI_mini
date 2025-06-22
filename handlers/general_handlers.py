@@ -107,6 +107,36 @@ def get_user_display_name(user: Optional[types.User]) -> str:
         return "друже"
 
 
+def is_party_request_message(message: Message) -> bool:
+    """
+    🔧 БЕЗПЕЧНА ФУНКЦІЯ для визначення чи є повідомлення запитом на створення паті.
+    
+    Args:
+        message: Повідомлення від користувача.
+        
+    Returns:
+        True якщо це запит на паті, False інакше.
+    """
+    # Перевіряємо наявність тексту
+    if not message.text:
+        return False
+        
+    try:
+        text_lower = message.text.lower()
+        
+        # Перевіряємо основні ключові слова паті
+        has_party_keywords = re.search(r'\b(паті|пати|команду)\b', text_lower) is not None
+        
+        # Перевіряємо дієслова/індикатори збору
+        has_action_keywords = re.search(r'\b(збир|го|шука|грат|зібра)\w*\b|\+', text_lower) is not None
+        
+        return has_party_keywords and has_action_keywords
+        
+    except (AttributeError, TypeError) as e:
+        logger.warning(f"Помилка при перевірці party request: {e}")
+        return False
+
+
 def get_lobby_message_text(lobby_data: dict) -> str:
     """
     Форматує текст повідомлення для лобі на основі поточних даних.
@@ -139,15 +169,16 @@ def get_lobby_message_text(lobby_data: dict) -> str:
 
 # === ЛОГІКА СТВОРЕННЯ ПАТІ (FSM) НА `party_router` ===
 
-@party_router.message(F.text & F.func(lambda msg: 
-    re.search(r'\b(паті|пати|команду)\b', msg.text.lower()) and 
-    re.search(r'\b(збир|го|шука|грат|зібра)\w*\b|\+', msg.text.lower())
-))
+# 🔧 ВИПРАВЛЕНИЙ ФІЛЬТР - використовуємо безпечну функцію
+@party_router.message(F.text & F.func(is_party_request_message))
 async def ask_for_party_creation(message: Message, state: FSMContext):
     """
     Крок 0: Перехоплює повідомлення про пошук паті та запускає діалог,
     переводячи користувача у стан очікування підтвердження.
     """
+    user_name = get_user_display_name(message.from_user)
+    logger.info(f"Виявлено запит на створення паті від {user_name}: '{message.text}'")
+    
     await state.set_state(PartyCreationFSM.waiting_for_confirmation)
     await message.reply("Бачу, ти хочеш зібрати команду. Допомогти тобі?", reply_markup=create_party_confirmation_keyboard())
 
@@ -370,7 +401,12 @@ async def handle_image_messages(message: Message, bot: Bot):
     chat_id = message.chat.id
     current_time = time.time()
     current_user_name = get_user_display_name(message.from_user)
-    bot_info = await bot.get_me()
+    
+    try:
+        bot_info = await bot.get_me()
+    except Exception as e:
+        logger.error(f"Не вдалося отримати інформацію про бота: {e}")
+        return
 
     # Визначаємо пріоритет відповіді
     is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
@@ -532,7 +568,12 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     current_user_name = get_user_display_name(message.from_user)
     
     current_time = time.time()
-    bot_info = await bot.get_me()
+    
+    try:
+        bot_info = await bot.get_me()
+    except Exception as e:
+        logger.error(f"Не вдалося отримати інформацію про бота в handle_trigger_messages: {e}")
+        return
 
     # --- 2. Визначення умов для відповіді (Рівні Пріоритету) ---
     is_explicit_mention = f"@{bot_info.username.lower()}" in text_lower
@@ -594,6 +635,8 @@ async def handle_trigger_messages(message: Message, bot: Bot):
 async def error_handler(event: types.ErrorEvent, bot: Bot):
     """
     Глобальний обробник помилок. Логує помилку та надсилає повідомлення користувачу.
+    
+    🔧 ПОКРАЩЕНИЙ: Більш детальна обробка різних типів помилок.
     """
     logger.error(
         f"Глобальна помилка: {event.exception} для update: {event.update.model_dump_json(exclude_none=True, indent=2)}",
@@ -615,7 +658,13 @@ async def error_handler(event: types.ErrorEvent, bot: Bot):
         except TelegramAPIError:
             pass
 
-    error_message_text = f"Вибач, {user_name}, сталася непередбачена системна помилка 😔\nСпробуй, будь ласка, ще раз через хвилинку."
+    # Більш інформативні повідомлення залежно від типу помилки
+    if "AttributeError" in str(event.exception) and "NoneType" in str(event.exception):
+        error_message_text = f"Вибач, {user_name}, виникла технічна проблема з обробкою повідомлення 🔧\nВже виправляємо!"
+    elif "TelegramAPIError" in str(event.exception):
+        error_message_text = f"Упс, {user_name}, проблема з Telegram API 📡\nСпробуй ще раз через хвилинку."
+    else:
+        error_message_text = f"Вибач, {user_name}, сталася непередбачена системна помилка 😔\nСпробуй, будь ласка, ще раз через хвилинку."
 
     if chat_id:
         try:
