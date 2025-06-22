@@ -2,7 +2,8 @@
 Головний модуль обробників загального призначення.
 
 Цей файл містить всю логіку для:
-- Обробки  стартових команд (/start, /go).
+- 🆕 Reply Keyboard навігації (замість команд).
+- Обробки стартових команд (/start, /go).
 - Адаптивної відповіді на тригерні фрази в чаті.
 - Покрокового створення ігрового лобі (паті) з використанням FSM.
 - 🆕 Універсального розпізнавання та обробки зображень.
@@ -40,7 +41,9 @@ from config import (
     BOT_NAMES, CONVERSATIONAL_COOLDOWN_SECONDS,
     # 🆕 Нові імпорти для Vision
     VISION_AUTO_RESPONSE_ENABLED, VISION_RESPONSE_COOLDOWN_SECONDS, 
-    VISION_MAX_IMAGE_SIZE_MB, VISION_CONTENT_EMOJIS
+    VISION_MAX_IMAGE_SIZE_MB, VISION_CONTENT_EMOJIS,
+    # 🆕 Нові імпорти для Reply Keyboard
+    REPLY_KEYBOARD_ENABLED, BOT_MODES, NAVIGATION_TEXTS
 )
 from services.openai_service import MLBBChatGPT
 from utils.message_utils import send_message_in_chunks
@@ -49,6 +52,15 @@ from keyboards.inline_keyboards import (
     create_party_confirmation_keyboard,
     create_role_selection_keyboard,
     create_dynamic_lobby_keyboard
+)
+# 🆕 Імпорт Reply клавіатур
+from keyboards.reply_keyboards import (
+    create_main_keyboard,
+    create_go_keyboard,
+    create_analysis_keyboard,
+    get_keyboard_for_mode,
+    BTN_PROFILE, BTN_STATISTICS, BTN_GO, BTN_PARTY,
+    BTN_BACK, BTN_MAIN_MENU, BTN_HELP
 )
 
 # === ВИЗНАЧЕННЯ СТАНІВ FSM ===
@@ -63,6 +75,19 @@ class PartyCreationFSM(StatesGroup):
     waiting_for_role_selection = State()
 
 
+# 🆕 Стани для управління режимами навігації
+class NavigationFSM(StatesGroup):
+    """
+    Стани для управління навігацією через Reply Keyboard.
+    Відстежує поточний режим роботи користувача.
+    """
+    main_menu = State()
+    go_mode = State()
+    profile_mode = State()
+    stats_mode = State()
+    party_mode = State()
+
+
 # === СХОВИЩА ДАНИХ У ПАМ'ЯТІ ===
 # Історія повідомлень для кожного чату
 chat_histories: Dict[int, Deque[Dict[str, str]]] = defaultdict(lambda: deque(maxlen=MAX_CHAT_HISTORY_LENGTH))
@@ -70,6 +95,8 @@ chat_histories: Dict[int, Deque[Dict[str, str]]] = defaultdict(lambda: deque(max
 chat_cooldowns: Dict[int, float] = {}
 # 🆕 Кулдауни для Vision відповідей у кожному чаті
 vision_cooldowns: Dict[int, float] = {}
+# 🆕 Режими роботи для кожного користувача
+user_modes: Dict[int, str] = defaultdict(lambda: "main")
 # Сховище для активних лобі. УВАГА: для production варто використовувати Redis або БД.
 active_lobbies: Dict[str, Dict] = {}
 # Глобальний список ролей для гри
@@ -167,6 +194,145 @@ def get_lobby_message_text(lobby_data: dict) -> str:
     return f"{header}\n{players_section}{available_section}"
 
 
+# === 🆕 НОВІ ОБРОБНИКИ REPLY KEYBOARD НАВІГАЦІЇ ===
+
+@general_router.message(F.text == BTN_PROFILE)
+async def handle_profile_button(message: Message, state: FSMContext):
+    """
+    🆕 Обробник кнопки "🧑‍💼 Профіль".
+    Переводить користувача в режим аналізу профілю.
+    """
+    user_id = message.from_user.id if message.from_user else 0
+    user_name = get_user_display_name(message.from_user)
+    
+    logger.info(f"Користувач {user_name} (ID: {user_id}) натиснув кнопку 'Профіль'")
+    
+    # Встановлюємо режим та стан
+    user_modes[user_id] = "analysis"
+    await state.set_state(NavigationFSM.profile_mode)
+    
+    await message.answer(
+        NAVIGATION_TEXTS["profile_mode"],
+        reply_markup=create_analysis_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@general_router.message(F.text == BTN_STATISTICS)
+async def handle_statistics_button(message: Message, state: FSMContext):
+    """
+    🆕 Обробник кнопки "📊 Статистика".
+    Переводить користувача в режим аналізу статистики.
+    """
+    user_id = message.from_user.id if message.from_user else 0
+    user_name = get_user_display_name(message.from_user)
+    
+    logger.info(f"Користувач {user_name} (ID: {user_id}) натиснув кнопку 'Статистика'")
+    
+    # Встановлюємо режим та стан
+    user_modes[user_id] = "analysis"
+    await state.set_state(NavigationFSM.stats_mode)
+    
+    await message.answer(
+        NAVIGATION_TEXTS["stats_mode"],
+        reply_markup=create_analysis_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@general_router.message(F.text == BTN_GO)
+async def handle_go_button(message: Message, state: FSMContext):
+    """
+    🆕 Обробник кнопки "🤖 GO".
+    Переводить користувача в режим AI-асистента.
+    """
+    user_id = message.from_user.id if message.from_user else 0
+    user_name = get_user_display_name(message.from_user)
+    
+    logger.info(f"Користувач {user_name} (ID: {user_id}) натиснув кнопку 'GO'")
+    
+    # Встановлюємо режим та стан
+    user_modes[user_id] = "go"
+    await state.set_state(NavigationFSM.go_mode)
+    
+    await message.answer(
+        NAVIGATION_TEXTS["go_mode"],
+        reply_markup=create_go_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@general_router.message(F.text == BTN_PARTY)
+async def handle_party_button(message: Message, state: FSMContext):
+    """
+    🆕 Обробник кнопки "🎮 Зібрати паті".
+    Переводить користувача в режим збору команди.
+    """
+    user_id = message.from_user.id if message.from_user else 0
+    user_name = get_user_display_name(message.from_user)
+    
+    logger.info(f"Користувач {user_name} (ID: {user_id}) натиснув кнопку 'Зібрати паті'")
+    
+    # Встановлюємо режим та стан
+    user_modes[user_id] = "party"
+    await state.set_state(NavigationFSM.party_mode)
+    
+    await message.answer(
+        NAVIGATION_TEXTS["party_mode"],
+        reply_markup=create_main_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@general_router.message(F.text == BTN_MAIN_MENU)
+async def handle_main_menu_button(message: Message, state: FSMContext):
+    """
+    🆕 Обробник кнопки "🏠 Головне меню".
+    Повертає користувача до головного меню.
+    """
+    user_id = message.from_user.id if message.from_user else 0
+    user_name = get_user_display_name(message.from_user)
+    
+    logger.info(f"Користувач {user_name} (ID: {user_id}) повернувся до головного меню")
+    
+    # Скидаємо режим та стан
+    user_modes[user_id] = "main"
+    await state.set_state(NavigationFSM.main_menu)
+    
+    await message.answer(
+        NAVIGATION_TEXTS["back_to_main"],
+        reply_markup=create_main_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@general_router.message(F.text == BTN_BACK)
+async def handle_back_button(message: Message, state: FSMContext):
+    """
+    🆕 Обробник кнопки "◀️ Назад".
+    Повертає користувача до попереднього меню.
+    """
+    # Поки що просто повертаємо до головного меню
+    await handle_main_menu_button(message, state)
+
+
+@general_router.message(F.text == BTN_HELP)
+async def handle_help_button(message: Message, state: FSMContext):
+    """
+    🆕 Обробник кнопки "❓ Допомога".
+    Показує довідку по функціоналу.
+    """
+    user_id = message.from_user.id if message.from_user else 0
+    user_name = get_user_display_name(message.from_user)
+    
+    logger.info(f"Користувач {user_name} (ID: {user_id}) запросив допомогу")
+    
+    await message.answer(
+        NAVIGATION_TEXTS["help_text"],
+        parse_mode=ParseMode.HTML
+    )
+
+
 # === ЛОГІКА СТВОРЕННЯ ПАТІ (FSM) НА `party_router` ===
 
 # 🔧 ВИПРАВЛЕНИЙ ФІЛЬТР - використовуємо безпечну функцію
@@ -237,8 +403,8 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
 @general_router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     """
-    Обробник команди /start.
-    Надсилає вітальне повідомлення з зображенням та описом функціоналу.
+    🔧 ОНОВЛЕНИЙ обробник команди /start.
+    Надсилає вітальне повідомлення з Reply клавіатурою замість команд.
     """
     await state.clear()
     user = message.from_user
@@ -246,6 +412,11 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     user_id = user.id if user else "невідомий"
 
     logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) запустив бота командою /start.")
+
+    # Встановлюємо початковий режим
+    if isinstance(user_id, int):
+        user_modes[user_id] = "main"
+        await state.set_state(NavigationFSM.main_menu)
 
     kyiv_tz = timezone(timedelta(hours=3))
     current_time_kyiv = datetime.now(kyiv_tz)
@@ -259,6 +430,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
             "☀️" if 12 <= current_hour < 17 else \
             "🌆" if 17 <= current_hour < 22 else "🌙"
 
+    # 🆕 ОНОВЛЕНЕ привітання з акцентом на кнопки
     welcome_caption = f"""{greeting_msg}, <b>{user_name_escaped}</b>! {emoji}
 
 Ласкаво просимо до <b>MLBB IUI mini</b>! 🎮
@@ -266,39 +438,39 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 
 Готовий допомогти тобі стати справжньою легендою!
 
-<b>Що я можу для тебе зробити:</b>
-🔸 Проаналізувати скріншот твого ігрового профілю.
-🔸 Відповісти на запитання по грі.
-🔸 🆕 Автоматично реагувати на зображення в чаті!
+<b>🎯 Оберіть потрібну дію з меню нижче:</b>
 
-👇 Для початку роботи, використай одну з команд:
-• <code>/analyzeprofile</code> – для аналізу скріншота.
-• <code>/go &lt;твоє питання&gt;</code> – для консультації (наприклад, <code>/go найкращий танк</code>).
-• Або просто надішли будь-яке зображення! 📸
-"""
+🧑‍💼 <b>Профіль</b> - аналіз скріншота профілю
+📊 <b>Статистика</b> - аналіз статистики аккаунту  
+🤖 <b>GO</b> - універсальний AI-асистент
+🎮 <b>Зібрати паті</b> - допомога в пошуку команди
+
+<i>💡 Просто натисніть потрібну кнопку!</i>"""
 
     try:
         await message.answer_photo(
             photo=WELCOME_IMAGE_URL,
             caption=welcome_caption,
+            reply_markup=create_main_keyboard() if REPLY_KEYBOARD_ENABLED else None,
             parse_mode=ParseMode.HTML
         )
-        logger.info(f"Привітання з зображенням для {user_name_escaped} надіслано.")
+        logger.info(f"Привітання з зображенням та Reply клавіатурою для {user_name_escaped} надіслано.")
     except TelegramAPIError as e:
         logger.error(f"Не вдалося надіслати привітальне фото для {user_name_escaped}: {e}. Спроба надіслати текст.")
         fallback_text = f"""{greeting_msg}, <b>{user_name_escaped}</b>! {emoji}
-Ласкаво просимо до <b>MLBB IUI mini</b>! 🎮
-Я твій AI-помічник для всього, що стосується світу Mobile Legends.
-Готовий допомогти тобі стати справжньою легендою!
+{NAVIGATION_TEXTS["welcome"]}
 
-<b>Що я можу для тебе зробити:</b>
-🔸 Проаналізувати скріншот твого ігрового профілю (команда <code>/analyzeprofile</code>).
-🔸 Відповісти на запитання по грі (команда <code>/go &lt;твоє питання&gt;</code>).
-🔸 🆕 Автоматично реагувати на зображення в чаті!
-"""
+🧑‍💼 <b>Профіль</b> - аналіз скріншота профілю
+📊 <b>Статистика</b> - аналіз статистики аккаунту  
+🤖 <b>GO</b> - універсальний AI-асистент
+🎮 <b>Зібрати паті</b> - допомога в пошуку команди"""
         try:
-            await message.answer(fallback_text, parse_mode=ParseMode.HTML)
-            logger.info(f"Резервне текстове привітання для {user_name_escaped} надіслано.")
+            await message.answer(
+                fallback_text, 
+                reply_markup=create_main_keyboard() if REPLY_KEYBOARD_ENABLED else None,
+                parse_mode=ParseMode.HTML
+            )
+            logger.info(f"Резервне текстове привітання з Reply клавіатурою для {user_name_escaped} надіслано.")
         except TelegramAPIError as e_text:
             logger.error(f"Не вдалося надіслати навіть резервне текстове привітання для {user_name_escaped}: {e_text}")
 
@@ -306,26 +478,31 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 @general_router.message(Command("go"))
 async def cmd_go(message: Message, state: FSMContext, bot: Bot):
     """
-    Обробник команди /go.
-    Надсилає запит до GPT та повертає структуровану відповідь.
+    🔧 ЗАСТАРІЛИЙ обробник команди /go (залишений для сумісності).
+    Рекомендується використовувати кнопку "🤖 GO".
     """
-    await state.clear()
-    user = message.from_user
-    user_name_escaped = get_user_display_name(user)  # Використовуємо безпечну функцію
-    user_id = user.id if user else "невідомий"
-    user_query = message.text.replace("/go", "", 1).strip() if message.text else ""
+    user_name = get_user_display_name(message.from_user)
+    logger.info(f"Користувач {user_name} використав застарілу команду /go")
+    
+    # Перенаправляємо на кнопку GO
+    await handle_go_button(message, state)
 
-    logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) зробив запит з /go: '{user_query}'")
 
-    if not user_query:
-        logger.info(f"Порожній запит /go від {user_name_escaped}.")
-        await message.reply(
-            f"Привіт, <b>{user_name_escaped}</b>! 👋\n"
-            "Напиши своє питання після <code>/go</code>, наприклад:\n"
-            "<code>/go найкращі герої для міду</code>",
-            parse_mode=ParseMode.HTML
-        )
+@general_router.message(NavigationFSM.go_mode, F.text & ~F.text.in_([BTN_HELP, BTN_MAIN_MENU]))
+async def handle_go_mode_query(message: Message, state: FSMContext, bot: Bot):
+    """
+    🆕 Обробник запитів в режимі GO (AI-асистент).
+    Працює тільки коли користувач в режимі GO.
+    """
+    if not message.text or not message.from_user:
         return
+        
+    user = message.from_user
+    user_name_escaped = get_user_display_name(user)
+    user_id = user.id
+    user_query = message.text.strip()
+
+    logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) зробив запит в GO режимі: '{user_query}'")
 
     thinking_messages = [
         f"🤔 {user_name_escaped}, аналізую твій запит...",
@@ -348,7 +525,7 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
         logger.exception(f"Критична помилка MLBBChatGPT для '{user_query}' від {user_name_escaped}: {e}")
 
     processing_time = time.time() - start_time
-    logger.info(f"Час обробки /go для '{user_query}' від {user_name_escaped}: {processing_time:.2f}с")
+    logger.info(f"Час обробки GO запиту для '{user_query}' від {user_name_escaped}: {processing_time:.2f}с")
 
     admin_info = ""
     if user_id == ADMIN_USER_ID:
@@ -364,9 +541,9 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
             parse_mode=ParseMode.HTML,
             initial_message_to_edit=thinking_msg
         )
-        logger.info(f"Відповідь /go для {user_name_escaped} успішно надіслано (можливо, частинами).")
+        logger.info(f"Відповідь GO режиму для {user_name_escaped} успішно надіслано (можливо, частинами).")
     except Exception as e:
-        logger.error(f"Не вдалося надіслати відповідь /go для {user_name_escaped} навіть частинами: {e}", exc_info=True)
+        logger.error(f"Не вдалося надіслати відповідь GO режиму для {user_name_escaped} навіть частинами: {e}", exc_info=True)
         try:
             final_error_msg = f"Вибач, {user_name_escaped}, сталася критична помилка при відправці відповіді. Спробуйте пізніше."
             if thinking_msg:
@@ -380,15 +557,21 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
             logger.error(f"Зовсім не вдалося надіслати фінальне повідомлення про помилку для {user_name_escaped}: {final_err_send}")
 
 
-@general_router.message(F.photo)
-async def handle_image_messages(message: Message, bot: Bot):
+@general_router.message(NavigationFSM.party_mode, F.text & F.func(is_party_request_message))
+async def handle_party_mode_request(message: Message, state: FSMContext):
     """
-    🆕 Універсальний обробник зображень.
-    Автоматично розпізнає тип контенту та генерує релевантну відповідь.
-    
-    Працює з адаптивною логікою:
-    - Пряме звернення (відповідь на зображення бота) → завжди відповідає
-    - Звичайне зображення → відповідає з кулдауном та ймовірністю
+    🆕 Обробник запитів на паті в режимі збору команди.
+    Працює тільки коли користувач в режимі party.
+    """
+    # Викликаємо звичайну логіку створення паті
+    await ask_for_party_creation(message, state)
+
+
+@general_router.message(F.photo)
+async def handle_image_messages(message: Message, bot: Bot, state: FSMContext):
+    """
+    🔧 ОНОВЛЕНИЙ універсальний обробник зображень.
+    Тепер враховує поточний режим користувача для кращої обробки.
     """
     if not message.photo or not message.from_user:
         return
@@ -401,6 +584,11 @@ async def handle_image_messages(message: Message, bot: Bot):
     chat_id = message.chat.id
     current_time = time.time()
     current_user_name = get_user_display_name(message.from_user)
+    user_id = message.from_user.id
+    
+    # 🆕 Отримуємо поточний режим користувача
+    current_mode = user_modes.get(user_id, "main")
+    current_state = await state.get_state()
     
     try:
         bot_info = await bot.get_me()
@@ -411,6 +599,9 @@ async def handle_image_messages(message: Message, bot: Bot):
     # Визначаємо пріоритет відповіді
     is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
     is_caption_mention = False
+    
+    # 🆕 Особлива логіка для режимів аналізу
+    is_analysis_mode = current_state in [NavigationFSM.profile_mode.state, NavigationFSM.stats_mode.state]
     
     # Перевіряємо згадку бота в підписі до зображення
     if message.caption:
@@ -423,10 +614,11 @@ async def handle_image_messages(message: Message, bot: Bot):
     # Логіка прийняття рішення про відповідь
     should_respond = False
     
-    if is_reply_to_bot or is_caption_mention:
-        # Пряме звернення - завжди відповідаємо
+    if is_reply_to_bot or is_caption_mention or is_analysis_mode:
+        # Пряме звернення або режим аналізу - завжди відповідаємо
         should_respond = True
-        logger.info(f"Рішення обробити зображення: пряме звернення в чаті {chat_id} від {current_user_name}.")
+        reason = "режим аналізу" if is_analysis_mode else "пряме звернення"
+        logger.info(f"Рішення обробити зображення: {reason} в чаті {chat_id} від {current_user_name}.")
     else:
         # Пасивна обробка з кулдауном
         last_vision_time = vision_cooldowns.get(chat_id, 0)
@@ -472,11 +664,18 @@ async def handle_image_messages(message: Message, bot: Bot):
         
         logger.info(f"Зображення від {current_user_name} успішно завантажено та конвертовано. Розмір: {len(image_base64)} символів base64.")
 
-        # Надсилаємо "thinking" індикатор тільки для прямих звернень
+        # 🆕 Контекстні повідомлення залежно від режиму
         thinking_msg: Optional[Message] = None
-        if is_reply_to_bot or is_caption_mention:
+        if is_reply_to_bot or is_caption_mention or is_analysis_mode:
             try:
-                thinking_msg = await message.reply(f"🔍 {current_user_name}, аналізую зображення...")
+                if current_state == NavigationFSM.profile_mode.state:
+                    thinking_text = f"🧑‍💼 {current_user_name}, аналізую профіль..."
+                elif current_state == NavigationFSM.stats_mode.state:
+                    thinking_text = f"📊 {current_user_name}, аналізую статистику..."
+                else:
+                    thinking_text = f"🔍 {current_user_name}, аналізую зображення..."
+                    
+                thinking_msg = await message.reply(thinking_text)
             except TelegramAPIError as e:
                 logger.warning(f"Не вдалося надіслати thinking_msg для {current_user_name}: {e}")
 
@@ -501,13 +700,19 @@ async def handle_image_messages(message: Message, bot: Bot):
             content_type = "general"  # За замовчуванням
             response_lower = vision_response.lower()
             
-            # Простий алгоритм визначення типу
-            if any(word in response_lower for word in ["мем", "смішн", "жарт", "прикол", "кек", "лол"]):
-                content_type = "meme"
-            elif any(word in response_lower for word in ["скріншот", "гра", "матч", "катка", "профіль", "стати"]):
-                content_type = "screenshot"
-            elif any(word in response_lower for word in ["текст", "напис"]):
-                content_type = "text"
+            # 🆕 Адаптація типу відповідно до режиму
+            if current_state == NavigationFSM.profile_mode.state:
+                content_type = "profile"
+            elif current_state == NavigationFSM.stats_mode.state:
+                content_type = "stats"
+            else:
+                # Простий алгоритм визначення типу
+                if any(word in response_lower for word in ["мем", "смішн", "жарт", "прикол", "кек", "лол"]):
+                    content_type = "meme"
+                elif any(word in response_lower for word in ["скріншот", "гра", "матч", "катка", "профіль", "стати"]):
+                    content_type = "screenshot"
+                elif any(word in response_lower for word in ["текст", "напис"]):
+                    content_type = "text"
 
             # Додаємо емодзі на початок (якщо його ще немає)
             emoji = VISION_CONTENT_EMOJIS.get(content_type, "🔍")
@@ -528,6 +733,15 @@ async def handle_image_messages(message: Message, bot: Bot):
                 # Додаємо до історії чату
                 chat_histories[chat_id].append({"role": "user", "content": f"[Надіслав зображення]"})
                 chat_histories[chat_id].append({"role": "assistant", "content": final_response})
+                
+                # 🆕 Після аналізу в спеціальних режимах повертаємося до головного меню
+                if is_analysis_mode:
+                    await message.answer(
+                        "✅ Аналіз завершено! Оберіть наступну дію:",
+                        reply_markup=create_main_keyboard()
+                    )
+                    user_modes[user_id] = "main"
+                    await state.set_state(NavigationFSM.main_menu)
                 
             except TelegramAPIError as e:
                 logger.error(f"Не вдалося надіслати Vision відповідь для {current_user_name}: {e}")
@@ -558,6 +772,10 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     🔧 КЛЮЧОВЕ ВИПРАВЛЕННЯ: Тепер завжди витягуємо актуальне ім'я з поточного повідомлення!
     """
     if not message.text or message.text.startswith('/') or not message.from_user:
+        return
+
+    # Ігноруємо кнопки Reply клавіатури (вони обробляються окремо)
+    if message.text in [BTN_PROFILE, BTN_STATISTICS, BTN_GO, BTN_PARTY, BTN_BACK, BTN_MAIN_MENU, BTN_HELP]:
         return
 
     # --- 1. Збір даних для аналізу ---
@@ -593,96 +811,4 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     if not matched_trigger_mood:
         return
 
-    # --- 4. Логіка прийняття фінального рішення про відповідь ---
-    should_respond = False
-    if is_explicit_mention or is_reply_to_bot or is_name_mention:
-        should_respond = True
-        logger.info(f"Прийнято рішення відповісти: пряме звернення в чаті {chat_id} від {current_user_name}.")
-    else:
-        last_response_time = chat_cooldowns.get(chat_id, 0)
-        if (current_time - last_response_time) > CONVERSATIONAL_COOLDOWN_SECONDS:
-            should_respond = True
-            chat_cooldowns[chat_id] = current_time
-            logger.info(f"Прийнято рішення відповісти: пасивний тригер в чаті {chat_id} від {current_user_name} (кулдаун пройшов).")
-        else:
-            logger.info(f"Рішення проігнорувати: пасивний тригер в чаті {chat_id} від {current_user_name} (активний кулдаун).")
-
-    # --- 5. Генерація та відправка відповіді ---
-    if should_respond:
-        # Додаємо повідомлення користувача до історії з актуальним іменем
-        chat_histories[chat_id].append({"role": "user", "content": message.text})
-        
-        try:
-            history_for_api = list(chat_histories[chat_id])
-            async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
-                # 🎯 ПЕРЕДАЄМО АКТУАЛЬНЕ ІМ'Я В GPT
-                reply_text = await gpt.generate_conversational_reply(
-                    user_name=current_user_name,  # Тепер завжди актуальне ім'я!
-                    chat_history=history_for_api,
-                    trigger_mood=matched_trigger_mood
-                )
-
-            if reply_text and "<i>" not in reply_text:
-                chat_histories[chat_id].append({"role": "assistant", "content": reply_text})
-                await message.reply(reply_text)
-                logger.info(f"Адаптивну відповідь успішно надіслано в чат {chat_id} для {current_user_name}.")
-            else:
-                logger.error(f"Сервіс повернув порожню або помилкову відповідь для чату {chat_id} користувача {current_user_name}.")
-        except Exception as e:
-            logger.exception(f"Критична помилка під час генерації адаптивної відповіді в чаті {chat_id} для {current_user_name}: {e}")
-
-
-async def error_handler(event: types.ErrorEvent, bot: Bot):
-    """
-    Глобальний обробник помилок. Логує помилку та надсилає повідомлення користувачу.
-    
-    🔧 ПОКРАЩЕНИЙ: Більш детальна обробка різних типів помилок.
-    """
-    logger.error(
-        f"Глобальна помилка: {event.exception} для update: {event.update.model_dump_json(exclude_none=True, indent=2)}",
-        exc_info=event.exception
-    )
-
-    chat_id: Optional[int] = None
-    user_name: str = "друже"
-
-    update = event.update
-    if update.message and update.message.chat:
-        chat_id = update.message.chat.id
-        user_name = get_user_display_name(update.message.from_user)  # Використовуємо безпечну функцію
-    elif update.callback_query and update.callback_query.message and update.callback_query.message.chat:
-        chat_id = update.callback_query.message.chat.id
-        user_name = get_user_display_name(update.callback_query.from_user)  # Також тут
-        try:
-            await update.callback_query.answer("Сталася помилка...", show_alert=False)
-        except TelegramAPIError:
-            pass
-
-    # Більш інформативні повідомлення залежно від типу помилки
-    if "AttributeError" in str(event.exception) and "NoneType" in str(event.exception):
-        error_message_text = f"Вибач, {user_name}, виникла технічна проблема з обробкою повідомлення 🔧\nВже виправляємо!"
-    elif "TelegramAPIError" in str(event.exception):
-        error_message_text = f"Упс, {user_name}, проблема з Telegram API 📡\nСпробуй ще раз через хвилинку."
-    else:
-        error_message_text = f"Вибач, {user_name}, сталася непередбачена системна помилка 😔\nСпробуй, будь ласка, ще раз через хвилинку."
-
-    if chat_id:
-        try:
-            await bot.send_message(chat_id, error_message_text, parse_mode=None)
-        except TelegramAPIError as e:
-            logger.error(f"Не вдалося надіслати повідомлення про системну помилку в чат {chat_id}: {e}")
-    else:
-        logger.warning("Системна помилка, але не вдалося визначити chat_id для відповіді користувачу.")
-
-
-# === ФУНКЦІЯ РЕЄСТРАЦІЇ ОБРОБНИКІВ ===
-def register_general_handlers(dp: Dispatcher):
-    """
-    Реєструє всі обробники в головному диспетчері.
-
-    КЛЮЧОВА ЗМІНА: реєструє `party_router` ПЕРЕД `general_router`,
-    щоб специфічна логіка паті мала вищий пріоритет.
-    """
-    dp.include_router(party_router)
-    dp.include_router(general_router)
-    logger.info("🚀 Обробники для паті (FSM), тригерів та 🆕 універсального Vision модуля успішно зареєстровано в правильному порядку.")
+    # --- 4. Логіка прийняття фінального рішення про
