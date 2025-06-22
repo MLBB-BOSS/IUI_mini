@@ -74,7 +74,29 @@ party_router = Router()
 general_router = Router()
 
 
-# === ЛОГІКА СТВОРЕННЯ ПАТІ (FSM) НА `party_router` ===
+# === ДОПОМІЖНІ ФУНКЦІЇ ===
+
+def get_user_display_name(user: Optional[types.User]) -> str:
+    """
+    Витягує найкраще доступне ім'я користувача для звернення.
+    
+    Args:
+        user: Об'єкт користувача Telegram або None.
+        
+    Returns:
+        Відформатоване ім'я для звернення (завжди повертає валідний рядок).
+    """
+    if not user:
+        return "друже"
+    
+    # Пріоритет: first_name -> username -> "друже"
+    if user.first_name and user.first_name.strip():
+        return html.escape(user.first_name.strip())
+    elif user.username and user.username.strip():
+        return html.escape(user.username.strip())
+    else:
+        return "друже"
+
 
 def get_lobby_message_text(lobby_data: dict) -> str:
     """
@@ -105,7 +127,9 @@ def get_lobby_message_text(lobby_data: dict) -> str:
     available_section = "\n\n<b>Вільні ролі:</b>\n" + "\n".join(available_roles_list) if available_roles_list else "\n\n✅ <b>Команда зібрана!</b>"
     return f"{header}\n{players_section}{available_section}"
 
-# --- ОСЬ ВИПРАВЛЕННЯ ---
+
+# === ЛОГІКА СТВОРЕННЯ ПАТІ (FSM) НА `party_router` ===
+
 @party_router.message(F.text & F.func(lambda msg: 
     re.search(r'\b(паті|пати|команду)\b', msg.text.lower()) and 
     re.search(r'\b(збир|го|шука|грат|зібра)\w*\b|\+', msg.text.lower())
@@ -151,14 +175,14 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
     # КЛЮЧОВИЙ ФІКС: Ініціатор одразу додається до списку гравців!
     lobby_data = {
         "leader_id": user.id,
-        "leader_name": user.first_name,
+        "leader_name": get_user_display_name(user),  # Використовуємо безпечну функцію
         "players": {
-            user.id: {"name": user.first_name, "role": selected_role}
+            user.id: {"name": get_user_display_name(user), "role": selected_role}  # Також тут
         },
         "chat_id": callback.message.chat.id
     }
     active_lobbies[lobby_id] = lobby_data
-    logger.info(f"Створено нове лобі {lobby_id} ініціатором {user.first_name} (ID: {user.id}) з роллю {selected_role}")
+    logger.info(f"Створено нове лобі {lobby_id} ініціатором {get_user_display_name(user)} (ID: {user.id}) з роллю {selected_role}")
 
     message_text = get_lobby_message_text(lobby_data)
     keyboard = create_dynamic_lobby_keyboard(lobby_id, user.id, lobby_data)
@@ -178,7 +202,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     """
     await state.clear()
     user = message.from_user
-    user_name_escaped = html.escape(user.first_name if user else "Гравець")
+    user_name_escaped = get_user_display_name(user)  # Використовуємо безпечну функцію
     user_id = user.id if user else "невідомий"
 
     logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) запустив бота командою /start.")
@@ -244,7 +268,7 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
     """
     await state.clear()
     user = message.from_user
-    user_name_escaped = html.escape(user.first_name if user else "Гравець")
+    user_name_escaped = get_user_display_name(user)  # Використовуємо безпечну функцію
     user_id = user.id if user else "невідомий"
     user_query = message.text.replace("/go", "", 1).strip() if message.text else ""
 
@@ -317,6 +341,8 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     """
     Обробляє текстові повідомлення за "Стратегією Адаптивної Присутності",
     щоб бот поводився як розумний учасник чату, а не спамер.
+    
+    🔧 КЛЮЧОВЕ ВИПРАВЛЕННЯ: Тепер завжди витягуємо актуальне ім'я з поточного повідомлення!
     """
     if not message.text or message.text.startswith('/') or not message.from_user:
         return
@@ -324,7 +350,10 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     # --- 1. Збір даних для аналізу ---
     text_lower = message.text.lower()
     chat_id = message.chat.id
-    user_name = message.from_user.first_name
+    
+    # 🎯 ГОЛОВНЕ ВИПРАВЛЕННЯ: Завжди витягуємо ім'я з ПОТОЧНОГО повідомлення
+    current_user_name = get_user_display_name(message.from_user)
+    
     current_time = time.time()
     bot_info = await bot.get_me()
 
@@ -350,24 +379,27 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     should_respond = False
     if is_explicit_mention or is_reply_to_bot or is_name_mention:
         should_respond = True
-        logger.info(f"Прийнято рішення відповісти: пряме звернення в чаті {chat_id}.")
+        logger.info(f"Прийнято рішення відповісти: пряме звернення в чаті {chat_id} від {current_user_name}.")
     else:
         last_response_time = chat_cooldowns.get(chat_id, 0)
         if (current_time - last_response_time) > CONVERSATIONAL_COOLDOWN_SECONDS:
             should_respond = True
             chat_cooldowns[chat_id] = current_time
-            logger.info(f"Прийнято рішення відповісти: пасивний тригер в чаті {chat_id} (кулдаун пройшов).")
+            logger.info(f"Прийнято рішення відповісти: пасивний тригер в чаті {chat_id} від {current_user_name} (кулдаун пройшов).")
         else:
-            logger.info(f"Рішення проігнорувати: пасивний тригер в чаті {chat_id} (активний кулдаун).")
+            logger.info(f"Рішення проігнорувати: пасивний тригер в чаті {chat_id} від {current_user_name} (активний кулдаун).")
 
     # --- 5. Генерація та відправка відповіді ---
     if should_respond:
+        # Додаємо повідомлення користувача до історії з актуальним іменем
         chat_histories[chat_id].append({"role": "user", "content": message.text})
+        
         try:
             history_for_api = list(chat_histories[chat_id])
             async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+                # 🎯 ПЕРЕДАЄМО АКТУАЛЬНЕ ІМ'Я В GPT
                 reply_text = await gpt.generate_conversational_reply(
-                    user_name=user_name,
+                    user_name=current_user_name,  # Тепер завжди актуальне ім'я!
                     chat_history=history_for_api,
                     trigger_mood=matched_trigger_mood
                 )
@@ -375,11 +407,11 @@ async def handle_trigger_messages(message: Message, bot: Bot):
             if reply_text and "<i>" not in reply_text:
                 chat_histories[chat_id].append({"role": "assistant", "content": reply_text})
                 await message.reply(reply_text)
-                logger.info(f"Адаптивну відповідь успішно надіслано в чат {chat_id}.")
+                logger.info(f"Адаптивну відповідь успішно надіслано в чат {chat_id} для {current_user_name}.")
             else:
-                logger.error(f"Сервіс повернув порожню або помилкову відповідь для чату {chat_id}.")
+                logger.error(f"Сервіс повернув порожню або помилкову відповідь для чату {chat_id} користувача {current_user_name}.")
         except Exception as e:
-            logger.exception(f"Критична помилка під час генерації адаптивної відповіді в чаті {chat_id}: {e}")
+            logger.exception(f"Критична помилка під час генерації адаптивної відповіді в чаті {chat_id} для {current_user_name}: {e}")
 
 
 async def error_handler(event: types.ErrorEvent, bot: Bot):
@@ -397,18 +429,16 @@ async def error_handler(event: types.ErrorEvent, bot: Bot):
     update = event.update
     if update.message and update.message.chat:
         chat_id = update.message.chat.id
-        if update.message.from_user:
-            user_name = html.escape(update.message.from_user.first_name or "Гравець")
+        user_name = get_user_display_name(update.message.from_user)  # Використовуємо безпечну функцію
     elif update.callback_query and update.callback_query.message and update.callback_query.message.chat:
         chat_id = update.callback_query.message.chat.id
-        if update.callback_query.from_user:
-            user_name = html.escape(update.callback_query.from_user.first_name or "Гравець")
+        user_name = get_user_display_name(update.callback_query.from_user)  # Також тут
         try:
             await update.callback_query.answer("Сталася помилка...", show_alert=False)
         except TelegramAPIError:
             pass
 
-    error_message_text = f"Вибач, {user_name}, сталася непередбачена системна помилка 😔\nСпробуй, будь ласка, ще раз через хвилину."
+    error_message_text = f"Вибач, {user_name}, сталася непередбачена системна помилка 😔\nСпробуй, будь ласка, ще раз через хвилинку."
 
     if chat_id:
         try:
