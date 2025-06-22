@@ -7,6 +7,7 @@
 - Адаптивної відповіді на тригерні фрази в чаті.
 - Покрокового створення ігрового лобі (паті) з використанням FSM.
 - 🆕 Універсального розпізнавання та обробки зображень.
+- 🆕 Спеціалізованих команд /analyzeprofile та /analyzestats.
 - Глобальної обробки помилок.
 
 Архітектура побудована на двох роутерах для керування пріоритетами:
@@ -20,6 +21,7 @@ import time
 import base64
 import io
 import random
+import json
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Deque, List
 from collections import defaultdict, deque
@@ -83,8 +85,8 @@ class NavigationFSM(StatesGroup):
     """
     main_menu = State()
     go_mode = State()
-    profile_mode = State()
-    stats_mode = State()
+    profile_analysis = State()  # 🔧 Змінено для команди /analyzeprofile
+    stats_analysis = State()    # 🔧 Змінено для команди /analyzestats
     party_mode = State()
 
 
@@ -194,50 +196,93 @@ def get_lobby_message_text(lobby_data: dict) -> str:
     return f"{header}\n{players_section}{available_section}"
 
 
-# === 🆕 НОВІ ОБРОБНИКИ REPLY KEYBOARD НАВІГАЦІЇ ===
+# === 🆕 КОМАНДИ /analyzeprofile ТА /analyzestats ===
 
-@general_router.message(F.text == BTN_PROFILE)
-async def handle_profile_button(message: Message, state: FSMContext):
+@general_router.message(Command("analyzeprofile"))
+async def cmd_analyze_profile(message: Message, state: FSMContext, bot: Bot):
     """
-    🆕 Обробник кнопки "🧑‍💼 Профіль".
-    Переводить користувача в режим аналізу профілю.
+    🧑‍💼 Команда для аналізу скріншота профілю гравця.
+    Переводить користувача в режим очікування зображення профілю.
     """
     user_id = message.from_user.id if message.from_user else 0
     user_name = get_user_display_name(message.from_user)
     
-    logger.info(f"Користувач {user_name} (ID: {user_id}) натиснув кнопку 'Профіль'")
+    logger.info(f"Користувач {user_name} (ID: {user_id}) використав команду /analyzeprofile")
     
-    # Встановлюємо режим та стан
-    user_modes[user_id] = "analysis"
-    await state.set_state(NavigationFSM.profile_mode)
+    # Встановлюємо режим аналізу профілю
+    user_modes[user_id] = "profile_analysis"
+    await state.set_state(NavigationFSM.profile_analysis)
     
     await message.answer(
-        NAVIGATION_TEXTS["profile_mode"],
-        reply_markup=create_analysis_keyboard(),
-        parse_mode=ParseMode.HTML
+        "🧑‍💼 <b>Режим аналізу профілю активовано!</b>\n\n"
+        "📸 Надішліть скріншот профілю гравця з Mobile Legends, і я проаналізую:\n"
+        "• Нікнейм та ID\n"
+        "• Найвищий ранг\n"
+        "• Кількість матчів\n"
+        "• Лайки та локацію\n"
+        "• Сквад\n\n"
+        "<i>💡 Зображення має бути чітким та повністю показувати профіль</i>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=create_analysis_keyboard()
     )
+
+
+@general_router.message(Command("analyzestats"))
+async def cmd_analyze_stats(message: Message, state: FSMContext, bot: Bot):
+    """
+    📊 Команда для аналізу скріншота статистики гравця.
+    Переводить користувача в режим очікування зображення статистики.
+    """
+    user_id = message.from_user.id if message.from_user else 0
+    user_name = get_user_display_name(message.from_user)
+    
+    logger.info(f"Користувач {user_name} (ID: {user_id}) використав команду /analyzestats")
+    
+    # Встановлюємо режим аналізу статистики
+    user_modes[user_id] = "stats_analysis"
+    await state.set_state(NavigationFSM.stats_analysis)
+    
+    await message.answer(
+        "📊 <b>Режим аналізу статистики активовано!</b>\n\n"
+        "📸 Надішліть скріншот сторінки Statistics з Mobile Legends, і я проаналізую:\n"
+        "• Win Rate та кількість матчів\n"
+        "• MVP рейтинг\n"
+        "• KDA та участь у боях\n"
+        "• Savage, Legendary, Maniac\n"
+        "• Серії перемог та рекорди\n"
+        "• Ефективність гри\n\n"
+        "<i>💡 Скріншот має показувати повну сторінку Statistics</i>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=create_analysis_keyboard()
+    )
+
+
+# === 🆕 ОНОВЛЕНІ ОБРОБНИКИ REPLY KEYBOARD НАВІГАЦІЇ ===
+
+@general_router.message(F.text == BTN_PROFILE)
+async def handle_profile_button(message: Message, state: FSMContext, bot: Bot):
+    """
+    🆕 Обробник кнопки "🧑‍💼 Профіль".
+    Викликає команду /analyzeprofile.
+    """
+    user_name = get_user_display_name(message.from_user)
+    logger.info(f"Користувач {user_name} натиснув кнопку 'Профіль' - перенаправляю на /analyzeprofile")
+    
+    # Викликаємо обробник команди /analyzeprofile
+    await cmd_analyze_profile(message, state, bot)
 
 
 @general_router.message(F.text == BTN_STATISTICS)
-async def handle_statistics_button(message: Message, state: FSMContext):
+async def handle_statistics_button(message: Message, state: FSMContext, bot: Bot):
     """
     🆕 Обробник кнопки "📊 Статистика".
-    Переводить користувача в режим аналізу статистики.
+    Викликає команду /analyzestats.
     """
-    user_id = message.from_user.id if message.from_user else 0
     user_name = get_user_display_name(message.from_user)
+    logger.info(f"Користувач {user_name} натиснув кнопку 'Статистика' - перенаправляю на /analyzestats")
     
-    logger.info(f"Користувач {user_name} (ID: {user_id}) натиснув кнопку 'Статистика'")
-    
-    # Встановлюємо режим та стан
-    user_modes[user_id] = "analysis"
-    await state.set_state(NavigationFSM.stats_mode)
-    
-    await message.answer(
-        NAVIGATION_TEXTS["stats_mode"],
-        reply_markup=create_analysis_keyboard(),
-        parse_mode=ParseMode.HTML
-    )
+    # Викликаємо обробник команди /analyzestats
+    await cmd_analyze_stats(message, state, bot)
 
 
 @general_router.message(F.text == BTN_GO)
@@ -430,10 +475,10 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
             "☀️" if 12 <= current_hour < 17 else \
             "🌆" if 17 <= current_hour < 22 else "🌙"
 
-    # 🆕 ОНОВЛЕНЕ привітання з акцентом на кнопки
+    # 🆕 ОНОВЛЕНЕ привітання з ребрендингом на GGenius
     welcome_caption = f"""{greeting_msg}, <b>{user_name_escaped}</b>! {emoji}
 
-Ласкаво просимо до <b>MLBB IUI mini</b>! 🎮
+Ласкаво просимо до <b>GGenius</b>! 🎮
 Я твій AI-помічник для всього, що стосується світу Mobile Legends.
 
 Готовий допомогти тобі стати справжньою легендою!
@@ -442,7 +487,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 
 🧑‍💼 <b>Профіль</b> - аналіз скріншота профілю
 📊 <b>Статистика</b> - аналіз статистики аккаунту  
-🤖 <b>GO</b> - універсальний AI-асистент
+🤖 <b>GO</b> - universal AI-асистент
 🎮 <b>Зібрати паті</b> - допомога в пошуку команди
 
 <i>💡 Просто натисніть потрібну кнопку!</i>"""
@@ -458,11 +503,13 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     except TelegramAPIError as e:
         logger.error(f"Не вдалося надіслати привітальне фото для {user_name_escaped}: {e}. Спроба надіслати текст.")
         fallback_text = f"""{greeting_msg}, <b>{user_name_escaped}</b>! {emoji}
-{NAVIGATION_TEXTS["welcome"]}
+
+Ласкаво просимо до <b>GGenius</b>! 🎮
+Я твій AI-помічник для всього, що стосується світу Mobile Legends.
 
 🧑‍💼 <b>Профіль</b> - аналіз скріншота профілю
 📊 <b>Статистика</b> - аналіз статистики аккаунту  
-🤖 <b>GO</b> - універсальний AI-асистент
+🤖 <b>GO</b> - universal AI-асистент
 🎮 <b>Зібрати паті</b> - допомога в пошуку команди"""
         try:
             await message.answer(
@@ -570,8 +617,8 @@ async def handle_party_mode_request(message: Message, state: FSMContext):
 @general_router.message(F.photo)
 async def handle_image_messages(message: Message, bot: Bot, state: FSMContext):
     """
-    🔧 ОНОВЛЕНИЙ універсальний обробник зображень.
-    Тепер враховує поточний режим користувача для кращої обробки.
+    🔧 ПОВНІСТЮ ОНОВЛЕНИЙ універсальний обробник зображень.
+    Тепер враховує поточний режим користувача та викликає спеціалізовані команди.
     """
     if not message.photo or not message.from_user:
         return
@@ -600,8 +647,9 @@ async def handle_image_messages(message: Message, bot: Bot, state: FSMContext):
     is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
     is_caption_mention = False
     
-    # 🆕 Особлива логіка для режимів аналізу
-    is_analysis_mode = current_state in [NavigationFSM.profile_mode.state, NavigationFSM.stats_mode.state]
+    # 🆕 Спеціальна логіка для команд /analyzeprofile та /analyzestats
+    is_profile_analysis = current_state == NavigationFSM.profile_analysis.state
+    is_stats_analysis = current_state == NavigationFSM.stats_analysis.state
     
     # Перевіряємо згадку бота в підписі до зображення
     if message.caption:
@@ -614,10 +662,10 @@ async def handle_image_messages(message: Message, bot: Bot, state: FSMContext):
     # Логіка прийняття рішення про відповідь
     should_respond = False
     
-    if is_reply_to_bot or is_caption_mention or is_analysis_mode:
-        # Пряме звернення або режим аналізу - завжди відповідаємо
+    if is_reply_to_bot or is_caption_mention or is_profile_analysis or is_stats_analysis:
+        # Пряме звернення або режим спеціалізованого аналізу - завжди відповідаємо
         should_respond = True
-        reason = "режим аналізу" if is_analysis_mode else "пряме звернення"
+        reason = "спеціалізований аналіз" if (is_profile_analysis or is_stats_analysis) else "пряме звернення"
         logger.info(f"Рішення обробити зображення: {reason} в чаті {chat_id} від {current_user_name}.")
     else:
         # Пасивна обробка з кулдауном
@@ -666,11 +714,11 @@ async def handle_image_messages(message: Message, bot: Bot, state: FSMContext):
 
         # 🆕 Контекстні повідомлення залежно від режиму
         thinking_msg: Optional[Message] = None
-        if is_reply_to_bot or is_caption_mention or is_analysis_mode:
+        if is_reply_to_bot or is_caption_mention or is_profile_analysis or is_stats_analysis:
             try:
-                if current_state == NavigationFSM.profile_mode.state:
+                if is_profile_analysis:
                     thinking_text = f"🧑‍💼 {current_user_name}, аналізую профіль..."
-                elif current_state == NavigationFSM.stats_mode.state:
+                elif is_stats_analysis:
                     thinking_text = f"📊 {current_user_name}, аналізую статистику..."
                 else:
                     thinking_text = f"🔍 {current_user_name}, аналізую зображення..."
@@ -679,34 +727,71 @@ async def handle_image_messages(message: Message, bot: Bot, state: FSMContext):
             except TelegramAPIError as e:
                 logger.warning(f"Не вдалося надіслати thinking_msg для {current_user_name}: {e}")
 
-        # Викликаємо універсальний Vision аналіз
+        # 🔥 КЛЮЧОВА ЗМІНА: Спеціалізовані аналізи викликають правильні методи
         start_time = time.time()
-        try:
-            async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
-                vision_response = await gpt.analyze_image_universal(
-                    image_base64=image_base64,
-                    user_name=current_user_name
-                )
-        except Exception as e:
-            logger.exception(f"Критична помилка Universal Vision для {current_user_name}: {e}")
-            vision_response = None
+        final_response = None
+        
+        if is_profile_analysis:
+            # Викликаємо спеціалізований аналіз профілю (як /analyzeprofile)
+            try:
+                async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+                    vision_result = await gpt.analyze_profile_screenshot(
+                        image_base64=image_base64,
+                        user_name=current_user_name
+                    )
+            except Exception as e:
+                logger.exception(f"Критична помилка Profile Vision для {current_user_name}: {e}")
+                vision_result = None
 
-        processing_time = time.time() - start_time
-        logger.info(f"Час обробки зображення для {current_user_name}: {processing_time:.2f}с")
-
-        # Обробляємо результат
-        if vision_response and vision_response.strip():
-            # Визначаємо тип контенту для емодзі
-            content_type = "general"  # За замовчуванням
-            response_lower = vision_response.lower()
-            
-            # 🆕 Адаптація типу відповідно до режиму
-            if current_state == NavigationFSM.profile_mode.state:
-                content_type = "profile"
-            elif current_state == NavigationFSM.stats_mode.state:
-                content_type = "stats"
+            if vision_result and vision_result.get("description"):
+                final_response = f"🧑‍💼 <b>Аналіз профілю:</b>\n\n{vision_result['description']}"
+                
+                # Додаємо технічні дані для адміна
+                if user_id == ADMIN_USER_ID and vision_result.get("profile_data"):
+                    admin_data = json.dumps(vision_result["profile_data"], ensure_ascii=False, indent=2)
+                    final_response += f"\n\n<i>📊 Технічні дані:\n<code>{admin_data}</code></i>"
             else:
-                # Простий алгоритм визначення типу
+                final_response = f"Хм, {current_user_name}, не можу розібрати дані профілю з цього скріншота 🤔\n\nСпробуйте зробити більш чіткий скріншот повного профілю."
+
+        elif is_stats_analysis:
+            # Викликаємо спеціалізований аналіз статистики (як /analyzestats)
+            try:
+                async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+                    vision_result = await gpt.analyze_stats_screenshot(
+                        image_base64=image_base64,
+                        user_name=current_user_name
+                    )
+            except Exception as e:
+                logger.exception(f"Критична помилка Stats Vision для {current_user_name}: {e}")
+                vision_result = None
+
+            if vision_result and vision_result.get("description"):
+                final_response = f"📊 <b>Аналіз статистики:</b>\n\n{vision_result['description']}"
+                
+                # Додаємо технічні дані для адміна
+                if user_id == ADMIN_USER_ID and vision_result.get("stats_data"):
+                    admin_data = json.dumps(vision_result["stats_data"], ensure_ascii=False, indent=2)
+                    final_response += f"\n\n<i>📊 Технічні дані:\n<code>{admin_data}</code></i>"
+            else:
+                final_response = f"Хм, {current_user_name}, не можу розібрати дані статистики з цього скріншота 🤔\n\nПереконайтеся, що скріншот показує повну сторінку Statistics."
+
+        else:
+            # Універсальний Vision аналіз для інших режимів
+            try:
+                async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+                    vision_response = await gpt.analyze_image_universal(
+                        image_base64=image_base64,
+                        user_name=current_user_name
+                    )
+            except Exception as e:
+                logger.exception(f"Критична помилка Universal Vision для {current_user_name}: {e}")
+                vision_response = None
+
+            if vision_response and vision_response.strip():
+                # Визначаємо тип контенту для емодзі
+                content_type = "general"
+                response_lower = vision_response.lower()
+                
                 if any(word in response_lower for word in ["мем", "смішн", "жарт", "прикол", "кек", "лол"]):
                     content_type = "meme"
                 elif any(word in response_lower for word in ["скріншот", "гра", "матч", "катка", "профіль", "стати"]):
@@ -714,19 +799,25 @@ async def handle_image_messages(message: Message, bot: Bot, state: FSMContext):
                 elif any(word in response_lower for word in ["текст", "напис"]):
                     content_type = "text"
 
-            # Додаємо емодзі на початок (якщо його ще немає)
-            emoji = VISION_CONTENT_EMOJIS.get(content_type, "🔍")
-            if not any(char in vision_response[:3] for char in "🎮📸😂📝👤📊🦸⚔️📋🏆🔍"):
-                final_response = f"{emoji} {vision_response}"
+                # Додаємо емодзі на початок (якщо його ще немає)
+                emoji = VISION_CONTENT_EMOJIS.get(content_type, "🔍")
+                if not any(char in vision_response[:3] for char in "🎮📸😂📝👤📊🦸⚔️📋🏆🔍"):
+                    final_response = f"{emoji} {vision_response}"
+                else:
+                    final_response = vision_response
             else:
-                final_response = vision_response
+                final_response = f"Хм, {current_user_name}, щось не можу розібрати що тут 🤔"
 
-            # Надсилаємо відповідь
+        processing_time = time.time() - start_time
+        logger.info(f"Час обробки зображення для {current_user_name}: {processing_time:.2f}с")
+
+        # Надсилаємо відповідь
+        if final_response:
             try:
                 if thinking_msg:
-                    await thinking_msg.edit_text(final_response, parse_mode=None)
+                    await thinking_msg.edit_text(final_response, parse_mode=ParseMode.HTML)
                 else:
-                    await message.reply(final_response, parse_mode=None)
+                    await message.reply(final_response, parse_mode=ParseMode.HTML)
                     
                 logger.info(f"Vision відповідь для {current_user_name} успішно надіслано.")
                 
@@ -735,25 +826,16 @@ async def handle_image_messages(message: Message, bot: Bot, state: FSMContext):
                 chat_histories[chat_id].append({"role": "assistant", "content": final_response})
                 
                 # 🆕 Після аналізу в спеціальних режимах повертаємося до головного меню
-                if is_analysis_mode:
+                if is_profile_analysis or is_stats_analysis:
+                    user_modes[user_id] = "main"
+                    await state.set_state(NavigationFSM.main_menu)
                     await message.answer(
                         "✅ Аналіз завершено! Оберіть наступну дію:",
                         reply_markup=create_main_keyboard()
                     )
-                    user_modes[user_id] = "main"
-                    await state.set_state(NavigationFSM.main_menu)
                 
             except TelegramAPIError as e:
                 logger.error(f"Не вдалося надіслати Vision відповідь для {current_user_name}: {e}")
-                
-        else:
-            # Якщо Vision не зміг обробити
-            logger.warning(f"Vision не зміг проаналізувати зображення від {current_user_name}")
-            if thinking_msg:
-                try:
-                    await thinking_msg.edit_text(f"Хм, {current_user_name}, щось не можу розібрати що тут 🤔")
-                except TelegramAPIError:
-                    pass
 
     except Exception as e:
         logger.exception(f"Загальна помилка обробки зображення від {current_user_name}: {e}")
@@ -903,4 +985,4 @@ def register_general_handlers(dp: Dispatcher):
     """
     dp.include_router(party_router)
     dp.include_router(general_router)
-    logger.info("🚀 Обробники для паті (FSM), тригерів та 🆕 універсального Vision модуля успішно зареєстровано в правильному порядку.")
+    logger.info("🚀 Обробники для паті (FSM), тригерів, спеціалізованих команд та універсального Vision модуля успішно зареєстровано в правильному порядку пріоритетів.")
