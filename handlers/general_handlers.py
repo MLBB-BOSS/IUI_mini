@@ -5,16 +5,20 @@
 - Обробки стартових команд (/start, /go).
 - Адаптивної відповіді на тригерні фрази в чаті.
 - Покрокового створення ігрового лобі (паті) з використанням FSM.
+- 🆕 Універсального розпізнавання та обробки зображень.
 - Глобальної обробки помилок.
 
 Архітектура побудована на двох роутерах для керування пріоритетами:
 1. `party_router`: Перехоплює специфічні запити на створення паті.
-2. `general_router`: Обробляє всі інші загальні команди та повідомлення.
+2. `general_router`: Обробляє всі інші загальні команди, повідомлення та зображення.
 """
 import html
 import logging
 import re
 import time
+import base64
+import io
+import random
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Deque, List
 from collections import defaultdict, deque
@@ -22,7 +26,7 @@ from collections import defaultdict, deque
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, Update, CallbackQuery
+from aiogram.types import Message, Update, CallbackQuery, PhotoSize
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
@@ -33,7 +37,10 @@ from aiogram.fsm.state import StatesGroup, State
 from config import (
     ADMIN_USER_ID, WELCOME_IMAGE_URL, OPENAI_API_KEY, logger,
     CONVERSATIONAL_TRIGGERS, MAX_CHAT_HISTORY_LENGTH,
-    BOT_NAMES, CONVERSATIONAL_COOLDOWN_SECONDS
+    BOT_NAMES, CONVERSATIONAL_COOLDOWN_SECONDS,
+    # 🆕 Нові імпорти для Vision
+    VISION_AUTO_RESPONSE_ENABLED, VISION_RESPONSE_COOLDOWN_SECONDS, 
+    VISION_MAX_IMAGE_SIZE_MB, VISION_CONTENT_EMOJIS
 )
 from services.openai_service import MLBBChatGPT
 from utils.message_utils import send_message_in_chunks
@@ -61,6 +68,8 @@ class PartyCreationFSM(StatesGroup):
 chat_histories: Dict[int, Deque[Dict[str, str]]] = defaultdict(lambda: deque(maxlen=MAX_CHAT_HISTORY_LENGTH))
 # Кулдауни для пасивних відповідей у кожному чаті
 chat_cooldowns: Dict[int, float] = {}
+# 🆕 Кулдауни для Vision відповідей у кожному чаті
+vision_cooldowns: Dict[int, float] = {}
 # Сховище для активних лобі. УВАГА: для production варто використовувати Redis або БД.
 active_lobbies: Dict[str, Dict] = {}
 # Глобальний список ролей для гри
@@ -229,10 +238,12 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 <b>Що я можу для тебе зробити:</b>
 🔸 Проаналізувати скріншот твого ігрового профілю.
 🔸 Відповісти на запитання по грі.
+🔸 🆕 Автоматично реагувати на зображення в чаті!
 
 👇 Для початку роботи, використай одну з команд:
 • <code>/analyzeprofile</code> – для аналізу скріншота.
 • <code>/go &lt;твоє питання&gt;</code> – для консультації (наприклад, <code>/go найкращий танк</code>).
+• Або просто надішли будь-яке зображення! 📸
 """
 
     try:
@@ -252,6 +263,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 <b>Що я можу для тебе зробити:</b>
 🔸 Проаналізувати скріншот твого ігрового профілю (команда <code>/analyzeprofile</code>).
 🔸 Відповісти на запитання по грі (команда <code>/go &lt;твоє питання&gt;</code>).
+🔸 🆕 Автоматично реагувати на зображення в чаті!
 """
         try:
             await message.answer(fallback_text, parse_mode=ParseMode.HTML)
@@ -279,7 +291,8 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
         await message.reply(
             f"Привіт, <b>{user_name_escaped}</b>! 👋\n"
             "Напиши своє питання після <code>/go</code>, наприклад:\n"
-            "<code>/go найкращі герої для міду</code>"
+            "<code>/go найкращі герої для міду</code>",
+            parse_mode=ParseMode.HTML
         )
         return
 
@@ -334,6 +347,170 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
                 await message.reply(final_error_msg, parse_mode=None)
         except Exception as final_err_send:
             logger.error(f"Зовсім не вдалося надіслати фінальне повідомлення про помилку для {user_name_escaped}: {final_err_send}")
+
+
+@general_router.message(F.photo)
+async def handle_image_messages(message: Message, bot: Bot):
+    """
+    🆕 Універсальний обробник зображень.
+    Автоматично розпізнає тип контенту та генерує релевантну відповідь.
+    
+    Працює з адаптивною логікою:
+    - Пряме звернення (відповідь на зображення бота) → завжди відповідає
+    - Звичайне зображення → відповідає з кулдауном та ймовірністю
+    """
+    if not message.photo or not message.from_user:
+        return
+
+    # Перевірка, чи увімкнений Vision модуль
+    if not VISION_AUTO_RESPONSE_ENABLED:
+        logger.debug("Vision модуль вимкнений у конфігурації.")
+        return
+
+    chat_id = message.chat.id
+    current_time = time.time()
+    current_user_name = get_user_display_name(message.from_user)
+    bot_info = await bot.get_me()
+
+    # Визначаємо пріоритет відповіді
+    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
+    is_caption_mention = False
+    
+    # Перевіряємо згадку бота в підписі до зображення
+    if message.caption:
+        caption_lower = message.caption.lower()
+        is_caption_mention = (
+            f"@{bot_info.username.lower()}" in caption_lower or
+            any(re.search(r'\b' + name + r'\b', caption_lower) for name in BOT_NAMES)
+        )
+
+    # Логіка прийняття рішення про відповідь
+    should_respond = False
+    
+    if is_reply_to_bot or is_caption_mention:
+        # Пряме звернення - завжди відповідаємо
+        should_respond = True
+        logger.info(f"Рішення обробити зображення: пряме звернення в чаті {chat_id} від {current_user_name}.")
+    else:
+        # Пасивна обробка з кулдауном
+        last_vision_time = vision_cooldowns.get(chat_id, 0)
+        if (current_time - last_vision_time) > VISION_RESPONSE_COOLDOWN_SECONDS:
+            # Додаємо елемент випадковості для більш природної поведінки
+            if random.random() < 0.7:  # 70% шанс відповісти
+                should_respond = True
+                vision_cooldowns[chat_id] = current_time
+                logger.info(f"Рішення обробити зображення: пасивний режим в чаті {chat_id} від {current_user_name}.")
+            else:
+                logger.info(f"Рішення проігнорувати зображення: випадковий фактор в чаті {chat_id}.")
+        else:
+            logger.info(f"Рішення проігнорувати зображення: активний кулдаун в чаті {chat_id}.")
+
+    if not should_respond:
+        return
+
+    # Отримуємо найбільше зображення
+    largest_photo: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
+    
+    # Перевіряємо розмір файлу
+    if largest_photo.file_size and largest_photo.file_size > VISION_MAX_IMAGE_SIZE_MB * 1024 * 1024:
+        logger.warning(f"Зображення від {current_user_name} занадто велике: {largest_photo.file_size / (1024*1024):.1f}MB")
+        await message.reply(f"Вибач, {current_user_name}, зображення занадто велике для обробки 📏")
+        return
+
+    try:
+        # Завантажуємо файл
+        file_info = await bot.get_file(largest_photo.file_id)
+        if not file_info.file_path:
+            logger.error(f"Не вдалося отримати шлях до файлу зображення від {current_user_name}")
+            return
+
+        # Отримуємо байти зображення
+        image_bytes = await bot.download_file(file_info.file_path)
+        if not isinstance(image_bytes, io.BytesIO):
+            logger.error(f"Помилка завантаження зображення від {current_user_name}")
+            return
+
+        # Конвертуємо в base64
+        image_bytes.seek(0)
+        image_base64 = base64.b64encode(image_bytes.read()).decode('utf-8')
+        
+        logger.info(f"Зображення від {current_user_name} успішно завантажено та конвертовано. Розмір: {len(image_base64)} символів base64.")
+
+        # Надсилаємо "thinking" індикатор тільки для прямих звернень
+        thinking_msg: Optional[Message] = None
+        if is_reply_to_bot or is_caption_mention:
+            try:
+                thinking_msg = await message.reply(f"🔍 {current_user_name}, аналізую зображення...")
+            except TelegramAPIError as e:
+                logger.warning(f"Не вдалося надіслати thinking_msg для {current_user_name}: {e}")
+
+        # Викликаємо універсальний Vision аналіз
+        start_time = time.time()
+        try:
+            async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+                vision_response = await gpt.analyze_image_universal(
+                    image_base64=image_base64,
+                    user_name=current_user_name
+                )
+        except Exception as e:
+            logger.exception(f"Критична помилка Universal Vision для {current_user_name}: {e}")
+            vision_response = None
+
+        processing_time = time.time() - start_time
+        logger.info(f"Час обробки зображення для {current_user_name}: {processing_time:.2f}с")
+
+        # Обробляємо результат
+        if vision_response and vision_response.strip():
+            # Визначаємо тип контенту для емодзі
+            content_type = "general"  # За замовчуванням
+            response_lower = vision_response.lower()
+            
+            # Простий алгоритм визначення типу
+            if any(word in response_lower for word in ["мем", "смішн", "жарт", "прикол", "кек", "лол"]):
+                content_type = "meme"
+            elif any(word in response_lower for word in ["скріншот", "гра", "матч", "катка", "профіль", "стати"]):
+                content_type = "screenshot"
+            elif any(word in response_lower for word in ["текст", "напис"]):
+                content_type = "text"
+
+            # Додаємо емодзі на початок (якщо його ще немає)
+            emoji = VISION_CONTENT_EMOJIS.get(content_type, "🔍")
+            if not any(char in vision_response[:3] for char in "🎮📸😂📝👤📊🦸⚔️📋🏆🔍"):
+                final_response = f"{emoji} {vision_response}"
+            else:
+                final_response = vision_response
+
+            # Надсилаємо відповідь
+            try:
+                if thinking_msg:
+                    await thinking_msg.edit_text(final_response, parse_mode=None)
+                else:
+                    await message.reply(final_response, parse_mode=None)
+                    
+                logger.info(f"Vision відповідь для {current_user_name} успішно надіслано.")
+                
+                # Додаємо до історії чату
+                chat_histories[chat_id].append({"role": "user", "content": f"[Надіслав зображення]"})
+                chat_histories[chat_id].append({"role": "assistant", "content": final_response})
+                
+            except TelegramAPIError as e:
+                logger.error(f"Не вдалося надіслати Vision відповідь для {current_user_name}: {e}")
+                
+        else:
+            # Якщо Vision не зміг обробити
+            logger.warning(f"Vision не зміг проаналізувати зображення від {current_user_name}")
+            if thinking_msg:
+                try:
+                    await thinking_msg.edit_text(f"Хм, {current_user_name}, щось не можу розібрати що тут 🤔")
+                except TelegramAPIError:
+                    pass
+
+    except Exception as e:
+        logger.exception(f"Загальна помилка обробки зображення від {current_user_name}: {e}")
+        try:
+            await message.reply(f"Упс, {current_user_name}, щось пішло не так з обробкою зображення 😅")
+        except TelegramAPIError:
+            pass
 
 
 @general_router.message(F.text)
@@ -459,4 +636,4 @@ def register_general_handlers(dp: Dispatcher):
     """
     dp.include_router(party_router)
     dp.include_router(general_router)
-    logger.info("Обробники для паті (FSM) та загальні тригери успішно зареєстровано в правильному порядку.")
+    logger.info("🚀 Обробники для паті (FSM), тригерів та 🆕 універсального Vision модуля успішно зареєстровано в правильному порядку.")
