@@ -1,86 +1,82 @@
 import logging
-from aiogram import Router, Bot, types
+import os
+from aiogram import Router, Bot
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, ErrorEvent
+from aiogram.types import Message, ErrorEvent, User
+from aiogram.utils.markdown import hbold, hcode, hitalic
 from aiogram.exceptions import TelegramAPIError
-from config import ADMIN_USER_ID
 
-# Створюємо роутер для загальних обробників. Це дозволяє групувати логіку.
-general_router = Router(name="general_router")
+from app.keyboards.reply_keyboards import get_main_kb
+
+# Налаштування логера та роутера
 logger = logging.getLogger(__name__)
-
-# Ця функція не потрібна, якщо ми імпортуємо роутер напряму в main.py,
-# але я залишаю її, якщо ви використовуєте такий патерн в інших місцях.
-def register_general_handlers(dp):
-    dp.include_router(general_router)
+general_router = Router()
+ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")
 
 @general_router.message(CommandStart())
-async def cmd_start(message: types.Message):
+async def cmd_start(message: Message):
     """
-    Обробник команди /start. Вітає користувача.
+    Обробник команди /start. Вітає користувача та пропонує головне меню.
     """
-    start_message = (
-        "<b>Вітаю! Я MLBB IUI mini.</b>\n\n"
-        "Ваш персональний асистент для аналізу ігрових результатів у Mobile Legends: Bang Bang.\n\n"
-        "<b>Що я вмію:</b>\n"
-        "► Аналізувати скріншоти з результатами матчів.\n"
-        "► Надавати поради щодо збірок та стратегій.\n"
-        "► Відповідати на питання про гру.\n\n"
-        "Просто надішліть мені скріншот, і я почну аналіз!"
+    user = message.from_user
+    welcome_message = (
+        f"Привіт, {hbold(user.full_name)}! 👋\n\n"
+        f"Я — 🤖 {hbold('MLBB IUI mini')}, ваш персональний помічник у світі Mobile Legends: Bang Bang.\n\n"
+        "Я можу аналізувати скріншоти з результатами матчів, надавати статистику та поради. "
+        "Просто надішліть мені скріншот, і я зроблю все інше!\n\n"
+        "Для початку, спробуйте команду /go."
     )
-    await message.answer(start_message)
+    await message.answer(welcome_message, reply_markup=get_main_kb())
 
-@general_router.message(Command("help"))
-async def cmd_help(message: types.Message):
+@general_router.message(Command("go"))
+async def cmd_go(message: Message):
     """
-    Обробник команди /help. Надає довідкову інформацію.
+    Обробник команди /go. Інструктує користувача надіслати скріншот.
     """
-    help_text = (
-        "<b>Довідка по командам:</b>\n\n"
-        "<code>/start</code> - Перезапустити бота та отримати вітальне повідомлення.\n"
-        "<code>/help</code> - Показати це повідомлення.\n\n"
-        "<b>Основна функціональність:</b>\n"
-        "Просто надішліть зображення (скріншот) з гри в цей чат. Я автоматично його оброблю та надам детальний аналіз."
-    )
-    await message.answer(help_text)
+    await message.answer("🚀 Команда /go отримана! Надсилайте скріншот для аналізу.")
 
-async def cmd_go(message: types.Message, **data):
-    """
-    Заглушка для логіки команди /go.
-    Ця функція, ймовірно, викликається з іншого обробника (наприклад, vision_handler),
-    тому вона не декорована як обробник повідомлення.
-    """
-    await message.reply("Команда /go наразі в розробці.")
 
 async def general_error_handler(event: ErrorEvent, bot: Bot):
     """
-    Централізований обробник помилок для aiogram 3.x.
-    Логує всі винятки та сповіщає користувача/адміністратора.
+    Глобальний обробник помилок для всіх неперехоплених винятків.
 
-    Args:
-        event (ErrorEvent): Об'єкт, що містить оновлення та виняток.
-        bot (Bot): Екземпляр бота, переданий при реєстрації.
+    Цей обробник реєструється в головному диспетчері. Він логує помилку
+    та надсилає детальне сповіщення адміністратору, якщо його ID задано.
     """
-    logger.error(f"Помилка в обробнику: {event.exception}", exc_info=True)
+    logger.error(f"Неочікувана помилка: {event.exception}", exc_info=True)
 
-    user_message = "🔴 <b>Сталася помилка</b>\n\nНа жаль, під час обробки вашого запиту виникла проблема. Спробуйте, будь ласка, пізніше."
-    chat_id = event.update.message.chat.id if event.update.message else None
+    if not ADMIN_USER_ID:
+        logger.warning("ADMIN_USER_ID не встановлено. Сповіщення про помилку не буде надіслано.")
+        return
 
-    if chat_id:
-        try:
-            await bot.send_message(chat_id, user_message)
-        except Exception as e:
-            logger.error(f"Не вдалося надіслати повідомлення про помилку в чат {chat_id}: {e}")
+    # Спроба отримати інформацію про користувача, який спричинив помилку
+    user: User | None = None
+    if event.update.message:
+        user = event.update.message.from_user
+    elif event.update.callback_query:
+        user = event.update.callback_query.from_user
 
-    # Надсилаємо детальне повідомлення про помилку адміністратору
-    if ADMIN_USER_ID:
-        try:
-            admin_message = (
-                f"⚠️ <b>Зафіксовано помилку в боті!</b>\n\n"
-                f"<b>Тип помилки:</b> <code>{type(event.exception).__name__}</code>\n"
-                f"<b>Повідомлення:</b> <code>{event.exception}</code>\n\n"
-                f"<b>Update ID:</b> <code>{event.update.update_id}</code>"
-            )
-            await bot.send_message(ADMIN_USER_ID, admin_message)
-        except Exception as e:
-            logger.error(f"Не вдалося надіслати звіт про помилку адміну {ADMIN_USER_ID}: {e}")
+    user_info = "N/A"
+    if user:
+        user_info = f"{user.full_name} (@{user.username}, ID: {user.id})"
+
+    # Формування детального повідомлення для адміністратора
+    update_details = event.update.model_dump_json(indent=2, exclude_none=True)
+    error_message_to_admin = [
+        "🚨 <b>Сталася помилка у боті!</b> 🚨",
+        "",
+        f"👤 <b>Користувач:</b> {hitalic(user_info)}",
+        f"📝 <b>Виключення:</b>",
+        hcode(f"{type(event.exception).__name__}: {event.exception}"),
+        "",
+        "🗂 <b>Деталі оновлення (Update):</b>",
+        hcode(update_details)
+    ]
+
+    try:
+        await bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text="\n".join(error_message_to_admin)
+        )
+    except Exception as e:
+        logger.error(f"Критична помилка в самому обробнику помилок під час надсилання звіту адміну: {e}", exc_info=True)
