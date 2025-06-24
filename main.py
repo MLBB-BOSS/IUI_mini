@@ -1,88 +1,109 @@
 import asyncio
-import logging # Логер тепер ініціалізується в config.py
+import logging
 import os
 from datetime import datetime, timezone, timedelta
 
-from aiogram import Bot, Dispatcher, types # Added types for ErrorEvent
+from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage # <-- 1. Імпорт сховища для FSM
 from aiogram.client.default import DefaultBotProperties
-from aiogram.exceptions import TelegramAPIError 
+from aiogram.exceptions import TelegramAPIError
 
 # Імпорти з проєкту
-from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, logger 
-# Імпортуємо функції реєстрації та сам глобальний обробник помилок
-from handlers.general_handlers import register_general_handlers, error_handler as general_error_handler 
-from handlers.vision_handlers import register_vision_handlers
+from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, logger
+# Імпортуємо роутери та функції реєстрації
+from app.handlers.general_handlers import register_general_handlers, error_handler as general_error_handler
+from app.handlers.vision_handlers import register_vision_handlers
+from app.handlers.gemini_handler import gemini_router # <-- 2. Імпорт роутера Gemini
 # Імпортуємо cmd_go для передачі в vision_handlers
-from handlers.general_handlers import cmd_go
+from app.handlers.general_handlers import cmd_go
 
 
 async def main() -> None:
-    """Головна функція запуску бота."""
-    bot_version = "v2.10.0 (додано аналіз статистики гравця /analyzestats)" 
+    """
+    Головна асинхронна функція для ініціалізації та запуску Telegram-бота.
+    Вона налаштовує логування, конфігурує бота та диспетчер,
+    реєструє обробники повідомлень та помилок, і запускає polling.
+    """
+    bot_version = "v3.0.0 (інтеграція Gemini)"
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
-    bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher()
+    # Ініціалізація сховища для FSM. MemoryStorage підходить для розробки.
+    # Для production рекомендується використовувати RedisStorage.
+    storage = MemoryStorage()
 
+    bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    # Передаємо сховище в диспетчер
+    dp = Dispatcher(storage=storage)
+
+    # Реєстрація роутерів з різних модулів
+    # Такий підхід робить архітектуру чистою та модульною
     register_general_handlers(dp)
-    register_vision_handlers(dp, cmd_go_handler_func=cmd_go) 
-    
-    # Реєстрація глобального обробника помилок
-    @dp.errors()
-    async def global_error_handler_wrapper(event: types.ErrorEvent): # Recommended signature
-        """
-        Global error handler wrapper that catches unhandled exceptions.
-        It calls the main error handling logic from general_handlers.
-        'bot' instance is taken from the outer scope of main().
-        """
-        logger.debug(f"Global error wrapper caught exception: {event.exception} in update: {event.update}")
-        await general_error_handler(event, bot) # Pass ErrorEvent and bot
+    register_vision_handlers(dp, cmd_go_handler_func=cmd_go)
+    dp.include_router(gemini_router) # <-- 3. Реєстрація роутера Gemini
+
+    # Реєстрація глобального обробника помилок.
+    # Явний виклик register є більш надійним, ніж декоратор у головному файлі.
+    dp.errors.register(general_error_handler, exception=Exception)
 
     try:
         bot_info = await bot.get_me()
         logger.info(f"✅ Бот @{bot_info.username} (ID: {bot_info.id}) успішно авторизований!")
-        if ADMIN_USER_ID: # Pythonic check for non-zero/non-None ADMIN_USER_ID
-            try:
-                kyiv_tz = timezone(timedelta(hours=3))
-                launch_time_kyiv = datetime.now(kyiv_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
-                
-                admin_message_lines = [
-                    f"🤖 <b>MLBB IUI mini {bot_version} запущено!</b>",
-                    "",
-                    f"🆔 @{bot_info.username}",
-                    f"⏰ {launch_time_kyiv}",
-                    f"🔩 Моделі: Vision: <code>gpt-4o-mini</code>, Текст/Опис: <code>gpt-4.1-turbo</code> (жорстко задані)",
-                    "✨ <b>Нові функції:</b>",
-                    "  • Додано команду <code>/analyzestats</code> для аналізу скріншотів статистики гравця.",
-                    "📂 Структура проєкту та логіка обробки зображень оновлені.",
-                    "🟢 Готовий до роботи!"
-                ]
-                admin_message = "\n".join(admin_message_lines)
-                
-                await bot.send_message(str(ADMIN_USER_ID), admin_message, parse_mode=ParseMode.HTML) # Ensure ADMIN_USER_ID is str if needed by API
-                logger.info(f"Повідомлення про запуск надіслано адміну ID: {ADMIN_USER_ID}")
-            except Exception as e:
-                logger.warning(f"Не вдалося надіслати повідомлення про запуск адміну (ID: {ADMIN_USER_ID}): {e}", exc_info=True)
+
+        if ADMIN_USER_ID:
+            await notify_admin_on_startup(bot, bot_info, bot_version)
 
         logger.info("Розпочинаю polling...")
+        # Видаляємо необроблені оновлення, щоб не відповідати на старі повідомлення після перезапуску
+        await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
+
     except KeyboardInterrupt:
         logger.info("👋 Бот зупинено користувачем (KeyboardInterrupt).")
     except TelegramAPIError as e:
-        logger.critical(f"Критична помилка Telegram API під час запуску або роботи: {e}", exc_info=True)
+        logger.critical(f"Критична помилка Telegram API під час запуску: {e}", exc_info=True)
     except Exception as e:
-        logger.critical(f"Непередбачена критична помилка під час запуску або роботи: {e}", exc_info=True)
+        logger.critical(f"Непередбачена критична помилка під час запуску: {e}", exc_info=True)
     finally:
         logger.info("🛑 Зупинка бота та закриття сесій...")
-        if bot and hasattr(bot, 'session') and bot.session and not bot.session.closed:
-            try:
-                await bot.session.close()
-                logger.info("Сесію HTTP клієнта Bot закрито.")
-            except Exception as e:
-                logger.error(f"Помилка під час закриття сесії HTTP клієнта Bot: {e}", exc_info=True)
-        
+        await dp.storage.close() # Коректно закриваємо сховище
+        await bot.session.close()
         logger.info("👋 Бот остаточно зупинено.")
 
+async def notify_admin_on_startup(bot: Bot, bot_info: types.User, bot_version: str):
+    """
+    Надсилає детальне інформаційне повідомлення адміністратору під час запуску бота.
+    """
+    try:
+        kyiv_tz = timezone(timedelta(hours=3))
+        launch_time_kyiv = datetime.now(kyiv_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
+
+        admin_message_lines = [
+            f"🤖 <b>MLBB IUI mini {bot_version} запущено!</b>",
+            "",
+            f"🆔 @{bot_info.username}",
+            f"⏰ {launch_time_kyiv}",
+            "---",
+            "🔩 <b>Активні моделі:</b>",
+            "  • <b>Vision (OpenAI):</b> <code>gpt-4o-mini</code>",
+            "  • <b>Text/Analysis (Google):</b> <code>gemini-1.5-flash</code>",
+            "---",
+            "✨ <b>Ключове оновлення:</b>",
+            "  • Інтегровано модуль <b>Google Gemini</b> для аналізу тексту та зображень.",
+            "  • Додано команди <code>/start</code>, <code>/help</code>, <code>/newchat</code> для Gemini.",
+            "  • Бот тепер реагує на тригерні слова та фото з підписами.",
+            "  • Впроваджено FSM для ведення історії діалогів.",
+            "🟢 Готовий до роботи!"
+        ]
+        admin_message = "\n".join(admin_message_lines)
+
+        await bot.send_message(str(ADMIN_USER_ID), admin_message, parse_mode=ParseMode.HTML)
+        logger.info(f"Повідомлення про запуск надіслано адміну ID: {ADMIN_USER_ID}")
+    except Exception as e:
+        logger.warning(f"Не вдалося надіслати повідомлення про запуск адміну (ID: {ADMIN_USER_ID}): {e}", exc_info=True)
+
+
 if __name__ == "__main__":
+    # Налаштування логування для aiogram, щоб бачити детальніші помилки
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
     asyncio.run(main())
