@@ -9,10 +9,12 @@
 import logging
 import os
 from typing import Optional
+import asyncio
+from datetime import datetime, timezone
 
 import google.generativeai as genai
 from google.api_core.exceptions import GoogleAPIError
-from google.api_core import retry
+from google.api_core import retry_async
 
 # Імпортуємо логер, а ключ зчитуємо з os.getenv
 from config import logger
@@ -35,7 +37,7 @@ class GeminiSearch:
         self.model = genai.GenerativeModel('models/gemini-2.5-pro')
         logger.info("Модель для пошукових запитів: gemini-2.5-pro (з підтримкою Deep Research)")
 
-    @retry.Retry(predicate=retry.if_exception_type(GoogleAPIError), initial=1.0, maximum=10.0, multiplier=2.0)
+    @retry_async.AsyncRetry(predicate=retry_async.if_exception_type(GoogleAPIError), initial=1.0, maximum=10.0, multiplier=2.0)
     async def get_search_response(self, user_query: str, user_name: str) -> Optional[str]:
         """
         Асинхронно виконує пошуковий запит до Gemini з використанням "залізного" промпту.
@@ -47,6 +49,11 @@ class GeminiSearch:
         Returns:
             Пряма відповідь від моделі або повідомлення про помилку.
         """
+        # Обробка простих запитів
+        if "яка сьгодні дата" in user_query.lower() or "яка дата" in user_query.lower():
+            current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            return f"Сьогодні {current_date}, {user_name}! 😊"
+
         if len(user_query) > 1000:
             logger.warning(f"Запит від {user_name} занадто довгий: {len(user_query)} символів")
             return f"Вибач, {user_name}, твій запит занадто довгий. Скороти до 1000 символів."
@@ -74,6 +81,10 @@ class GeminiSearch:
             return response.text.strip() if response.text else f"Вибач, {user_name}, не вдалося отримати відповідь."
         except GoogleAPIError as e:
             logger.error(f"Помилка Google API під час запиту до Gemini від {user_name}: {e}")
+            if "quota" in str(e).lower():
+                logger.info(f"Quota exceeded, waiting 35 seconds for retry...")
+                await asyncio.sleep(35)  # Затримка перед повторною спробою
+                return await self.get_search_response(user_query, user_name)  # Рекурсивна повторна спроба
             return f"Вибач, {user_name}, сталась помилка під час звернення до пошукового сервісу Google. Спробуй, будь ласка, пізніше."
         except Exception as e:
             logger.exception(f"Неочікувана помилка в сервісі Gemini для {user_name}: {e}")
