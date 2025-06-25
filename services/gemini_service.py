@@ -1,4 +1,3 @@
-# services/gemini_service.py
 """
 Сервісний модуль для взаємодії з Google Vertex AI.
 Цей файл інкапсулює всю логіку для:
@@ -10,7 +9,7 @@ import logging
 import os
 from typing import Optional
 
-# 🔽 ВИПРАВЛЕНО: Використовуємо правильні імпорти з Vertex AI SDK
+# Використовуємо правильні імпорти з Vertex AI SDK
 import vertexai
 from vertexai.generative_models import GenerativeModel, Tool
 from google.api_core.exceptions import ResourceExhausted, GoogleAPIError
@@ -29,14 +28,14 @@ try:
 
 except (ValueError, ImportError) as e:
     logger.error(f"❌ Помилка ініціалізації Vertex AI: {e}")
-    raise  # Зупиняємо додаток, якщо Vertex AI не може бути ініціалізований
-
+    raise
 
 class GeminiSearch:
     def __init__(self):
+        # 🔽 ВИПРАВЛЕНО: Забираємо пробіл з назви функції.
         self.model = GenerativeModel(
             "gemini-1.5-pro-latest",
-            tools=[Tool.from_Google Search_retrieval()] # Явна активація пошуку
+            tools=[Tool.from_google_search_retrieval()] # Правильна назва: from_google_search_retrieval
         )
         logger.info(f"Модель gemini-1.5-pro-latest (Vertex AI) ініціалізовано з активованим Google Search.")
 
@@ -59,4 +58,3 @@ class GeminiSearch:
         except Exception as e:
             logger.exception(f"Неочікувана помилка в сервісі Vertex AI: {e}")
             return f"Вибач, {user_name}, щось пішло зовсім не так."
-
