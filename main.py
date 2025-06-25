@@ -17,7 +17,7 @@ from handlers.general_handlers import cmd_go
 
 async def main() -> None:
     """Головна функція запуску бота."""
-    bot_version = "v3.0.0 (Реалізовано пошук в Інтернеті)" 
+    bot_version = "v3.0.1 (Final Search Fix)" 
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -28,9 +28,6 @@ async def main() -> None:
     
     @dp.errors()
     async def global_error_handler_wrapper(event: types.ErrorEvent):
-        """
-        Global error handler wrapper that catches unhandled exceptions.
-        """
         logger.debug(f"Global error wrapper caught exception: {event.exception} in update: {event.update}")
         await general_error_handler(event, bot)
 
@@ -48,7 +45,7 @@ async def main() -> None:
                     f"🆔 @{bot_info.username}",
                     f"⏰ {launch_time_kyiv}",
                     "✨ <b>Ключове оновлення:</b>",
-                    "  • 🔎 Додано команду <code>/search</code> з реальним доступом до Google Search через Gemini Tools.",
+                    "  • 🔎 Реалізовано фінальну версію пошуку через Google Search.",
                     "🟢 Готовий до роботи!"
                 ]
                 admin_message = "\n".join(admin_message_lines)
@@ -66,8 +63,8 @@ async def main() -> None:
         logger.critical(f"Непередбачена критична помилка під час запуску або роботи: {e}", exc_info=True)
     finally:
         logger.info("🛑 Зупинка бота та закриття сесій...")
-        # 🔽 ВИПРАВЛЕНО: Використовуємо .is_closed() замість застарілого .closed
-        if bot and hasattr(bot, 'session') and bot.session and not bot.session.is_closed():
+        # 🔽 ВИПРАВЛЕНО: Використовуємо .is_closed() для сумісності з новими версіями aiogram
+        if bot and bot.session and not bot.session.is_closed():
             try:
                 await bot.session.close()
                 logger.info("Сесію HTTP клієнта Bot закрито.")
