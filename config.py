@@ -131,3 +131,27 @@ logger.info(f"Модель для Vision (аналіз скріншотів): gp
 logger.info(f"Модель для текстових генерацій (/go, опис профілю): gpt-4.1-turbo (жорстко задано)")
 logger.info(f"🆕 Універсальний Vision модуль: {'УВІМКНЕНО' if VISION_AUTO_RESPONSE_ENABLED else 'ВИМКНЕНО'}")
 logger.info(f"🆕 Reply Keyboard навігація: {'УВІМКНЕНО' if REPLY_KEYBOARD_ENABLED else 'ВИМКНЕНО'}")
+
+# === ЗАВАНТАЖЕННЯ ЗМІННИХ СЕРЕДОВИЩА ===
+load_dotenv()
+
+TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+# 🔽 ДОДАНО НОВИЙ КЛЮЧ
+GEMINI_API_KEY: str = os.getenv("API_Gemini", "") # Ти вказав, що назва змінної "API_Gemini"
+ADMIN_USER_ID: int = int(os.getenv("ADMIN_USER_ID", "0"))
+
+# ... (решта файлу)
+
+# === ПЕРЕВІРКА КРИТИЧНИХ ЗМІННИХ ===
+# 🔽 ОНОВЛЕНО ПЕРЕВІРКУ
+if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY or not GEMINI_API_KEY:
+    logger.critical("❌ TELEGRAM_BOT_TOKEN, OPENAI_API_KEY та GEMINI_API_KEY повинні бути встановлені в .env файлі")
+    raise RuntimeError("❌ Встанови TELEGRAM_BOT_TOKEN, OPENAI_API_KEY та GEMINI_API_KEY в .env файлі")
+
+logger.info(f"Модель для Vision (аналіз скріншотів): gpt-4o-mini (жорстко задано)")
+logger.info(f"Модель для текстових генерацій (/go, опис профілю): gpt-4.1-turbo (жорстко задано)")
+# 🔽 ДОДАНО НОВИЙ ЛОГ
+logger.info(f"🆕 Модель для пошуку в Інтернеті (/search): Gemini 1.5 Pro (жорстко задано)")
+logger.info(f"🆕 Універсальний Vision модуль: {'УВІМКНЕНО' if VISION_AUTO_RESPONSE_ENABLED else 'ВИМКНЕНО'}")
+logger.info(f"🆕 Reply Keyboard навігація: {'УВІМКНЕНО' if REPLY_KEYBOARD_ENABLED else 'ВИМКНЕНО'}")
