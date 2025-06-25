@@ -9,9 +9,9 @@ import logging
 import os
 from typing import Optional
 
-# Використовуємо правильні імпорти з Vertex AI SDK
+# 🔽 ВИПРАВЛЕНО: Додатково імпортуємо GoogleSearchRetrieval
 import vertexai
-from vertexai.generative_models import GenerativeModel, Tool
+from vertexai.generative_models import GenerativeModel, Tool, GoogleSearchRetrieval
 from google.api_core.exceptions import ResourceExhausted, GoogleAPIError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -32,10 +32,14 @@ except (ValueError, ImportError) as e:
 
 class GeminiSearch:
     def __init__(self):
-        # 🔽 ВИПРАВЛЕНО: Забираємо пробіл з назви функції.
+        # 🔽 ВИПРАВЛЕНО: Створюємо інструмент пошуку, передаючи йому необхідний об'єкт.
+        google_search_tool = Tool.from_google_search_retrieval(
+            google_search_retrieval=GoogleSearchRetrieval()
+        )
+        
         self.model = GenerativeModel(
             "gemini-1.5-pro-latest",
-            tools=[Tool.from_google_search_retrieval()] # Правильна назва: from_google_search_retrieval
+            tools=[google_search_tool] # Передаємо правильно створений інструмент
         )
         logger.info(f"Модель gemini-1.5-pro-latest (Vertex AI) ініціалізовано з активованим Google Search.")
 
