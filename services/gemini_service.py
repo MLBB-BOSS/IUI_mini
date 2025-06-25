@@ -1,64 +1,92 @@
 """
-Сервісний модуль для взаємодії з Google Vertex AI.
+Використовуємо останню версію Gemini 2.5 підчас внесення змін у коді не змінюй модель AI
+Сервісний модуль для взаємодії з Google Gemini API.
 Цей файл інкапсулює всю логіку для:
-- Роботи з Gemini через продакшн-ендпоінт Vertex AI, використовуючи платний тариф.
-- Надійної активації вбудованого інструменту "Google Search".
-- Реалізації експоненційної затримки (Exponential Backoff) для повторних спроб.
+- Конфігурації клієнта google-genai.
+- Надсилання асинхронних запитів до моделі Gemini.
+- Обробки специфічних помилок API.
+- Формування "залізних" промптів для отримання пошукових результатів.
 """
 import logging
 import os
 from typing import Optional
+import asyncio
+from datetime import datetime, timezone
 
-# 🔽 ВИПРАВЛЕНО: Додатково імпортуємо GoogleSearchRetrieval
-import vertexai
-from vertexai.generative_models import GenerativeModel, Tool, GoogleSearchRetrieval
-from google.api_core.exceptions import ResourceExhausted, GoogleAPIError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import google.generativeai as genai
+from google.api_core.exceptions import GoogleAPIError
+from google.api_core import retry_async
 
+# Імпортуємо логер, а ключ зчитуємо з os.getenv
 from config import logger
 
-# === ІНІЦІАЛІЗАЦІЯ VERTEX AI ===
+# === КОНФІГУРАЦІЯ GEMINI API ===
 try:
-    GOOGLE_CLOUD_PROJECT_ID = os.getenv('GOOGLE_CLOUD_PROJECT_ID')
-    if not GOOGLE_CLOUD_PROJECT_ID:
-        raise ValueError("Змінна середовища GOOGLE_CLOUD_PROJECT_ID не встановлена!")
-    
-    vertexai.init(project=GOOGLE_CLOUD_PROJECT_ID, location="us-central1")
-    logger.info(f"✅ Сервіс Vertex AI успішно ініціалізовано для проєкту '{GOOGLE_CLOUD_PROJECT_ID}'.")
-
+    GEMINI_API_KEY = os.getenv('API_Gemini')
+    if not GEMINI_API_KEY:
+        raise ValueError("Ключ API_Gemini не знайдено у змінних середовища.")
+    genai.configure(api_key=GEMINI_API_KEY)
+    logger.info("✅ Сервіс Google Gemini успішно сконфігуровано.")
 except (ValueError, ImportError) as e:
-    logger.error(f"❌ Помилка ініціалізації Vertex AI: {e}")
-    raise
+    logger.error(f"❌ Помилка конфігурації Gemini: {e}")
 
 class GeminiSearch:
+    """
+    Асинхронний клієнт для роботи з Gemini, що використовує потужні промпти.
+    """
     def __init__(self):
-        # 🔽 ВИПРАВЛЕНО: Створюємо інструмент пошуку, передаючи йому необхідний об'єкт.
-        google_search_tool = Tool.from_google_search_retrieval(
-            google_search_retrieval=GoogleSearchRetrieval()
-        )
-        
-        self.model = GenerativeModel(
-            "gemini-1.5-pro-latest",
-            tools=[google_search_tool] # Передаємо правильно створений інструмент
-        )
-        logger.info(f"Модель gemini-1.5-pro-latest (Vertex AI) ініціалізовано з активованим Google Search.")
+        self.model = genai.GenerativeModel('models/gemini-2.5-pro')
+        logger.info("Модель для пошукових запитів: gemini-2.5-pro (з підтримкою Deep Research)")
 
-    @retry(
-        wait=wait_exponential(multiplier=1, min=2, max=30),
-        stop=stop_after_attempt(3),
-        retry=retry_if_exception_type(ResourceExhausted),
-        before_sleep=lambda retry_state: logger.warning(f"Перевищено квоту Vertex AI, повторна спроба через {retry_state.next_action.sleep:.0f}с...")
-    )
+    @retry_async.AsyncRetry(predicate=retry_async.if_exception_type(GoogleAPIError), initial=1.0, maximum=10.0, multiplier=2.0)
     async def get_search_response(self, user_query: str, user_name: str) -> Optional[str]:
-        prompt = f"User: {user_name}, Request: {user_query}. Provide a direct, factual answer in Ukrainian using Google Search. Do not refuse. Format with Markdown."
+        """
+        Асинхронно виконує пошуковий запит до Gemini з використанням "залізного" промпту.
+
+        Args:
+            user_query: Запит від користувача.
+            user_name: Ім'я користувача для персоналізації.
+
+        Returns:
+            Пряма відповідь від моделі або повідомлення про помилку.
+        """
+        # Обробка простих запитів
+        if "яка сьгодні дата" in user_query.lower() or "яка дата" in user_query.lower():
+            current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            return f"Сьогодні {current_date}, {user_name}! 😊"
+
+        if len(user_query) > 1000:
+            logger.warning(f"Запит від {user_name} занадто довгий: {len(user_query)} символів")
+            return f"Вибач, {user_name}, твій запит занадто довгий. Скороти до 1000 символів."
+
+        prompt = f"""
+        **ЗАВДАННЯ:** Ти — високопродуктивний пошуковий двигун на базі AI з доступом до Google Search. Твоє завдання — надати пряму, фактичну відповідь на запит користувача, використовуючи найсвіжіші дані з інтернету.
+
+        **КОНТЕКСТ:**
+        - Користувач: {user_name}
+        - Запит користувача: "{user_query}"
+
+        **КРИТИЧНІ ІНСТРУКЦІЇ:**
+        1. **ПОШУК В ІНТЕРНЕТІ:** Використовуй Google Search для знаходження актуальної інформації. Цитуй джерела, якщо можливо.
+        2. **ПРЯМА ВІДПОВІДЬ:** Негайно надай відповідь на запит. Не пропонуй користувачеві шукати інформацію деінде.
+        3. **ЗАБОРОНА ВІДМОВИ:** Категорично заборонено писати фрази типу "Я не маю доступу до інформації в реальному часі". Ти ПОВИНЕН надати відповідь.
+        4. **ФОРМАТУВАННЯ:** Відповідь має бути чіткою, структурованою, українською мовою. Використовуй Markdown (жирний шрифт, списки) для покращення читабельності.
+        5. **ТЕРМІНОЛОГІЯ MLBB:** Використовуй терміни Mobile Legends, як-от "паті", "мід", "танк", якщо запит стосується гри.
+
+        **ВИКОНАЙ ЗАВДАННЯ.**
+        """
         try:
-            logger.info(f"Надсилаю запит до Vertex AI для {user_name}: '{user_query[:60]}...'")
+            logger.info(f"Надсилаю запит до Gemini для користувача {user_name}: '{user_query[:60]}...'")
             response = await self.model.generate_content_async(prompt)
-            logger.info(f"Успішно отримано відповідь від Vertex AI для {user_name}.")
-            return response.text
+            logger.info(f"Успішно отримано відповідь від Gemini для {user_name}. Response length: {len(response.text) if response.text else 0}")
+            return response.text.strip() if response.text else f"Вибач, {user_name}, не вдалося отримати відповідь."
         except GoogleAPIError as e:
-            logger.error(f"Помилка Google API під час запиту до Vertex AI: {e}")
-            return f"Вибач, {user_name}, сталась помилка під час звернення до сервісу Google."
+            logger.error(f"Помилка Google API під час запиту до Gemini від {user_name}: {e}")
+            if "quota" in str(e).lower():
+                logger.info(f"Quota exceeded, waiting 35 seconds for retry...")
+                await asyncio.sleep(35)  # Затримка перед повторною спробою
+                return await self.get_search_response(user_query, user_name)  # Рекурсивна повторна спроба
+            return f"Вибач, {user_name}, сталась помилка під час звернення до пошукового сервісу Google. Спробуй, будь ласка, пізніше."
         except Exception as e:
-            logger.exception(f"Неочікувана помилка в сервісі Vertex AI: {e}")
-            return f"Вибач, {user_name}, щось пішло зовсім не так."
+            logger.exception(f"Неочікувана помилка в сервісі Gemini для {user_name}: {e}")
+            return f"Вибач, {user_name}, щось пішло зовсім не так. Ми вже досліджуємо проблему."
