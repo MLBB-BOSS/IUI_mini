@@ -211,8 +211,8 @@ UNIVERSAL_VISION_PROMPT_TEMPLATE = """
 """
 
 class MLBBChatGPT:
-    TEXT_MODEL = "gpt-4.1-turbo" 
-    VISION_MODEL = "gpt-4o-mini" 
+    TEXT_MODEL = "gpt-4.1" 
+    VISION_MODEL = "gpt-4.1" 
 
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
