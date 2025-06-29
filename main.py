@@ -1,4 +1,3 @@
-#main.py
 import asyncio
 import logging
 import os
@@ -11,30 +10,41 @@ from aiogram.exceptions import TelegramAPIError
 
 # Імпорти з проєкту
 from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, logger
-from handlers.general_handlers import register_general_handlers, error_handler as general_error_handler
+# Оновлені імпорти з general_handlers
+from handlers.general_handlers import (
+    register_general_handlers, 
+    set_bot_commands,  # 🆕 Імпортуємо функцію для встановлення команд
+    error_handler as general_error_handler
+)
 from handlers.vision_handlers import register_vision_handlers
-# 🆕 Імпортуємо функцію реєстрації для нового функціоналу
 from handlers.registration_handler import register_registration_handlers
 from handlers.general_handlers import cmd_go
 
 
 async def main() -> None:
     """Головна функція запуску бота."""
-    bot_version = "v3.0.0 (Реєстрація користувачів)"
+    bot_version = "v3.0.1 (Fix-Commands)"
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
+    # 🆕 Встановлюємо команди бота при старті
+    await set_bot_commands(bot)
+
     # Реєстрація всіх роутерів
     register_general_handlers(dp)
     register_vision_handlers(dp, cmd_go_handler_func=cmd_go)
-    # 🆕 Реєструємо новий роутер для обробки реєстрації
     register_registration_handlers(dp)
 
     # Реєстрація глобального обробника помилок
     @dp.errors()
     async def global_error_handler_wrapper(event: types.ErrorEvent):
+        """
+        Global error handler wrapper that catches unhandled exceptions.
+        It calls the main error handling logic from general_handlers.
+        'bot' instance is taken from the outer scope of main().
+        """
         logger.debug(f"Global error wrapper caught exception: {event.exception} in update: {event.update}")
         await general_error_handler(event, bot)
 
@@ -51,9 +61,9 @@ async def main() -> None:
                     "",
                     f"🆔 @{bot_info.username}",
                     f"⏰ {launch_time_kyiv}",
-                    "✨ <b>Нові функції:</b>",
-                    "  • Додано повний цикл реєстрації користувачів через команду <code>/register</code>.",
-                    "  • Інтегровано базу даних для зберігання профілів.",
+                    "✨ <b>Зміни:</b>",
+                    "  • Додано команду /register до меню.",
+                    "  • Виправлено логіку реєстрації команд.",
                     "🟢 Готовий до роботи!"
                 ]
                 admin_message = "\n".join(admin_message_lines)
@@ -67,7 +77,10 @@ async def main() -> None:
         await dp.start_polling(bot)
     except KeyboardInterrupt:
         logger.info("👋 Бот зупинено користувачем (KeyboardInterrupt).")
-    # ... (решта блоку finally) ...
+    except TelegramAPIError as e:
+        logger.critical(f"Критична помилка Telegram API під час запуску або роботи: {e}", exc_info=True)
+    except Exception as e:
+        logger.critical(f"Непередбачена критична помилка під час запуску або роботи: {e}", exc_info=True)
     finally:
         logger.info("🛑 Зупинка бота та закриття сесій...")
         if bot and hasattr(bot, 'session') and bot.session and not bot.session.closed:
