@@ -13,17 +13,16 @@ from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, logger
 from handlers.general_handlers import (
     register_general_handlers, 
     set_bot_commands,
-    error_handler as general_error_handler
+    error_handler as general_error_handler,
+    cmd_go  # Імпортуємо cmd_go для передачі
 )
 from handlers.vision_handlers import register_vision_handlers
 from handlers.registration_handler import register_registration_handlers
-# Ми можемо видалити цей імпорт, оскільки він більше не потрібен тут
-# from handlers.general_handlers import cmd_go
 
 
 async def main() -> None:
     """Головна функція запуску бота."""
-    bot_version = "v3.0.2 (Router-Fix)"
+    bot_version = "v3.0.3 (Final-Fix)"
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -32,12 +31,11 @@ async def main() -> None:
     # Встановлюємо команди бота при старті
     await set_bot_commands(bot)
 
-    #  критично важлива зміна: реєструємо специфічні роутери ПЕРЕД загальними
+    # Реєструємо специфічні роутери ПЕРЕД загальними для правильного пріоритету
     register_registration_handlers(dp)
     
-    # Тепер реєструємо решту роутерів
-    # Ми передаємо `dp` замість `cmd_go`, оскільки `vision_handlers` тепер буде сам реєструвати свої команди
-    register_vision_handlers(dp) 
+    # Тепер реєструємо решту роутерів, передаючи всі необхідні аргументи
+    register_vision_handlers(dp, cmd_go_handler_func=cmd_go) 
     register_general_handlers(dp)
 
     # Реєстрація глобального обробника помилок
@@ -65,7 +63,8 @@ async def main() -> None:
                     f"🆔 @{bot_info.username}",
                     f"⏰ {launch_time_kyiv}",
                     "✨ <b>Зміни:</b>",
-                    "  • Виправлено порядок реєстрації роутерів для коректної роботи команд.",
+                    "  • Виправлено TypeError при запуску.",
+                    "  • Відновлено передачу аргументів в vision_handlers.",
                     "🟢 Готовий до роботи!"
                 ]
                 admin_message = "\n".join(admin_message_lines)
@@ -76,6 +75,8 @@ async def main() -> None:
                 logger.warning(f"Не вдалося надіслати повідомлення про запуск адміну (ID: {ADMIN_USER_ID}): {e}", exc_info=True)
 
         logger.info("Розпочинаю polling...")
+        # Видаляємо всі оновлення, що накопичилися, поки бот був офлайн
+        await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
     except KeyboardInterrupt:
         logger.info("👋 Бот зупинено користувачем (KeyboardInterrupt).")
