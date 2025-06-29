@@ -1,3 +1,4 @@
+#main.py
 import asyncio
 import logging # Логер тепер ініціалізується в config.py
 import os
