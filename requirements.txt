@@ -6,3 +6,7 @@ redis>=5.0.0
 apscheduler==3.10.4
 google-genai==1.21.1
 google-generativeai==0.5.4
+cloudinary==1.40.0
+# 🆕 Додано бібліотеки для роботи з базою даних
+SQLAlchemy==2.0.30
+asyncpg==0.29.0
