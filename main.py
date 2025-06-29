@@ -10,32 +10,35 @@ from aiogram.exceptions import TelegramAPIError
 
 # Імпорти з проєкту
 from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, logger
-# Оновлені імпорти з general_handlers
 from handlers.general_handlers import (
     register_general_handlers, 
-    set_bot_commands,  # 🆕 Імпортуємо функцію для встановлення команд
+    set_bot_commands,
     error_handler as general_error_handler
 )
 from handlers.vision_handlers import register_vision_handlers
 from handlers.registration_handler import register_registration_handlers
-from handlers.general_handlers import cmd_go
+# Ми можемо видалити цей імпорт, оскільки він більше не потрібен тут
+# from handlers.general_handlers import cmd_go
 
 
 async def main() -> None:
     """Головна функція запуску бота."""
-    bot_version = "v3.0.1 (Fix-Commands)"
+    bot_version = "v3.0.2 (Router-Fix)"
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # 🆕 Встановлюємо команди бота при старті
+    # Встановлюємо команди бота при старті
     await set_bot_commands(bot)
 
-    # Реєстрація всіх роутерів
-    register_general_handlers(dp)
-    register_vision_handlers(dp, cmd_go_handler_func=cmd_go)
+    #  критично важлива зміна: реєструємо специфічні роутери ПЕРЕД загальними
     register_registration_handlers(dp)
+    
+    # Тепер реєструємо решту роутерів
+    # Ми передаємо `dp` замість `cmd_go`, оскільки `vision_handlers` тепер буде сам реєструвати свої команди
+    register_vision_handlers(dp) 
+    register_general_handlers(dp)
 
     # Реєстрація глобального обробника помилок
     @dp.errors()
@@ -62,8 +65,7 @@ async def main() -> None:
                     f"🆔 @{bot_info.username}",
                     f"⏰ {launch_time_kyiv}",
                     "✨ <b>Зміни:</b>",
-                    "  • Додано команду /register до меню.",
-                    "  • Виправлено логіку реєстрації команд.",
+                    "  • Виправлено порядок реєстрації роутерів для коректної роботи команд.",
                     "🟢 Готовий до роботи!"
                 ]
                 admin_message = "\n".join(admin_message_lines)
