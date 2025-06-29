@@ -2,9 +2,9 @@
 Обробники для процесу реєстрації нового користувача.
 """
 import html
+import json
 import base64
 import io
-# 🆕 Виправлено: додано Dispatcher до імпортів
 from aiogram import Bot, F, Router, types, Dispatcher
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -21,19 +21,24 @@ registration_router = Router()
 
 def format_profile_data_for_confirmation(data: dict) -> str:
     """Форматує дані профілю для повідомлення-підтвердження."""
-    # Перетворюємо список героїв на рядок, якщо він існує
-    heroes = data.get('favorite_heroes', [])
+    # 🆕 Виправлено: Елегантна обробка Win Rate
+    win_rate = data.get('win_rate')
+    win_rate_str = f"{win_rate}%" if win_rate is not None else "Не знайдено"
+
+    # Обробка списку героїв
+    heroes = data.get('favorite_heroes', 'Не знайдено')
     if isinstance(heroes, list):
         heroes_str = ", ".join(heroes)
     else:
-        heroes_str = str(heroes) # На випадок, якщо AI поверне рядок
+        # Переконуємося, що None не перетвориться на "None"
+        heroes_str = heroes if heroes is not None else "Не знайдено"
 
     return (
         f"👤 <b>Нікнейм:</b> {html.escape(data.get('nickname', 'Не знайдено'))}\n"
         f"🆔 <b>ID:</b> {data.get('player_id', 'N/A')} ({data.get('server_id', 'N/A')})\n"
         f"🏆 <b>Ранг:</b> {html.escape(data.get('current_rank', 'Не знайдено'))}\n"
         f"⚔️ <b>Матчів:</b> {data.get('total_matches', 'Не знайдено')}\n"
-        f"📊 <b>WR:</b> {data.get('win_rate', 'Не знайдено')}%\n\n"
+        f"📊 <b>WR:</b> {win_rate_str}\n\n"
         f"🦸 <b>Улюблені герої:</b>\n• {html.escape(heroes_str)}"
     )
 
@@ -47,7 +52,9 @@ async def cmd_register(message: Message, state: FSMContext):
     
     existing_user = await get_user_by_telegram_id(user_id)
     if existing_user:
-        profile_info = format_profile_data_for_confirmation(existing_user)
+        # Перетворюємо об'єкт SQLAlchemy на словник для форматування
+        user_data = {c.name: getattr(existing_user, c.name) for c in existing_user.__table__.columns}
+        profile_info = format_profile_data_for_confirmation(user_data)
         await message.answer(f"Ви вже зареєстровані! Ось ваші дані:\n\n{profile_info}", parse_mode="HTML")
         return
 
@@ -122,7 +129,6 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
 
     profile_data['telegram_id'] = callback.from_user.id
     
-    # Перетворюємо список героїв на рядок перед збереженням
     if 'favorite_heroes' in profile_data and isinstance(profile_data['favorite_heroes'], list):
         profile_data['favorite_heroes'] = ", ".join(profile_data['favorite_heroes'])
 
