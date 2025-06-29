@@ -1,13 +1,12 @@
-#keyboards/inline_keyboards.py
 """
 Модуль для створення всіх інлайн-клавіатур, що використовуються в боті.
-Розширено для підтримки покрокового створення паті (FSM).
+Розширено для підтримки покрокового створення паті (FSM) та реєстрації.
 """
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from typing import List, Dict, Optional
 
-# --- НОВІ КЛАВІАТУРИ ДЛЯ FSM СТВОРЕННЯ ПАТІ ---
+# --- КЛАВІАТУРИ ДЛЯ FSM СТВОРЕННЯ ПАТІ ---
 
 def create_party_confirmation_keyboard() -> InlineKeyboardMarkup:
     """
@@ -39,7 +38,6 @@ def create_role_selection_keyboard(available_roles: List[str]) -> InlineKeyboard
     builder.adjust(1)  # По одній кнопці в ряд для максимальної зручності на мобільних
     return builder.as_markup()
 
-
 # --- ОНОВЛЕНА КЛАВІАТУРА ЛОБІ ---
 
 def create_dynamic_lobby_keyboard(lobby_id: str, user_id: int, lobby_data: Dict) -> InlineKeyboardMarkup:
@@ -63,4 +61,17 @@ def create_dynamic_lobby_keyboard(lobby_id: str, user_id: int, lobby_data: Dict)
     if user_id == leader_id:
         builder.button(text="🚫 Скасувати лобі", callback_data=f"party_cancel_lobby:{lobby_id}")
 
+    return builder.as_markup()
+
+# === 🆕 КЛАВІАТУРИ ДЛЯ РЕЄСТРАЦІЇ ===
+
+def create_registration_confirmation_keyboard() -> InlineKeyboardMarkup:
+    """
+    Створює клавіатуру для підтвердження або скасування реєстрації.
+    """
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ Все вірно, зберегти", callback_data="register_confirm"),
+        InlineKeyboardButton(text="❌ Скасувати", callback_data="register_cancel")
+    )
     return builder.as_markup()
