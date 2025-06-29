@@ -15,12 +15,16 @@ logger = logging.getLogger(__name__)
 # На Heroku Config Vars завантажуються автоматично.
 load_dotenv()
 
+# === ЗАВАНТАЖЕННЯ КЛЮЧІВ ТА URL ===
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-# 🆕 Додано завантаження GEMINI_API_KEY та GOOGLE_CLOUD_PROJECT_ID
-GEMINI_API_KEY: str = os.getenv("API_Gemini", "") # Важливо: назва змінної API_Gemini
-GOOGLE_CLOUD_PROJECT_ID: str = os.getenv("GOOGLE_CLOUD_PROJECT_ID", "") # Project ID з Google Cloud
+GEMINI_API_KEY: str = os.getenv("API_Gemini", "")
+GOOGLE_CLOUD_PROJECT_ID: str = os.getenv("GOOGLE_CLOUD_PROJECT_ID", "")
 ADMIN_USER_ID: int = int(os.getenv("ADMIN_USER_ID", "0"))
+
+# Розділено URL для синхронних та асинхронних операцій
+SYNC_DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+ASYNC_DATABASE_URL: str = os.getenv("AS_BASE", "") # Використовуємо AS_BASE для async
 
 # === КОНСТАНТИ ===
 WELCOME_IMAGE_URL: str = "https://res.cloudinary.com/ha1pzppgf/image/upload/v1748286434/file_0000000017a46246b78bf97e2ecd9348_zuk16r.png"
@@ -58,7 +62,7 @@ CONVERSATIONAL_TRIGGERS: dict[str, str] = {
     "ти бот": "Підтверди, що ти AI, але з характером справжнього геймера."
 }
 
-# === 🆕 КОНФІГУРАЦІЯ УНІВЕРСАЛЬНОГО VISION МОДУЛЯ ===
+# === КОНФІГУРАЦІЯ УНІВЕРСАЛЬНОГО VISION МОДУЛЯ ===
 VISION_AUTO_RESPONSE_ENABLED: bool = True
 VISION_RESPONSE_COOLDOWN_SECONDS: int = 30
 VISION_MAX_IMAGE_SIZE_MB: float = 10.0
@@ -75,7 +79,7 @@ VISION_CONTENT_EMOJIS: dict[str, str] = {
     "patch_notes": "📋", "tournament": "🏆", "general": "🔍"
 }
 
-# === 🆕 КОНФІГУРАЦІЯ REPLY KEYBOARD НАВІГАЦІЇ ===
+# === КОНФІГУРАЦІЯ REPLY KEYBOARD НАВІГАЦІЇ ===
 REPLY_KEYBOARD_ENABLED: bool = True
 SHOW_COMMANDS_HELP: bool = False
 
@@ -95,16 +99,28 @@ NAVIGATION_TEXTS: dict[str, str] = {
 }
 
 # === ПЕРЕВІРКА КРИТИЧНИХ ЗМІННИХ ===
-# 🆕 Оновлено перевірку, тепер включає GEMINI_API_KEY та GOOGLE_CLOUD_PROJECT_ID
-if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY or not GEMINI_API_KEY or not GOOGLE_CLOUD_PROJECT_ID:
-    logger.critical("❌ TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, API_Gemini (Gemini API Key) та GOOGLE_CLOUD_PROJECT_ID повинні бути встановлені в Heroku Config Vars.")
-    raise RuntimeError("❌ Встановіть TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, API_Gemini (Gemini API Key) та GOOGLE_CLOUD_PROJECT_ID в Heroku Config Vars.")
+# Оновлено перевірку, тепер включає обидва URL бази даних
+if not all([TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, GEMINI_API_KEY, GOOGLE_CLOUD_PROJECT_ID, SYNC_DATABASE_URL, ASYNC_DATABASE_URL]):
+    critical_vars = {
+        "TELEGRAM_BOT_TOKEN": bool(TELEGRAM_BOT_TOKEN),
+        "OPENAI_API_KEY": bool(OPENAI_API_KEY),
+        "API_Gemini": bool(GEMINI_API_KEY),
+        "GOOGLE_CLOUD_PROJECT_ID": bool(GOOGLE_CLOUD_PROJECT_ID),
+        "DATABASE_URL (sync)": bool(SYNC_DATABASE_URL),
+        "AS_BASE (async)": bool(ASYNC_DATABASE_URL)
+    }
+    missing_vars = [key for key, value in critical_vars.items() if not value]
+    error_message = f"❌ Не встановлено критично важливі змінні в Heroku Config Vars: {', '.join(missing_vars)}"
+    logger.critical(error_message)
+    raise RuntimeError(error_message)
 
-# 🆕 Додано логування для перевірки, що змінні завантажені
+# Додано логування для перевірки, що змінні завантажені
 logger.info(f"Модель для Vision (аналіз скріншотів): gpt-4o-mini (жорстко задано)")
 logger.info(f"Модель для текстових генерацій (/go, опис профілю): gpt-4.1-turbo (жорстко задано)")
-logger.info(f"🆕 Модель для пошуку в Інтернеті (/search): Gemini 2.5 Pro (жорстко задано)") # Вказуємо 2.5 Pro, якщо ти її використовуєш
-logger.info(f"🆕 Універсальний Vision модуль: {'УВІМКНЕНО' if VISION_AUTO_RESPONSE_ENABLED else 'ВИМКНЕНО'}")
-logger.info(f"🆕 Reply Keyboard навігація: {'УВІМКНЕНО' if REPLY_KEYBOARD_ENABLED else 'ВИМКНЕНО'}")
-logger.info(f"✅ Google Cloud Project ID: '{GOOGLE_CLOUD_PROJECT_ID}' завантажено.") # Додано підтвердження завантаження Project ID
-logger.info(f"✅ Gemini API Key завантажено (перевірте Heroku Config Vars).") # Просто підтвердження, без розкриття ключа
+logger.info(f"Модель для пошуку в Інтернеті (/search): Gemini 2.5 Pro (жорстко задано)")
+logger.info(f"Універсальний Vision модуль: {'УВІМКНЕНО' if VISION_AUTO_RESPONSE_ENABLED else 'ВИМКНЕНО'}")
+logger.info(f"Reply Keyboard навігація: {'УВІМКНЕНО' if REPLY_KEYBOARD_ENABLED else 'ВИМКНЕНО'}")
+logger.info(f"✅ Google Cloud Project ID: '{GOOGLE_CLOUD_PROJECT_ID}' завантажено.")
+logger.info(f"✅ Gemini API Key завантажено (перевірте Heroku Config Vars).")
+logger.info(f"✅ SYNC_DATABASE_URL завантажено (перевірте Heroku Config Vars).")
+logger.info(f"✅ ASYNC_DATABASE_URL (з AS_BASE) завантажено (перевірте Heroku Config Vars).")
