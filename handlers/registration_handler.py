@@ -119,3 +119,9 @@ async def cancel_registration(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text("Реєстрацію скасовано. Ви можете почати знову, надіславши команду /register.")
     await callback.answer("Дію скасовано.")
+    
+# === 🆕 ФУНКЦІЯ РЕЄСТРАЦІЇ РОУТЕРА ===
+def register_registration_handlers(dp: Dispatcher):
+    """Реєструє всі обробники, пов'язані з процесом реєстрації."""
+    dp.include_router(registration_router)
+    logger.info("✅ Обробники для реєстрації користувачів успішно зареєстровано.")
