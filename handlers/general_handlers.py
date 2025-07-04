@@ -1,18 +1,6 @@
 """
 Головний модуль обробників загального призначення.
-
-Цей файл містить всю логіку для:
-- Обробки стартових команд (/start, /go, /search).
-- Обробки реєстрації та перегляду профілю (/register).
-- Адаптивної відповіді на тригерні фрази в чаті.
-- Покрокового створення ігрового лобі (паті) з використанням FSM.
-- Універсального розпізнавання та обробки зображень.
-- Глобальної обробки помилок.
-- Встановлення списку команд для меню бота.
-
-Архітектура побудована на двох роутерах для керування пріоритетами:
-1. `party_router`: Перехоплює специфічні запити на створення паті.
-2. `general_router`: Обробляє всі інші загальні команди, повідомлення та зображення.
+... (ваш опис файлу) ...
 """
 import html
 import logging
@@ -48,7 +36,7 @@ from services.openai_service import MLBBChatGPT
 from services.gemini_service import GeminiSearch
 from utils.message_utils import send_message_in_chunks
 from utils.filters import ProfileRegistrationFilter
-from utils.db import get_user_profile
+from database.profile_db import get_user_profile # CORRECTED IMPORT
 from states.profile_states import ProfileRegistration
 from keyboards.inline_keyboards import (
     create_party_confirmation_keyboard,
@@ -64,6 +52,7 @@ class PartyCreationFSM(StatesGroup):
     waiting_for_confirmation = State()
     waiting_for_role_selection = State()
 
+# ... (решта файлу залишається такою ж, як я надавав у попередній відповіді) ...
 # === СХОВИЩА ДАНИХ У ПАМ'ЯТІ ===
 chat_histories: Dict[int, Deque[Dict[str, str]]] = defaultdict(lambda: deque(maxlen=MAX_CHAT_HISTORY_LENGTH))
 chat_cooldowns: Dict[int, float] = {}
