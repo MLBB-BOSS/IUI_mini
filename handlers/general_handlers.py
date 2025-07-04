@@ -3,6 +3,7 @@
 
 Цей файл містить всю логіку для:
 - Обробки стартових команд (/start, /go, /search).
+- Обробки реєстрації та перегляду профілю (/register).
 - Адаптивної відповіді на тригерні фрази в чаті.
 - Покрокового створення ігрового лобі (паті) з використанням FSM.
 - Універсального розпізнавання та обробки зображень.
@@ -32,6 +33,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 # Імпорти з нашого проєкту
 from config import (
@@ -41,15 +43,20 @@ from config import (
     VISION_AUTO_RESPONSE_ENABLED, VISION_RESPONSE_COOLDOWN_SECONDS, 
     VISION_MAX_IMAGE_SIZE_MB, VISION_CONTENT_EMOJIS
 )
-# Імпортуємо сервіси та утиліти
+# Імпортуємо сервіси, утиліти та стани
 from services.openai_service import MLBBChatGPT
 from services.gemini_service import GeminiSearch
 from utils.message_utils import send_message_in_chunks
+from utils.filters import ProfileRegistrationFilter
+from utils.db import get_user_profile
+from states.profile_states import ProfileRegistration
 from keyboards.inline_keyboards import (
     create_party_confirmation_keyboard,
     create_role_selection_keyboard,
     create_dynamic_lobby_keyboard
 )
+from keyboards.profile_keyboards import get_profile_keyboard
+
 
 # === ВИЗНАЧЕННЯ СТАНІВ FSM ===
 class PartyCreationFSM(StatesGroup):
@@ -69,18 +76,16 @@ party_router = Router()
 general_router = Router()
 gemini_client = GeminiSearch()
 
-# === 🆕 ФУНКЦІЯ ДЛЯ ВСТАНОВЛЕННЯ КОМАНД БОТА ===
+# === ФУНКЦІЯ ДЛЯ ВСТАНОВЛЕННЯ КОМАНД БОТА ===
 async def set_bot_commands(bot: Bot):
     """
     Встановлює/оновлює список команд, які бот показує в меню Telegram.
     """
     commands = [
         BotCommand(command="start", description="🏁 Перезапустити бота"),
-        BotCommand(command="register", description="📝 Реєстрація/Оновлення профілю"),
+        BotCommand(command="register", description="📝 Реєстрація/Мій профіль"),
         BotCommand(command="go", description="💬 Задати питання AI-помічнику"),
         BotCommand(command="search", description="🔍 Пошук новин та оновлень"),
-        BotCommand(command="analyzeprofile", description="📸 Аналіз скріншота профілю"),
-        BotCommand(command="analyzestats", description="📊 Аналіз скріншота статистики"),
         BotCommand(command="help", description="❓ Допомога та інфо"),
     ]
     try:
@@ -168,6 +173,53 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
     await callback.answer(f"Ви зайняли роль: {selected_role}")
     await state.clear()
 
+# === ОБРОБНИКИ РЕЄСТРАЦІЇ ТА ПРОФІЛЮ ===
+@general_router.message(Command("register"), ProfileRegistrationFilter(is_registered=False))
+async def start_registration(message: Message, state: FSMContext):
+    """
+    Починає процес реєстрації для нового користувача.
+    """
+    logger.info(f"Користувач {message.from_user.id} починає нову реєстрацію.")
+    await state.set_state(ProfileRegistration.waiting_for_initial_photo)
+    await message.answer(
+        "👋 **Розпочнемо реєстрацію!**\n\n"
+        "Будь ласка, надішліть скріншот вашого ігрового профілю, де видно ваш нікнейм, ID та сервер."
+    )
+
+@general_router.message(Command("register"), ProfileRegistrationFilter(is_registered=True))
+async def show_profile(message: Message, state: FSMContext, session_maker: async_sessionmaker):
+    """
+    Показує існуючий профіль зареєстрованого користувача.
+    """
+    await state.clear() # Очищуємо будь-які попередні стани
+    user_id = message.from_user.id
+    user_name = get_user_display_name(message.from_user)
+    logger.info(f"Користувач {user_name} (ID: {user_id}) переглядає свій профіль.")
+
+    async with session_maker() as session:
+        user_profile = await get_user_profile(session, user_id)
+
+    # Ця перевірка є додатковою, оскільки фільтр вже виконав основну роботу
+    if not user_profile:
+        await state.set_state(ProfileRegistration.waiting_for_initial_photo)
+        await message.answer("Хм, не вдалося знайти ваш профіль. Давайте спробуємо зареєструватися знову. Надішліть скріншот профілю.")
+        return
+
+    profile_text = (
+        f"**👤 Профіль гравця @{message.from_user.username or user_name}**\n\n"
+        f"Ви вже зареєстровані. Ось ваші дані:\n\n"
+        f"**Базова інформація:**\n"
+        f"- ID гравця: `{user_profile.game_id}` (Сервер: `{user_profile.server_id}`)\n"
+        f"- Поточний ранг: {user_profile.current_rank or 'Не вказано'}\n\n"
+        f"**Загальна статистика:**\n"
+        f"- Всього матчів: {user_profile.total_matches or 'Не вказано'}\n"
+        f"- Відсоток перемог: {user_profile.win_rate or 'None'}%\n\n"
+        f"**Улюблені герої:**\n"
+        f"- {', '.join(user_profile.favorite_heroes) if user_profile.favorite_heroes else 'Не вказано'}"
+    )
+    
+    await message.answer(profile_text, reply_markup=get_profile_keyboard())
+
 # === ЗАГАЛЬНІ ОБРОБНИКИ КОМАНД ===
 @general_router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
@@ -213,11 +265,9 @@ async def cmd_help(message: Message):
 Я - ваш AI-помічник для Mobile Legends. Ось список моїх основних команд:
 
 /start - Перезапустити бота та показати вітальне повідомлення.
-/register - Зареєструвати або оновити свій ігровий профіль.
+/register - Зареєструвати або переглянути свій ігровий профіль.
 /go <code>&lt;питання&gt;</code> - Задати будь-яке питання про гру (герої, предмети, тактики).
 /search <code>&lt;запит&gt;</code> - Знайти останні новини або інформацію в Інтернеті.
-/analyzeprofile - Запустити аналіз скріншота вашого профілю.
-/analyzestats - Запустити аналіз скріншота вашої статистики.
 /help - Показати це повідомлення.
 
 Також я можу автоматично реагувати на зображення в чаті та підтримувати розмову, якщо ви звернетесь до мене.
