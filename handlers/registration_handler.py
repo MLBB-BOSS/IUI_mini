@@ -13,7 +13,7 @@ from aiogram.types import Message, CallbackQuery, PhotoSize
 from states.user_states import RegistrationFSM
 from keyboards.inline_keyboards import create_registration_confirmation_keyboard, create_profile_menu_keyboard, create_delete_confirm_keyboard
 from services.openai_service import MLBBChatGPT
-from database.crud import add_or_update_user, get_user_by_telegram_id
+from database.crud import add_or_update_user, get_user_by_telegram_id, delete_user_by_telegram_id
 from config import OPENAI_API_KEY, logger
 
 # Ініціалізація роутера для реєстрації
@@ -83,10 +83,23 @@ async def profile_delete_handler(callback: CallbackQuery, state: FSMContext):
 @registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_yes")
 async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext):
     """Видаляє профіль після підтвердження."""
-    # Тут буде логіка видалення користувача з БД
-    await callback.message.edit_text("Ваш профіль було успішно видалено.")
-    await state.clear()
-    await callback.answer("Профіль видалено", show_alert=True)
+    if not callback.from_user:
+        return
+    user_id = callback.from_user.id
+    try:
+        deleted = await delete_user_by_telegram_id(user_id)
+        if deleted:
+            await callback.message.edit_text("Ваш профіль було успішно видалено.")
+            await callback.answer("Профіль видалено", show_alert=True)
+        else:
+            await callback.message.edit_text("Не вдалося видалити профіль. Можливо, його вже не існує.")
+            await callback.answer("Помилка видалення", show_alert=True)
+    except Exception as e:
+        logger.exception(f"Помилка під час видалення користувача {user_id} з БД:")
+        await callback.message.edit_text("Сталася помилка під час видалення профілю. Спробуйте пізніше.")
+    finally:
+        await state.clear()
+
 
 @registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_no")
 async def cancel_delete_profile(callback: CallbackQuery, state: FSMContext):
