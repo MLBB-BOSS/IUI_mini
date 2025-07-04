@@ -10,7 +10,6 @@ from aiogram.exceptions import TelegramAPIError
 
 # Імпорти з проєкту
 from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, logger
-# 🆕 Імпортуємо функцію ініціалізації БД
 from database.init_db import init_db
 from handlers.general_handlers import (
     register_general_handlers, 
@@ -19,29 +18,27 @@ from handlers.general_handlers import (
     cmd_go
 )
 from handlers.vision_handlers import register_vision_handlers
+# Переконуємося, що імпортуємо оновлену функцію реєстрації
 from handlers.registration_handler import register_registration_handlers
 
 
 async def main() -> None:
     """Головна функція запуску бота."""
-    bot_version = "v3.1.0 (DB-Init)"
+    bot_version = "v3.2.0 (Profile-Refactor)" # Оновимо версію для наочності
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
-    # 🆕 Ініціалізуємо базу даних перед запуском бота
     await init_db()
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # Встановлюємо команди бота при старті
     await set_bot_commands(bot)
 
     # Реєструємо роутери
-    register_registration_handlers(dp)
+    register_registration_handlers(dp) # Цей рядок вже є і він правильний
     register_vision_handlers(dp, cmd_go_handler_func=cmd_go) 
     register_general_handlers(dp)
 
-    # Реєстрація глобального обробника помилок
     @dp.errors()
     async def global_error_handler_wrapper(event: types.ErrorEvent):
         logger.debug(f"Global error wrapper caught exception: {event.exception} in update: {event.update}")
@@ -61,7 +58,8 @@ async def main() -> None:
                     f"🆔 @{bot_info.username}",
                     f"⏰ {launch_time_kyiv}",
                     "✨ <b>Зміни:</b>",
-                    "  • Додано автоматичне створення таблиць в БД.",
+                    "  • Повністю перероблено логіку реєстрації та керування профілем.",
+                    "  • Додано FSM, меню профілю та вибіркове оновлення даних.",
                     "🟢 Готовий до роботи!"
                 ]
                 admin_message = "\n".join(admin_message_lines)
