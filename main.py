@@ -1,91 +1,75 @@
+"""
+Головний файл для запуску Telegram-бота.
+
+Відповідає за:
+- Ініціалізацію конфігурації та логування.
+- Створення та налаштування об'єктів бота та диспетчера.
+- Реєстрацію обробників (хендлерів).
+- Встановлення кастомних мідлварі (проміжних обробників).
+- Запуск та коректну зупинку бота.
+"""
 import asyncio
 import logging
-import os
-from datetime import datetime, timezone, timedelta
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from aiogram import Bot, Dispatcher, types
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
-from aiogram.exceptions import TelegramAPIError
-
-# Імпорти з проєкту
-from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, logger
-from database.init_db import init_db
-from handlers.general_handlers import (
-    register_general_handlers, 
-    set_bot_commands,
-    error_handler as general_error_handler,
-    cmd_go
-)
+# Імпорти з нашого проєкту
+from config import BOT_TOKEN, ASYNC_DATABASE_URL, logger
+from handlers.general_handlers import register_general_handlers, error_handler, set_bot_commands
+from handlers.profile_handlers import register_profile_handlers
 from handlers.vision_handlers import register_vision_handlers
-# Переконуємося, що імпортуємо оновлену функцію реєстрації
-from handlers.registration_handler import register_registration_handlers
+from middlewares.db_middleware import DbSessionMiddleware
 
+async def main():
+    """
+    Основна асинхронна функція для запуску бота.
+    """
+    # Створення асинхронного рушія та фабрики сесій для SQLAlchemy
+    try:
+        async_engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
+        session_maker = async_sessionmaker(async_engine, expire_on_commit=False)
+        logger.info("✅ Асинхронний рушій бази даних успішно створено.")
+    except Exception as e:
+        logger.critical(f"❌ Критична помилка при створенні рушія БД: {e}", exc_info=True)
+        return
 
-async def main() -> None:
-    """Головна функція запуску бота."""
-    bot_version = "v3.2.0 (Profile-Refactor)" # Оновимо версію для наочності
-    logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
-
-    await init_db()
-
-    bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    # Ініціалізація бота та диспетчера
+    bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
     dp = Dispatcher()
 
+    # Реєстрація мідлварі для передачі сесії БД в обробники
+    dp.update.middleware(DbSessionMiddleware(session_pool=session_maker))
+    logger.info("✅ Мідлварь для сесій бази даних успішно зареєстровано.")
+
+    # Реєстрація обробників
+    register_general_handlers(dp)
+    register_profile_handlers(dp)
+    register_vision_handlers(dp)
+
+    # Реєстрація глобального обробника помилок
+    dp.errors.register(error_handler)
+    logger.info("✅ Глобальний обробник помилок успішно зареєстровано.")
+
+    # Встановлення команд бота при старті
     await set_bot_commands(bot)
 
-    # Реєструємо роутери
-    register_registration_handlers(dp) # Цей рядок вже є і він правильний
-    register_vision_handlers(dp, cmd_go_handler_func=cmd_go) 
-    register_general_handlers(dp)
-
-    @dp.errors()
-    async def global_error_handler_wrapper(event: types.ErrorEvent):
-        logger.debug(f"Global error wrapper caught exception: {event.exception} in update: {event.update}")
-        await general_error_handler(event, bot)
-
+    # Запуск бота
+    logger.info("🚀 Запуск MLBB IUI mini v3.2.0 (Profile-Refactor)...")
     try:
-        bot_info = await bot.get_me()
-        logger.info(f"✅ Бот @{bot_info.username} (ID: {bot_info.id}) успішно авторизований!")
-        if ADMIN_USER_ID:
-            try:
-                kyiv_tz = timezone(timedelta(hours=3))
-                launch_time_kyiv = datetime.now(kyiv_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
-                
-                admin_message_lines = [
-                    f"🤖 <b>MLBB IUI mini {bot_version} запущено!</b>",
-                    "",
-                    f"🆔 @{bot_info.username}",
-                    f"⏰ {launch_time_kyiv}",
-                    "✨ <b>Зміни:</b>",
-                    "  • Повністю перероблено логіку реєстрації та керування профілем.",
-                    "  • Додано FSM, меню профілю та вибіркове оновлення даних.",
-                    "🟢 Готовий до роботи!"
-                ]
-                admin_message = "\n".join(admin_message_lines)
-                
-                await bot.send_message(str(ADMIN_USER_ID), admin_message, parse_mode=ParseMode.HTML)
-                logger.info(f"Повідомлення про запуск надіслано адміну ID: {ADMIN_USER_ID}")
-            except Exception as e:
-                logger.warning(f"Не вдалося надіслати повідомлення про запуск адміну (ID: {ADMIN_USER_ID}): {e}", exc_info=True)
-
-        logger.info("Розпочинаю polling...")
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
-    except KeyboardInterrupt:
-        logger.info("👋 Бот зупинено користувачем (KeyboardInterrupt).")
-    except Exception as e:
-        logger.critical(f"Непередбачена критична помилка під час запуску або роботи: {e}", exc_info=True)
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         logger.info("🛑 Зупинка бота та закриття сесій...")
-        if bot and hasattr(bot, 'session') and bot.session and not bot.session.closed:
-            try:
-                await bot.session.close()
-                logger.info("Сесію HTTP клієнта Bot закрито.")
-            except Exception as e:
-                logger.error(f"Помилка під час закриття сесії HTTP клієнта Bot: {e}", exc_info=True)
-        
-        logger.info("👋 Бот остаточно зупинено.")
+        # Коректне закриття сесії бота
+        if bot and hasattr(bot, 'session') and bot.session and not bot.session.is_closed(): # CORRECTED LINE
+            await bot.session.close()
+            logger.info("Сесію бота успішно закрито.")
+        # Закриття пулу з'єднань з БД
+        await async_engine.dispose()
+        logger.info("Пул з'єднань з базою даних успішно закрито.")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.warning("Бот був зупинений вручну (KeyboardInterrupt/SystemExit).")
+    except Exception as e:
+        logger.critical(f"❌ Неперехоплена помилка на верхньому рівні: {e}", exc_info=True)
