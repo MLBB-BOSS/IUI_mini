@@ -65,27 +65,30 @@ def create_dynamic_lobby_keyboard(lobby_id: str, user_id: int, lobby_data: Dict)
 
 # === КЛАВІАТУРИ ДЛЯ РЕЄСТРАЦІЇ ТА ПРОФІЛЮ ===
 
-def create_registration_confirmation_keyboard() -> InlineKeyboardMarkup:
+def create_profile_menu_keyboard() -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для підтвердження або скасування реєстрації.
+    Створює початкову, компактну клавіатуру для меню профілю.
     """
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✅ Все вірно, зберегти", callback_data="register_confirm"),
-        InlineKeyboardButton(text="❌ Скасувати", callback_data="register_cancel")
+        InlineKeyboardButton(text="⚙️ Налаштувати", callback_data="profile_menu_expand"),
+        InlineKeyboardButton(text="🚫 Закрити", callback_data="profile_menu_close")
     )
     return builder.as_markup()
 
-def create_profile_menu_keyboard() -> InlineKeyboardMarkup:
+def create_expanded_profile_menu_keyboard() -> InlineKeyboardMarkup:
     """
-    Клавіатура для меню профілю з усіма основними діями.
+    Створює розширену клавіатуру для меню профілю (2x2 + кнопка "Назад").
     """
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 Оновити базові дані", callback_data="profile_update_basic")],
-        [InlineKeyboardButton(text="📈 Додати загальну статистику", callback_data="profile_add_stats")],
-        [InlineKeyboardButton(text="🦸 Додати статистику героїв", callback_data="profile_add_heroes")],
-        [InlineKeyboardButton(text="🗑️ Видалити профіль", callback_data="profile_delete")],
-    ])
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Оновити базові дані", callback_data="profile_update_basic")
+    builder.button(text="📈 Додати загальну статистику", callback_data="profile_add_stats")
+    builder.button(text="🦸 Додати статистику героїв", callback_data="profile_add_heroes")
+    builder.button(text="🗑️ Видалити профіль", callback_data="profile_delete")
+    builder.button(text="◀️ Назад", callback_data="profile_menu_collapse")
+    # Розташовуємо кнопки 2x2, а кнопку "Назад" окремим рядком
+    builder.adjust(2, 2, 1)
+    return builder.as_markup()
 
 def create_delete_confirm_keyboard() -> InlineKeyboardMarkup:
     """
