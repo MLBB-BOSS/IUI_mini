@@ -2,9 +2,8 @@ from aiogram.filters import BaseFilter
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-# Припускаємо, що у вас є функція для отримання профілю
-# Якщо вона називається інакше або знаходиться в іншому місці, змініть імпорт
-from .db import get_user_profile 
+# Виправляємо шлях імпорту, вказуючи на правильний модуль
+from database.profile_db import get_user_profile 
 
 class ProfileRegistrationFilter(BaseFilter):
     """
@@ -17,7 +16,6 @@ class ProfileRegistrationFilter(BaseFilter):
         """
         Виконує перевірку під час обробки події.
         """
-        # Важливо: ваш middleware повинен передавати session_maker у хендлери
         async with session_maker() as session:
             user_profile = await get_user_profile(session, message.from_user.id)
         
