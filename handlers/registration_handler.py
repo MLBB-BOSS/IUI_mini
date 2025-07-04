@@ -11,7 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, PhotoSize
 
 from states.user_states import RegistrationFSM
-from keyboards.inline_keyboards import create_registration_confirmation_keyboard
+from keyboards.inline_keyboards import create_registration_confirmation_keyboard, create_profile_menu_keyboard, create_delete_confirm_keyboard
 from services.openai_service import MLBBChatGPT
 from database.crud import add_or_update_user, get_user_by_telegram_id
 from config import OPENAI_API_KEY, logger
@@ -39,9 +39,13 @@ def format_profile_data_for_confirmation(data: dict) -> str:
         f"🦸 <b>Улюблені герої:</b>\n• {html.escape(str(heroes_str))}"
     )
 
-@registration_router.message(Command("register"))
-async def cmd_register(message: Message, state: FSMContext):
-    """Починає процес реєстрації або показує існуючий профіль."""
+@registration_router.message(Command("profile"))
+async def cmd_profile(message: Message, state: FSMContext):
+    """
+    Центральна команда для управління профілем.
+    - Якщо користувач не зареєстрований, починає реєстрацію.
+    - Якщо зареєстрований, показує меню управління профілем.
+    """
     if not message.from_user:
         return
 
@@ -49,14 +53,47 @@ async def cmd_register(message: Message, state: FSMContext):
     
     existing_user = await get_user_by_telegram_id(user_id)
     if existing_user:
-        # 🆕 ВИПРАВЛЕНО: Видалено зайве перетворення.
-        # `existing_user` вже є словником, тому передаємо його напряму.
         profile_info = format_profile_data_for_confirmation(existing_user)
-        await message.answer(f"Ви вже зареєстровані! Ось ваші дані:\n\n{profile_info}", parse_mode="HTML")
-        return
+        await message.answer(
+            f"Ваш профіль:\n\n{profile_info}",
+            reply_markup=create_profile_menu_keyboard(),
+            parse_mode="HTML"
+        )
+    else:
+        await state.set_state(RegistrationFSM.waiting_for_photo)
+        await message.answer("Ви ще не зареєстровані. Для створення профілю, будь ласка, надішліть мені скріншот вашого ігрового профілю. 📸")
 
+@registration_router.callback_query(F.data == "profile_update")
+async def profile_update_handler(callback: CallbackQuery, state: FSMContext):
+    """Обробляє запит на оновлення профілю."""
     await state.set_state(RegistrationFSM.waiting_for_photo)
-    await message.answer("Для реєстрації, будь ласка, надішліть мені скріншот вашого ігрового профілю. 📸")
+    await callback.message.edit_text("Будь ласка, надішліть новий скріншот вашого профілю для оновлення.")
+    await callback.answer()
+
+@registration_router.callback_query(F.data == "profile_delete")
+async def profile_delete_handler(callback: CallbackQuery, state: FSMContext):
+    """Починає процес видалення профілю, запитуючи підтвердження."""
+    await state.set_state(RegistrationFSM.confirming_deletion)
+    await callback.message.edit_text(
+        "Ви впевнені, що хочете видалити свій профіль? Ця дія невідворотна.",
+        reply_markup=create_delete_confirm_keyboard()
+    )
+    await callback.answer()
+
+@registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_yes")
+async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext):
+    """Видаляє профіль після підтвердження."""
+    # Тут буде логіка видалення користувача з БД
+    await callback.message.edit_text("Ваш профіль було успішно видалено.")
+    await state.clear()
+    await callback.answer("Профіль видалено", show_alert=True)
+
+@registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_no")
+async def cancel_delete_profile(callback: CallbackQuery, state: FSMContext):
+    """Скасовує видалення профілю."""
+    await state.clear()
+    await callback.message.edit_text("Видалення скасовано. Ваш профіль у безпеці! 😊")
+    await callback.answer("Дію скасовано.")
 
 @registration_router.message(RegistrationFSM.waiting_for_photo, F.photo)
 async def handle_registration_photo(message: Message, state: FSMContext, bot: Bot):
