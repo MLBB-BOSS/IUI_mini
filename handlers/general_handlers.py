@@ -1,6 +1,16 @@
 """
 Головний модуль обробників загального призначення.
-... (ваш опис файлу) ...
+
+Цей файл містить всю логіку для:
+- Обробки стартових команд (/start, /go, /search).
+- Адаптивної відповіді на тригерні фрази в чаті.
+- Покрокового створення ігрового лобі (паті) з використанням FSM.
+- 🆕 Універсального розпізнавання та обробки зображень.
+- Глобальної обробки помилок.
+
+Архітектура побудована на двох роутерах для керування пріоритетами:
+1. `party_router`: Перехоплює специфічні запити на створення паті.
+2. `general_router`: Обробляє всі інші загальні команди, повідомлення та зображення.
 """
 import html
 import logging
@@ -16,12 +26,11 @@ from collections import defaultdict, deque
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, Update, CallbackQuery, PhotoSize, BotCommand, BotCommandScopeDefault
+from aiogram.types import Message, Update, CallbackQuery, PhotoSize
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 # Імпорти з нашого проєкту
 from config import (
@@ -31,28 +40,24 @@ from config import (
     VISION_AUTO_RESPONSE_ENABLED, VISION_RESPONSE_COOLDOWN_SECONDS, 
     VISION_MAX_IMAGE_SIZE_MB, VISION_CONTENT_EMOJIS
 )
-# Імпортуємо сервіси, утиліти та стани
+# Імпортуємо сервіси та утиліти
 from services.openai_service import MLBBChatGPT
-from services.gemini_service import GeminiSearch
+from services.gemini_service import GeminiSearch # Новий сервіс для Gemini
 from utils.message_utils import send_message_in_chunks
-from utils.filters import ProfileRegistrationFilter
-from database.profile_db import get_user_profile # CORRECTED IMPORT
-from states.profile_states import ProfileRegistration
 from keyboards.inline_keyboards import (
     create_party_confirmation_keyboard,
     create_role_selection_keyboard,
     create_dynamic_lobby_keyboard
 )
-from keyboards.profile_keyboards import get_profile_keyboard
-
 
 # === ВИЗНАЧЕННЯ СТАНІВ FSM ===
 class PartyCreationFSM(StatesGroup):
-    """Стани для покрокового процесу створення паті."""
+    """
+    Стани для покрокового процесу створення паті.
+    """
     waiting_for_confirmation = State()
     waiting_for_role_selection = State()
 
-# ... (решта файлу залишається такою ж, як я надавав у попередній відповіді) ...
 # === СХОВИЩА ДАНИХ У ПАМ'ЯТІ ===
 chat_histories: Dict[int, Deque[Dict[str, str]]] = defaultdict(lambda: deque(maxlen=MAX_CHAT_HISTORY_LENGTH))
 chat_cooldowns: Dict[int, float] = {}
@@ -65,29 +70,15 @@ party_router = Router()
 general_router = Router()
 gemini_client = GeminiSearch()
 
-# === ФУНКЦІЯ ДЛЯ ВСТАНОВЛЕННЯ КОМАНД БОТА ===
-async def set_bot_commands(bot: Bot):
-    """
-    Встановлює/оновлює список команд, які бот показує в меню Telegram.
-    """
-    commands = [
-        BotCommand(command="start", description="🏁 Перезапустити бота"),
-        BotCommand(command="register", description="📝 Реєстрація/Мій профіль"),
-        BotCommand(command="go", description="💬 Задати питання AI-помічнику"),
-        BotCommand(command="search", description="🔍 Пошук новин та оновлень"),
-        BotCommand(command="help", description="❓ Допомога та інфо"),
-    ]
-    try:
-        await bot.set_my_commands(commands, BotCommandScopeDefault())
-        logger.info("✅ Список команд бота успішно оновлено.")
-    except Exception as e:
-        logger.error(f"Помилка під час оновлення команд бота: {e}", exc_info=True)
-
 # === ДОПОМІЖНІ ФУНКЦІЇ ===
 def get_user_display_name(user: Optional[types.User]) -> str:
-    """Витягує найкраще доступне ім'я користувача для звернення."""
+    """
+    Витягує найкраще доступне ім'я користувача для звернення.
+    Написано в розгорнутому стилі для максимальної читабельності.
+    """
     if not user:
         return "друже"
+    
     if user.first_name and user.first_name.strip():
         return html.escape(user.first_name.strip())
     elif user.username and user.username.strip():
@@ -96,7 +87,9 @@ def get_user_display_name(user: Optional[types.User]) -> str:
         return "друже"
 
 def is_party_request_message(message: Message) -> bool:
-    """Безпечна функція для визначення, чи є повідомлення запитом на створення паті."""
+    """
+    Безпечна функція для визначення, чи є повідомлення запитом на створення паті.
+    """
     if not message.text:
         return False
     try:
@@ -109,7 +102,9 @@ def is_party_request_message(message: Message) -> bool:
         return False
 
 def get_lobby_message_text(lobby_data: dict) -> str:
-    """Форматує текст повідомлення для лобі на основі поточних даних."""
+    """
+    Форматує текст повідомлення для лобі на основі поточних даних.
+    """
     leader_name = html.escape(lobby_data['leader_name'])
     role_emoji_map = {"Танк/Підтримка": "🛡️", "Лісник": "🌳", "Маг (мід)": "🧙", "Стрілець (золото)": "🏹", "Боєць (досвід)": "⚔️"}
     
@@ -149,7 +144,6 @@ async def prompt_for_role(callback: CallbackQuery, state: FSMContext):
 
 @party_router.callback_query(PartyCreationFSM.waiting_for_role_selection, F.data.startswith("party_role_select:"))
 async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    if not callback.message: return
     user = callback.from_user
     selected_role = callback.data.split(":")[-1]
     lobby_id = str(callback.message.message_id)
@@ -162,59 +156,11 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
     await callback.answer(f"Ви зайняли роль: {selected_role}")
     await state.clear()
 
-# === ОБРОБНИКИ РЕЄСТРАЦІЇ ТА ПРОФІЛЮ ===
-@general_router.message(Command("register"), ProfileRegistrationFilter(is_registered=False))
-async def start_registration(message: Message, state: FSMContext):
-    """
-    Починає процес реєстрації для нового користувача.
-    """
-    logger.info(f"Користувач {message.from_user.id} починає нову реєстрацію.")
-    await state.set_state(ProfileRegistration.waiting_for_initial_photo)
-    await message.answer(
-        "👋 **Розпочнемо реєстрацію!**\n\n"
-        "Будь ласка, надішліть скріншот вашого ігрового профілю, де видно ваш нікнейм, ID та сервер."
-    )
-
-@general_router.message(Command("register"), ProfileRegistrationFilter(is_registered=True))
-async def show_profile(message: Message, state: FSMContext, session_maker: async_sessionmaker):
-    """
-    Показує існуючий профіль зареєстрованого користувача.
-    """
-    await state.clear() # Очищуємо будь-які попередні стани
-    user_id = message.from_user.id
-    user_name = get_user_display_name(message.from_user)
-    logger.info(f"Користувач {user_name} (ID: {user_id}) переглядає свій профіль.")
-
-    async with session_maker() as session:
-        user_profile = await get_user_profile(session, user_id)
-
-    # Ця перевірка є додатковою, оскільки фільтр вже виконав основну роботу
-    if not user_profile:
-        await state.set_state(ProfileRegistration.waiting_for_initial_photo)
-        await message.answer("Хм, не вдалося знайти ваш профіль. Давайте спробуємо зареєструватися знову. Надішліть скріншот профілю.")
-        return
-
-    profile_text = (
-        f"**👤 Профіль гравця @{message.from_user.username or user_name}**\n\n"
-        f"Ви вже зареєстровані. Ось ваші дані:\n\n"
-        f"**Базова інформація:**\n"
-        f"- ID гравця: `{user_profile.game_id}` (Сервер: `{user_profile.server_id}`)\n"
-        f"- Поточний ранг: {user_profile.current_rank or 'Не вказано'}\n\n"
-        f"**Загальна статистика:**\n"
-        f"- Всього матчів: {user_profile.total_matches or 'Не вказано'}\n"
-        f"- Відсоток перемог: {user_profile.win_rate or 'None'}%\n\n"
-        f"**Улюблені герої:**\n"
-        f"- {', '.join(user_profile.favorite_heroes) if user_profile.favorite_heroes else 'Не вказано'}"
-    )
-    
-    await message.answer(profile_text, reply_markup=get_profile_keyboard())
-
 # === ЗАГАЛЬНІ ОБРОБНИКИ КОМАНД ===
 @general_router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
     user = message.from_user
-    if not user: return
     user_name_escaped = get_user_display_name(user)
     logger.info(f"Користувач {user_name_escaped} (ID: {user.id}) запустив бота /start.")
     kyiv_tz = timezone(timedelta(hours=3))
@@ -224,7 +170,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     
     welcome_caption = f"""{greeting_msg}, <b>{user_name_escaped}</b>! {emoji}
 
-Ласкаво просимо до <b>GGenius</b>! 🎮
+Ласкаво просимо до <b>MLBB IUI mini</b>! 🎮
 Я твій AI-помічник для всього, що стосується світу Mobile Legends.
 
 <b>Що я можу для тебе зробити:</b>
@@ -233,10 +179,10 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 🔸 Відповісти на запитання по грі.
 🔸 Автоматично реагувати на зображення в чаті!
 
-👇 Для початку роботи, використай одну з команд в меню або напиши її:
-• <code>/search &lt;твій запит&gt;</code>
-• <code>/go &lt;твоє питання&gt;</code>
-• <code>/register</code>
+👇 Для початку роботи, використай одну з команд:
+• <code>/search &lt;твій запит&gt;</code> – для пошуку новин та оновлень.
+• <code>/go &lt;твоє питання&gt;</code> – для консультації по грі.
+• <code>/analyzeprofile</code> – для аналізу скріншота.
 • Або просто надішли будь-яке зображення! 📸
 """
     try:
@@ -245,31 +191,12 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
         logger.error(f"Не вдалося надіслати фото-привітання: {e}. Відправляю текст.")
         await message.answer(welcome_caption, parse_mode=ParseMode.HTML)
 
-@general_router.message(Command("help"))
-async def cmd_help(message: Message):
-    """Обробник команди /help."""
-    help_text = """
-ℹ️ <b>Довідка по боту GGenius</b>
-
-Я - ваш AI-помічник для Mobile Legends. Ось список моїх основних команд:
-
-/start - Перезапустити бота та показати вітальне повідомлення.
-/register - Зареєструвати або переглянути свій ігровий профіль.
-/go <code>&lt;питання&gt;</code> - Задати будь-яке питання про гру (герої, предмети, тактики).
-/search <code>&lt;запит&gt;</code> - Знайти останні новини або інформацію в Інтернеті.
-/help - Показати це повідомлення.
-
-Також я можу автоматично реагувати на зображення в чаті та підтримувати розмову, якщо ви звернетесь до мене.
-"""
-    await message.reply(help_text, parse_mode=ParseMode.HTML)
-
 @general_router.message(Command("search"))
 async def cmd_search(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
     user = message.from_user
-    if not user: return
     user_name_escaped = get_user_display_name(user)
-    user_id = user.id
+    user_id = user.id if user else "невідомий"
     user_query = message.text.replace("/search", "", 1).strip() if message.text else ""
 
     logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) зробив пошуковий запит: '{user_query}'")
@@ -296,6 +223,7 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
     full_response_to_send = f"{response_text}{admin_info}"
 
     try:
+        # 🔽 ВИПРАВЛЕНО: Додано відсутній параметр parse_mode=ParseMode.HTML
         await send_message_in_chunks(
             bot_instance=bot,
             chat_id=message.chat.id,
@@ -305,10 +233,13 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
         )
     except Exception as e:
         logger.error(f"Не вдалося надіслати відповідь /search для {user_name_escaped}: {e}", exc_info=True)
+        # Розгорнута обробка помилки відправки
         try:
             final_error_msg = f"Вибач, {user_name_escaped}, сталася критична помилка при відправці відповіді."
-            if thinking_msg: await thinking_msg.edit_text(final_error_msg, parse_mode=None)
-            else: await message.reply(final_error_msg, parse_mode=None)
+            if thinking_msg:
+                await thinking_msg.edit_text(final_error_msg, parse_mode=None)
+            else:
+                await message.reply(final_error_msg, parse_mode=None)
         except Exception as final_err:
              logger.error(f"Не вдалося надіслати навіть фінальне повідомлення про помилку: {final_err}")
 
@@ -316,9 +247,8 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
 async def cmd_go(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
     user = message.from_user
-    if not user: return
     user_name_escaped = get_user_display_name(user)
-    user_id = user.id
+    user_id = user.id if user else "невідомий"
     user_query = message.text.replace("/go", "", 1).strip() if message.text else ""
 
     logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) зробив запит /go: '{user_query}'")
@@ -342,7 +272,7 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
 
     admin_info = ""
     if user_id == ADMIN_USER_ID:
-        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | GPT (gpt-4.1-turbo)</i>"
+        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | GPT (gpt-4.1)</i>"
     
     full_response_to_send = f"{response_text}{admin_info}"
 
@@ -350,10 +280,13 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
         await send_message_in_chunks(bot, message.chat.id, full_response_to_send, ParseMode.HTML, thinking_msg)
     except Exception as e:
         logger.error(f"Не вдалося надіслати відповідь /go: {e}", exc_info=True)
+        # Розгорнута обробка помилки відправки
         try:
             final_error_msg = f"Вибач, {user_name_escaped}, сталася критична помилка при відправці відповіді."
-            if thinking_msg: await thinking_msg.edit_text(final_error_msg, parse_mode=None)
-            else: await message.reply(final_error_msg, parse_mode=None)
+            if thinking_msg:
+                await thinking_msg.edit_text(final_error_msg, parse_mode=None)
+            else:
+                await message.reply(final_error_msg, parse_mode=None)
         except Exception as final_err:
              logger.error(f"Не вдалося надіслати навіть фінальне повідомлення про помилку: {final_err}")
 
@@ -396,12 +329,12 @@ async def handle_image_messages(message: Message, bot: Bot):
             thinking_msg = await message.reply(f"🔍 {current_user_name}, аналізую зображення...")
 
         file_info = await bot.get_file(largest_photo.file_id)
-        if not file_info or not file_info.file_path: return
+        if not file_info.file_path: return
 
-        image_bytes_io = await bot.download_file(file_info.file_path)
-        if not image_bytes_io: return
+        image_bytes = await bot.download_file(file_info.file_path)
+        if not isinstance(image_bytes, io.BytesIO): return
 
-        image_base64 = base64.b64encode(image_bytes_io.read()).decode('utf-8')
+        image_base64 = base64.b64encode(image_bytes.getvalue()).decode('utf-8')
         
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
             vision_response = await gpt.analyze_image_universal(image_base64, current_user_name)
@@ -426,7 +359,6 @@ async def handle_image_messages(message: Message, bot: Bot):
             await thinking_msg.edit_text(f"Хм, {current_user_name}, не можу розібрати, що тут 🤔")
     except Exception as e:
         logger.exception(f"Помилка обробки зображення від {current_user_name}: {e}")
-        if thinking_msg: await thinking_msg.delete()
         await message.reply(f"Упс, {current_user_name}, щось пішло не так з обробкою зображення 😅")
 
 @general_router.message(F.text)
@@ -475,7 +407,7 @@ async def error_handler(event: types.ErrorEvent, bot: Bot):
     if update.message:
         chat_id = update.message.chat.id
         user_name = get_user_display_name(update.message.from_user)
-    elif update.callback_query and update.callback_query.message:
+    elif update.callback_query:
         chat_id = update.callback_query.message.chat.id
         user_name = get_user_display_name(update.callback_query.from_user)
         try: await update.callback_query.answer("Сталася помилка...", show_alert=False)
@@ -491,7 +423,6 @@ async def error_handler(event: types.ErrorEvent, bot: Bot):
 
 # === РЕЄСТРАЦІЯ ОБРОБНИКІВ ===
 def register_general_handlers(dp: Dispatcher):
-    """Реєструє всі загальні обробники (паті та основні)."""
     dp.include_router(party_router)
     dp.include_router(general_router)
     logger.info("🚀 Обробники для паті, команд, тригерів та Vision успішно зареєстровано.")
