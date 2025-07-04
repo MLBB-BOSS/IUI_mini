@@ -1,30 +1,23 @@
 """
-Обробники для процесу реєстрації, оновлення та видалення профілю користувача.
+Обробники для процесу реєстрації нового користувача.
 """
 import html
+import json
 import base64
-from aiogram import Bot, F, Router, Dispatcher
+import io
+from aiogram import Bot, F, Router, types, Dispatcher
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, PhotoSize
 
 from states.user_states import RegistrationFSM
+from keyboards.inline_keyboards import create_registration_confirmation_keyboard
 from services.openai_service import MLBBChatGPT
-from database.crud import (
-    add_or_update_user,
-    get_user_by_telegram_id,
-    delete_user
-)
-from keyboards.inline_keyboards import (
-    create_registration_confirmation_keyboard,
-    create_profile_menu_keyboard,
-    create_delete_confirm_keyboard
-)
+from database.crud import add_or_update_user, get_user_by_telegram_id
 from config import OPENAI_API_KEY, logger
 
-# Ініціалізація роутера для профілю та реєстрації
-profile_router = Router()
-
+# Ініціалізація роутера для реєстрації
+registration_router = Router()
 
 def format_profile_data_for_confirmation(data: dict) -> str:
     """Форматує дані профілю для повідомлення-підтвердження."""
@@ -46,132 +39,117 @@ def format_profile_data_for_confirmation(data: dict) -> str:
         f"🦸 <b>Улюблені герої:</b>\n• {html.escape(str(heroes_str))}"
     )
 
-
-@profile_router.message(Command("register"))
+@registration_router.message(Command("register"))
 async def cmd_register(message: Message, state: FSMContext):
-    """Початок реєстрації або показ існуючого профілю."""
-    user_id = message.from_user.id
-    existing = await get_user_by_telegram_id(user_id)
-    if existing:
-        # Виводимо збережений профіль з меню управління
-        txt = format_profile_data_for_confirmation(existing)
-        await message.answer(txt, parse_mode="HTML", reply_markup=create_profile_menu_keyboard())
+    """Починає процес реєстрації або показує існуючий профіль."""
+    if not message.from_user:
         return
 
-    # Запит скріну для базової реєстрації
+    user_id = message.from_user.id
+    
+    existing_user = await get_user_by_telegram_id(user_id)
+    if existing_user:
+        # 🆕 ВИПРАВЛЕНО: Видалено зайве перетворення.
+        # `existing_user` вже є словником, тому передаємо його напряму.
+        profile_info = format_profile_data_for_confirmation(existing_user)
+        await message.answer(f"Ви вже зареєстровані! Ось ваші дані:\n\n{profile_info}", parse_mode="HTML")
+        return
+
     await state.set_state(RegistrationFSM.waiting_for_photo)
-    await message.answer("Надішліть скріншот вашого профілю для реєстрації. 📸")
+    await message.answer("Для реєстрації, будь ласка, надішліть мені скріншот вашого ігрового профілю. 📸")
 
-
-@profile_router.message(RegistrationFSM.waiting_for_photo, F.photo)
+@registration_router.message(RegistrationFSM.waiting_for_photo, F.photo)
 async def handle_registration_photo(message: Message, state: FSMContext, bot: Bot):
-    """Обробка базового профілю через скріншот."""
-    thinking = await message.reply("Аналізую профіль... 🤖")
+    """Обробляє скріншот профілю, аналізує його та просить підтвердження."""
+    if not message.photo or not message.from_user:
+        await message.reply("Будь ласка, надішліть зображення.")
+        return
+
+    thinking_msg = await message.reply("Аналізую ваш профіль... 🤖 Це може зайняти до 30 секунд.")
+    
     try:
-        # Завантаження фото та перетворення в base64
-        largest: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
-        file_info = await bot.get_file(largest.file_id)
-        image_bytes = await bot.download_file(file_info.file_path)
-        image_b64 = base64.b64encode(image_bytes.read()).decode('utf-8')
+        largest_photo: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
+        file_info = await bot.get_file(largest_photo.file_id)
+        if not file_info.file_path:
+            await thinking_msg.edit_text("Не вдалося отримати інформацію про файл.")
+            return
+
+        image_bytes_io = await bot.download_file(file_info.file_path)
+        if not image_bytes_io:
+             await thinking_msg.edit_text("Не вдалося завантажити зображення.")
+             return
+        
+        image_base64 = base64.b64encode(image_bytes_io.read()).decode('utf-8')
 
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
-            result = await gpt.analyze_user_profile(image_b64)
-        if not result or 'error' in result:
-            raise ValueError(result.get('error', 'Невідома помилка'))
+            analysis_result = await gpt.analyze_user_profile(image_base64)
 
-        await state.update_data(profile_data=result)
-
-        text = (
-            "Перевірте дані профілю:\n\n"
-            f"{format_profile_data_for_confirmation(result)}\n\n"
-            "Натисніть «Зберегти» або «Скасувати»"
+        if not analysis_result or 'error' in analysis_result:
+            error_msg = analysis_result.get('error', 'Не вдалося розпізнати дані.')
+            await thinking_msg.edit_text(f"Помилка аналізу: {error_msg} Спробуйте інший скріншот.")
+            await state.clear()
+            return
+            
+        await state.update_data(profile_data=analysis_result)
+        
+        confirmation_text = (
+            "Будь ласка, перевірте розпізнані дані:\n\n"
+            f"{format_profile_data_for_confirmation(analysis_result)}\n\n"
+            "Якщо все вірно, натисніть 'Зберегти'."
         )
-        await thinking.edit_text(text, reply_markup=create_registration_confirmation_keyboard(), parse_mode="HTML")
+        
+        await thinking_msg.edit_text(
+            confirmation_text,
+            reply_markup=create_registration_confirmation_keyboard(),
+            parse_mode="HTML"
+        )
         await state.set_state(RegistrationFSM.waiting_for_confirmation)
 
     except Exception as e:
-        logger.exception("Помилка аналізу фото:")
-        await thinking.edit_text("Не вдалося розпізнати дані. Спробуйте інший скріншот.")
+        logger.exception("Критична помилка під час аналізу фото для реєстрації:")
+        await thinking_msg.edit_text("Сталася неочікувана помилка під час обробки фото. Спробуйте ще раз.")
         await state.clear()
 
-
-@profile_router.callback_query(RegistrationFSM.waiting_for_confirmation, F.data == "register_confirm")
+@registration_router.callback_query(RegistrationFSM.waiting_for_confirmation, F.data == "register_confirm")
 async def confirm_registration(callback: CallbackQuery, state: FSMContext):
-    """Збереження даних після підтвердження."""
-    data = await state.get_data()
-    profile = data.get('profile_data')
-    profile['telegram_id'] = callback.from_user.id
-    # Конвертуємо список героїв у рядок
-    if isinstance(profile.get('favorite_heroes'), list):
-        profile['favorite_heroes'] = ", ".join(profile['favorite_heroes'])
+    """Зберігає дані в БД після підтвердження користувачем."""
+    if not callback.message or not callback.from_user:
+        return
+        
+    user_data = await state.get_data()
+    profile_data = user_data.get('profile_data')
 
-    await add_or_update_user(profile)
-    await callback.message.edit_text("✅ Профіль успішно збережено.")
-    await callback.answer()
-    # Показ меню для наступних дій
-    await callback.message.answer(
-        format_profile_data_for_confirmation(profile),
-        parse_mode="HTML",
-        reply_markup=create_profile_menu_keyboard()
-    )
-    await state.clear()
+    if not profile_data:
+        await callback.message.edit_text("Помилка: дані для збереження не знайдено. Спробуйте знову.")
+        await state.clear()
+        return
 
+    profile_data['telegram_id'] = callback.from_user.id
+    
+    if 'favorite_heroes' in profile_data and isinstance(profile_data['favorite_heroes'], list):
+        profile_data['favorite_heroes'] = ", ".join(profile_data['favorite_heroes'])
 
-@profile_router.callback_query(RegistrationFSM.waiting_for_confirmation, F.data == "register_cancel")
+    try:
+        await add_or_update_user(profile_data)
+        await callback.message.edit_text("✅ Вітаю! Ваш профіль успішно збережено.")
+        await callback.answer("Реєстрацію завершено!")
+    except Exception as e:
+        logger.exception("Помилка під час збереження даних користувача в БД:")
+        await callback.message.edit_text("Помилка збереження даних. Спробуйте пізніше.")
+    finally:
+        await state.clear()
+
+@registration_router.callback_query(RegistrationFSM.waiting_for_confirmation, F.data == "register_cancel")
 async def cancel_registration(callback: CallbackQuery, state: FSMContext):
-    """Скасування реєстрації."""
+    """Скасовує процес реєстрації."""
+    if not callback.message:
+        return
     await state.clear()
-    await callback.message.edit_text("Реєстрацію скасовано.")
-    await callback.answer()
+    await callback.message.edit_text("Реєстрацію скасовано. Ви можете почати знову, надіславши команду /register.")
+    await callback.answer("Дію скасовано.")
 
 
-# ==== Обробники кнопок меню профілю ====
-@profile_router.callback_query(F.data == "profile_update_basic")
-async def update_basic(cb: CallbackQuery, state: FSMContext):
-    await cb.message.edit_text(
-        "Надішліть скріншот з базовою інформацією.",
-        reply_markup=None
-    )
-    await state.set_state(RegistrationFSM.waiting_for_photo)
-
-@profile_router.callback_query(F.data == "profile_add_stats")
-async def update_stats(cb: CallbackQuery, state: FSMContext):
-    await cb.message.edit_text(
-        "Надішліть скріншот зі статистикою All Seasons.",
-        reply_markup=None
-    )
-    await state.set_state(RegistrationFSM.waiting_for_stats_photo)
-
-@profile_router.callback_query(F.data == "profile_add_heroes")
-async def update_heroes(cb: CallbackQuery, state: FSMContext):
-    await cb.message.edit_text(
-        "Надішліть скріншот Favorite Heroes (Top 3).", reply_markup=None
-    )
-    await state.set_state(RegistrationFSM.waiting_for_heroes_photo)
-
-@profile_router.callback_query(F.data == "profile_delete")
-async def cb_delete_profile(cb: CallbackQuery, state: FSMContext):
-    await cb.message.edit_text(
-        "Ви впевнені, що хочете видалити профіль?", reply_markup=create_delete_confirm_keyboard()
-    )
-    await state.set_state(RegistrationFSM.confirming_deletion)
-
-@profile_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_yes")
-async def cb_delete_yes(cb: CallbackQuery, state: FSMContext):
-    await delete_user(cb.from_user.id)
-    await cb.message.edit_text("Профіль видалено. Для нової реєстрації — /register")
-    await state.clear()
-
-@profile_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_no")
-async def cb_delete_no(cb: CallbackQuery, state: FSMContext):
-    user = await get_user_by_telegram_id(cb.from_user.id)
-    txt = format_profile_data_for_confirmation(user)
-    await cb.message.edit_text(
-        txt, parse_mode="HTML", reply_markup=create_profile_menu_keyboard()
-    )
-    await state.clear()
-
-
-def register_profile_handlers(dp: Dispatcher):
-    dp.include_router(profile_router)
-    logger.info("✅ Обробники профілю успішно зареєстровано.")
+def register_registration_handlers(dp: Dispatcher):
+    """Реєструє всі обробники, пов'язані з процесом реєстрації."""
+    dp.include_router(registration_router)
+    logger.info("✅ Обробники для реєстрації користувачів успішно зареєстровано.")
