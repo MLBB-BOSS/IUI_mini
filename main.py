@@ -19,8 +19,7 @@ from handlers.general_handlers import (
     cmd_go
 )
 from handlers.vision_handlers import register_vision_handlers
-from handlers.registration_handler import register_registration_handlers
-
+from handlers.registration_handler import register_profile_handlers
 
 async def main() -> None:
     """Головна функція запуску бота."""
