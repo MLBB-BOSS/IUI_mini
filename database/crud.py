@@ -47,13 +47,3 @@ async def get_user_by_telegram_id(telegram_id: int) -> Optional[Dict[str, Any]]:
             # Перетворюємо результат у словник
             return dict(user_row._mapping)
     return None
-
-async def delete_user(telegram_id: int) -> None:
-    """
-    Видаляє користувача з БД за Telegram ID.
-    """
-    from database.models import User
-    from database.session import async_session
-    async with async_session() as session:
-        await session.execute(delete(User).where(User.telegram_id == telegram_id))
-        await session.commit()
