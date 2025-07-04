@@ -84,7 +84,7 @@ async def handle_registration_photo(message: Message, state: FSMContext, bot: Bo
         text = (
             "Перевірте дані профілю:\n\n"
             f"{format_profile_data_for_confirmation(result)}\n\n"
-            "Натисніть «Зберегти» або «Скасувати""
+            "Натисніть «Зберегти» або «Скасувати»"
         )
         await thinking.edit_text(text, reply_markup=create_registration_confirmation_keyboard(), parse_mode="HTML")
         await state.set_state(RegistrationFSM.waiting_for_confirmation)
