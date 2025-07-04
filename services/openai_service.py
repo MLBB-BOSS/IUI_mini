@@ -79,6 +79,37 @@ KESTER_TEXT_EXTRACTION_PROMPT = """
 3.  **Точність:** Розпізнай та переклади текст максимально точно, зберігаючи контекст.
 """
 
+# +++ НОВИЙ ПРОМПТ ДЛЯ СТАТИСТИКИ ГЕРОЇВ +++
+HERO_STATS_PROMPT = """
+Ти — MLBB аналітик. Витягни статистику по ТОП-3 героях зі скріншота "Favorite Heroes". Поверни ТІЛЬКИ JSON.
+{
+  "favorite_heroes": [
+    {
+      "hero_name": "string або null",
+      "matches": "int або null",
+      "win_rate": "float або null (число, без '%')"
+    },
+    {
+      "hero_name": "string або null",
+      "matches": "int або null",
+      "win_rate": "float або null (число, без '%')"
+    },
+    {
+      "hero_name": "string або null",
+      "matches": "int або null",
+      "win_rate": "float або null (число, без '%')"
+    }
+  ]
+}
+ВАЖЛИВО:
+1.  **ТІЛЬКИ ТОП-3:** Витягни дані лише для перших трьох героїв у списку.
+2.  **Win Rate:** Тільки число (float), без символу '%'.
+3.  **Порядок:** Зберігай порядок героїв, як на скріншоті.
+4.  **Відсутні дані:** Використовуй `null`.
+Точність є критичною.
+"""
+
+
 PROFILE_DESCRIPTION_PROMPT_TEMPLATE = """
 Ти — GGenius, AI-коментатор MLBB. Створи короткий, дотепний коментар (2-4 речення) про гравця.
 Дані:
@@ -660,55 +691,44 @@ class MLBBChatGPT:
         else: return "general"
 
     # === 🆕 НОВИЙ МЕТОД ДЛЯ АНАЛІЗУ ПРОФІЛЮ (ДЛЯ РЕЄСТРАЦІЇ) ===
-    async def analyze_user_profile(self, image_base64: str) -> dict:
+    async def analyze_user_profile(self, image_base64: str, mode: str = 'basic') -> dict:
         """
-        Аналізує скріншот профілю гравця та повертає структуровані дані у форматі JSON.
-        Цей метод спеціально створений для процесу реєстрації.
+        Аналізує скріншот профілю, статистики або героїв гравця та повертає структуровані дані.
+        
+        Args:
+            image_base64: Зображення у форматі Base64.
+            mode: Тип аналізу ('basic', 'stats', 'heroes').
         """
-        self.class_logger.info("Запит на аналіз профілю для реєстрації.")
-        system_prompt = """
-        Ти - просунутий AI-аналітик гри Mobile Legends, спеціалізований на розборі скріншотів профілів.
-        Твоє завдання - максимально точно витягти дані з наданого зображення і повернути їх у форматі JSON.
+        self.class_logger.info(f"Запит на аналіз профілю в режимі '{mode}'.")
 
-        Правила:
-        1.  **Формат відповіді**: Тільки JSON, без жодного додаткового тексту.
-        2.  **Структура JSON**:
-            {
-              "nickname": "string",
-              "player_id": integer,
-              "server_id": integer,
-              "current_rank": "string",
-              "total_matches": integer,
-              "win_rate": float,
-              "favorite_heroes": "string"
-            }
-        3.  **Точність**: Витягуй дані як є. Якщо поле неможливо знайти, поверни null для цього поля.
-        4.  **Числа**: Усі числові значення (ID, матчі, WR) мають бути без зайвих символів. Winrate - це число з плаваючою комою.
-        5.  **Ранг**: Вказуй повну назву рангу (напр., "Міфічна Слава 132 ⭐️").
-        6.  **Улюблені герої**: Перерахуй три імені героїв через кому та пробіл.
-        7.  **Помилка**: Якщо зображення не є скріншотом профілю MLBB, поверни JSON з помилкою: {"error": "Надане зображення не є скріншотом профілю."}
-        """
+        prompts = {
+            'basic': PROFILE_SCREENSHOT_PROMPT,
+            'stats': PLAYER_STATS_PROMPT,
+            'heroes': HERO_STATS_PROMPT
+        }
+        system_prompt = prompts.get(mode, PROFILE_SCREENSHOT_PROMPT)
+        
         payload = {
             "model": self.VISION_MODEL,
             "response_format": {"type": "json_object"},
             "messages": [
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": "Ти - AI-аналітик MLBB. Витягни дані зі скріншота у форматі JSON."},
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Проаналізуй цей скріншот ігрового профілю і поверни JSON."},
+                        {"type": "text", "text": system_prompt},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
                     ]
                 }
             ],
-            "max_tokens": 1000,
+            "max_tokens": 1500,
             "temperature": 0.0,
         }
 
         current_session = self.session
         temp_session_created = False
         if not current_session or current_session.closed:
-            self.class_logger.warning("Aiohttp сесія для analyze_user_profile була закрита. Створюю тимчасову.")
+            self.class_logger.warning(f"Aiohttp сесія для analyze_user_profile (mode={mode}) була закрита. Створюю тимчасову.")
             current_session = ClientSession(timeout=ClientTimeout(total=90), headers={"Authorization": f"Bearer {self.api_key}"})
             temp_session_created = True
 
@@ -716,24 +736,24 @@ class MLBBChatGPT:
             async with current_session.post("https://api.openai.com/v1/chat/completions", json=payload) as response:
                 if response.status != 200:
                     response_text = await response.text()
-                    self.class_logger.error(f"Помилка OpenAI API при аналізі профілю: {response.status} - {response_text}")
+                    self.class_logger.error(f"Помилка OpenAI API при аналізі профілю (mode={mode}): {response.status} - {response_text}")
                     return {"error": "Помилка відповіді від сервісу аналізу."}
                 
                 response_data = await response.json()
                 content = response_data.get("choices", [{}])[0].get("message", {}).get("content")
                 if not content:
-                    self.class_logger.error(f"OpenAI API повернув порожній контент при аналізі профілю: {response_data}")
+                    self.class_logger.error(f"OpenAI API повернув порожній контент (mode={mode}): {response_data}")
                     return {"error": "Сервіс аналізу повернув порожню відповідь."}
 
                 return json.loads(content)
 
         except json.JSONDecodeError as e:
-            self.class_logger.error(f"Помилка декодування JSON з відповіді OpenAI (аналіз профілю): {e}")
+            self.class_logger.error(f"Помилка декодування JSON з OpenAI (mode={mode}): {e}")
             return {"error": "Не вдалося обробити відповідь від AI. Спробуйте ще раз."}
         except Exception as e:
-            self.class_logger.exception("Критична помилка під час аналізу профілю в OpenAI:")
+            self.class_logger.exception(f"Критична помилка під час аналізу профілю в OpenAI (mode={mode}):")
             return {"error": f"Внутрішня помилка сервісу: {e}"}
         finally:
             if temp_session_created and current_session and not current_session.closed:
                 await current_session.close()
-                self.class_logger.debug("Тимчасову сесію для analyze_user_profile закрито.")
+                self.class_logger.debug(f"Тимчасову сесію для analyze_user_profile (mode={mode}) закрито.")
