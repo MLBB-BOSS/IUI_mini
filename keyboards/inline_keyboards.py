@@ -78,13 +78,14 @@ def create_profile_menu_keyboard() -> InlineKeyboardMarkup:
 
 def create_expanded_profile_menu_keyboard() -> InlineKeyboardMarkup:
     """
-    Створює розширену клавіатуру для меню профілю (2x2 + кнопка "Назад").
+    Створює розширену клавіатуру для меню профілю з короткими написами.
     """
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔄 Оновити базові дані", callback_data="profile_update_basic")
-    builder.button(text="📈 Додати загальну статистику", callback_data="profile_add_stats")
-    builder.button(text="🦸 Додати статистику героїв", callback_data="profile_add_heroes")
-    builder.button(text="🗑️ Видалити профіль", callback_data="profile_delete")
+    # Використовуємо короткі та зрозумілі назви
+    builder.button(text="🔄 Профіль", callback_data="profile_update_basic")
+    builder.button(text="📈 Статистика", callback_data="profile_add_stats")
+    builder.button(text="🦸 Герої", callback_data="profile_add_heroes")
+    builder.button(text="🗑️ Видалити", callback_data="profile_delete")
     builder.button(text="◀️ Назад", callback_data="profile_menu_collapse")
     # Розташовуємо кнопки 2x2, а кнопку "Назад" окремим рядком
     builder.adjust(2, 2, 1)
