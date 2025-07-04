@@ -75,3 +75,17 @@ def create_registration_confirmation_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="❌ Скасувати", callback_data="register_cancel")
     )
     return builder.as_markup()
+
+def create_profile_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        # ...інші кнопки...
+        [InlineKeyboardButton(text="🗑️ Видалити профіль", callback_data="profile_delete")],
+    ])
+
+def create_delete_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Так", callback_data="delete_confirm_yes"),
+            InlineKeyboardButton(text="❌ Ні", callback_data="delete_confirm_no")
+        ]
+    ]
