@@ -63,7 +63,7 @@ def create_dynamic_lobby_keyboard(lobby_id: str, user_id: int, lobby_data: Dict)
 
     return builder.as_markup()
 
-# === 🆕 КЛАВІАТУРИ ДЛЯ РЕЄСТРАЦІЇ ===
+# === КЛАВІАТУРИ ДЛЯ РЕЄСТРАЦІЇ ТА ПРОФІЛЮ ===
 
 def create_registration_confirmation_keyboard() -> InlineKeyboardMarkup:
     """
@@ -81,7 +81,9 @@ def create_profile_menu_keyboard() -> InlineKeyboardMarkup:
     Клавіатура для меню профілю з усіма основними діями.
     """
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 Оновити профіль", callback_data="profile_update")],
+        [InlineKeyboardButton(text="🔄 Оновити базові дані", callback_data="profile_update_basic")],
+        [InlineKeyboardButton(text="📈 Додати загальну статистику", callback_data="profile_add_stats")],
+        [InlineKeyboardButton(text="🦸 Додати статистику героїв", callback_data="profile_add_heroes")],
         [InlineKeyboardButton(text="🗑️ Видалити профіль", callback_data="profile_delete")],
     ])
 
