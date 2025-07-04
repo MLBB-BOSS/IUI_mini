@@ -81,9 +81,7 @@ def create_profile_menu_keyboard() -> InlineKeyboardMarkup:
     Клавіатура для меню профілю з усіма основними діями.
     """
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 Оновити базові дані", callback_data="profile_update_basic")],
-        [InlineKeyboardButton(text="📈 Додати загальну статистику", callback_data="profile_add_stats")],
-        [InlineKeyboardButton(text="🦸 Додати статистику героїв", callback_data="profile_add_heroes")],
+        [InlineKeyboardButton(text="🔄 Оновити профіль", callback_data="profile_update")],
         [InlineKeyboardButton(text="🗑️ Видалити профіль", callback_data="profile_delete")],
     ])
 
@@ -93,7 +91,7 @@ def create_delete_confirm_keyboard() -> InlineKeyboardMarkup:
     """
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Так", callback_data="delete_confirm_yes"),
-            InlineKeyboardButton(text="❌ Ні", callback_data="delete_confirm_no")
+            InlineKeyboardButton(text="✅ Так, я впевнений", callback_data="delete_confirm_yes"),
+            InlineKeyboardButton(text="❌ Ні, скасувати", callback_data="delete_confirm_no")
         ]
     ])
