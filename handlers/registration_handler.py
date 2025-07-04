@@ -14,7 +14,8 @@ from aiogram.types import Message, CallbackQuery, PhotoSize
 
 from states.user_states import RegistrationFSM
 from keyboards.inline_keyboards import (
-    create_profile_menu_keyboard, 
+    create_profile_menu_keyboard,
+    create_expanded_profile_menu_keyboard,
     create_delete_confirm_keyboard
 )
 from services.openai_service import MLBBChatGPT
@@ -48,7 +49,7 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
     )
 
 async def show_profile_menu(message: types.Message, user_id: int):
-    """Відображає профіль користувача та меню керування."""
+    """Відображає профіль користувача та компактне меню керування."""
     user_data = await get_user_by_telegram_id(user_id)
     if user_data:
         profile_text = format_profile_display(user_data)
@@ -76,7 +77,7 @@ async def cmd_profile(message: Message, state: FSMContext):
         await state.set_state(RegistrationFSM.waiting_for_basic_photo)
         await message.answer("👋 Вітаю! Схоже, ви тут уперше.\n\nДля створення профілю, будь ласка, надішліть мені скріншот вашого ігрового профілю (головна сторінка). 📸")
 
-# --- Обробники для кнопок меню ---
+# --- Обробники для кнопок розширеного меню ---
 
 @registration_router.callback_query(F.data == "profile_update_basic")
 async def profile_update_basic_handler(callback: CallbackQuery, state: FSMContext):
@@ -144,7 +145,6 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
         # Обробка результатів для різних режимів
         update_data = {}
         if analysis_mode == 'basic':
-            # Збираємо дані з основного профілю
             update_data = {
                 'nickname': analysis_result.get('game_nickname'),
                 'player_id': int(analysis_result.get('mlbb_id_server', '0 (0)').split(' ')[0]),
@@ -153,19 +153,16 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
                 'total_matches': analysis_result.get('matches_played')
             }
         elif analysis_mode == 'stats':
-            # Збираємо дані зі статистики
             main_indicators = analysis_result.get('main_indicators', {})
             update_data = {
                 'total_matches': main_indicators.get('matches_played'),
                 'win_rate': main_indicators.get('win_rate')
             }
         elif analysis_mode == 'heroes':
-            # Збираємо дані по героях
             heroes_list = analysis_result.get('favorite_heroes', [])
             heroes_str = ", ".join([h.get('hero_name', '') for h in heroes_list if h.get('hero_name')])
             update_data = {'favorite_heroes': heroes_str}
 
-        # Видаляємо ключі з None, щоб не перезаписувати існуючі дані
         update_data = {k: v for k, v in update_data.items() if v is not None}
 
         if not update_data:
@@ -185,6 +182,29 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
     finally:
         await state.clear()
 
+# --- Обробники управління меню ---
+
+@registration_router.callback_query(F.data == "profile_menu_expand")
+async def profile_menu_expand_handler(callback: CallbackQuery):
+    """Розгортає меню профілю до повного вигляду."""
+    await callback.message.edit_reply_markup(
+        reply_markup=create_expanded_profile_menu_keyboard()
+    )
+    await callback.answer()
+
+@registration_router.callback_query(F.data == "profile_menu_collapse")
+async def profile_menu_collapse_handler(callback: CallbackQuery):
+    """Згортає меню профілю до компактного вигляду."""
+    await callback.message.edit_reply_markup(
+        reply_markup=create_profile_menu_keyboard()
+    )
+    await callback.answer()
+
+@registration_router.callback_query(F.data == "profile_menu_close")
+async def profile_menu_close_handler(callback: CallbackQuery):
+    """Закриває (видаляє) повідомлення з меню профілю."""
+    await callback.message.delete()
+    await callback.answer("Меню закрито.")
 
 # --- Обробники видалення ---
 
@@ -212,9 +232,11 @@ async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext):
 @registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_no")
 async def cancel_delete_profile(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.delete() # Видаляємо повідомлення з підтвердженням
+    # Просто видаляємо повідомлення з підтвердженням, щоб повернутись до меню профілю
+    await callback.message.delete()
     if callback.from_user:
-        await show_profile_menu(callback.message, callback.from_user.id) # Показуємо меню знову
+        # Повторно викликаємо функцію, щоб показати головне меню профілю
+        await show_profile_menu(callback.message, callback.from_user.id)
     await callback.answer("Дію скасовано.")
 
 def register_registration_handlers(dp: Dispatcher):
