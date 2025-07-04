@@ -3,7 +3,7 @@
 """
 import asyncpg
 from typing import Optional, Dict, Any
-from sqlalchemy import insert, update, select
+from sqlalchemy import insert, update, select, delete
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from database.models import User
@@ -47,3 +47,26 @@ async def get_user_by_telegram_id(telegram_id: int) -> Optional[Dict[str, Any]]:
             # Перетворюємо результат у словник
             return dict(user_row._mapping)
     return None
+
+async def delete_user_by_telegram_id(telegram_id: int) -> bool:
+    """
+    Видаляє користувача з бази даних за його Telegram ID.
+
+    Args:
+        telegram_id: Унікальний ідентифікатор користувача в Telegram.
+
+    Returns:
+        True, якщо користувача було видалено, інакше False.
+    """
+    async with engine.connect() as conn:
+        async with conn.begin():
+            stmt = delete(User).where(User.telegram_id == telegram_id)
+            result = await conn.execute(stmt)
+            await conn.commit()
+            # result.rowcount > 0 означає, що було видалено хоча б один рядок
+            if result.rowcount > 0:
+                logger.info(f"Користувача з Telegram ID {telegram_id} було успішно видалено.")
+                return True
+            else:
+                logger.warning(f"Спроба видалити несуществуючого користувача з Telegram ID {telegram_id}.")
+                return False
