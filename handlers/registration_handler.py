@@ -8,7 +8,7 @@ import io
 from typing import Dict, Any
 
 from aiogram import Bot, F, Router, types, Dispatcher
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, PhotoSize
 
@@ -99,19 +99,21 @@ async def profile_add_heroes_handler(callback: CallbackQuery, state: FSMContext)
 # --- Універсальний обробник фото для всіх станів ---
 
 @registration_router.message(
-    F.photo,
-    (RegistrationFSM.waiting_for_basic_photo) |
-    (RegistrationFSM.waiting_for_stats_photo) |
-    (RegistrationFSM.waiting_for_heroes_photo)
+    StateFilter(
+        RegistrationFSM.waiting_for_basic_photo,
+        RegistrationFSM.waiting_for_stats_photo,
+        RegistrationFSM.waiting_for_heroes_photo
+    ),
+    F.photo
 )
 async def handle_profile_update_photo(message: Message, state: FSMContext, bot: Bot):
     if not message.photo or not message.from_user: return
 
     current_state = await state.get_state()
     mode_map = {
-        RegistrationFSM.waiting_for_basic_photo: 'basic',
-        RegistrationFSM.waiting_for_stats_photo: 'stats',
-        RegistrationFSM.waiting_for_heroes_photo: 'heroes'
+        RegistrationFSM.waiting_for_basic_photo.state: 'basic',
+        RegistrationFSM.waiting_for_stats_photo.state: 'stats',
+        RegistrationFSM.waiting_for_heroes_photo.state: 'heroes'
     }
     analysis_mode = mode_map.get(current_state)
     if not analysis_mode:
@@ -211,7 +213,8 @@ async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext):
 async def cancel_delete_profile(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.delete() # Видаляємо повідомлення з підтвердженням
-    await show_profile_menu(callback.message, callback.from_user.id) # Показуємо меню знову
+    if callback.from_user:
+        await show_profile_menu(callback.message, callback.from_user.id) # Показуємо меню знову
     await callback.answer("Дію скасовано.")
 
 def register_registration_handlers(dp: Dispatcher):
