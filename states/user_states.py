@@ -9,3 +9,5 @@ class RegistrationFSM(StatesGroup):
     """
     waiting_for_photo = State()        # Очікування на скріншот профілю
     waiting_for_confirmation = State() # Очікування на підтвердження даних
+    confirming_deletion = State()
+    
