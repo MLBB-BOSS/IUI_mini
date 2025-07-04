@@ -11,6 +11,7 @@ from aiogram import Bot, F, Router, types, Dispatcher
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, PhotoSize
+from aiogram.exceptions import TelegramAPIError
 
 from states.user_states import RegistrationFSM
 from keyboards.inline_keyboards import (
@@ -48,34 +49,41 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
         f"🦸 <b>Улюблені герої:</b> {heroes_str}"
     )
 
-async def show_profile_menu(message: types.Message, user_id: int):
+async def show_profile_menu(bot: Bot, chat_id: int, user_id: int):
     """Відображає профіль користувача та компактне меню керування."""
     user_data = await get_user_by_telegram_id(user_id)
     if user_data:
         profile_text = format_profile_display(user_data)
-        await message.answer(
+        await bot.send_message(
+            chat_id,
             profile_text,
             reply_markup=create_profile_menu_keyboard(),
             parse_mode="HTML"
         )
     else:
-        # Це не повинно трапитися, якщо логіка правильна, але це запобіжник
-        await message.answer("Не вдалося знайти ваш профіль. Спробуйте почати з /profile.")
+        await bot.send_message(chat_id, "Не вдалося знайти ваш профіль. Спробуйте почати з /profile.")
 
 @registration_router.message(Command("profile"))
-async def cmd_profile(message: Message, state: FSMContext):
-    """Центральна команда для управління профілем."""
+async def cmd_profile(message: Message, state: FSMContext, bot: Bot):
+    """Центральна команда для управління профілем з логікою "Чистого чату"."""
     if not message.from_user: return
-    await state.clear()
     
     user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    try:
+        await message.delete()
+    except TelegramAPIError as e:
+        logger.warning(f"Не вдалося видалити повідомлення /profile від {user_id}: {e}")
+
+    await state.clear()
     existing_user = await get_user_by_telegram_id(user_id)
     
     if existing_user:
-        await show_profile_menu(message, user_id)
+        await show_profile_menu(bot, chat_id, user_id)
     else:
         await state.set_state(RegistrationFSM.waiting_for_basic_photo)
-        await message.answer("👋 Вітаю! Схоже, ви тут уперше.\n\nДля створення профілю, будь ласка, надішліть мені скріншот вашого ігрового профілю (головна сторінка). 📸")
+        await bot.send_message(chat_id, "👋 Вітаю! Схоже, ви тут уперше.\n\nДля створення профілю, будь ласка, надішліть мені скріншот вашого ігрового профілю (головна сторінка). 📸")
 
 # --- Обробники для кнопок розширеного меню ---
 
@@ -110,6 +118,14 @@ async def profile_add_heroes_handler(callback: CallbackQuery, state: FSMContext)
 async def handle_profile_update_photo(message: Message, state: FSMContext, bot: Bot):
     if not message.photo or not message.from_user: return
 
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    try:
+        await message.delete()
+    except TelegramAPIError as e:
+        logger.warning(f"Не вдалося видалити фото-повідомлення від {user_id}: {e}")
+
     current_state = await state.get_state()
     mode_map = {
         RegistrationFSM.waiting_for_basic_photo.state: 'basic',
@@ -118,11 +134,11 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
     }
     analysis_mode = mode_map.get(current_state)
     if not analysis_mode:
-        await message.reply("Сталася помилка стану. Будь ласка, почніть знову з /profile.")
+        await bot.send_message(chat_id, "Сталася помилка стану. Будь ласка, почніть знову з /profile.")
         await state.clear()
         return
 
-    thinking_msg = await message.reply(f"Аналізую ваш скріншот ({analysis_mode})... 🤖")
+    thinking_msg = await bot.send_message(chat_id, f"Аналізую ваш скріншот ({analysis_mode})... 🤖")
     
     try:
         largest_photo: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
@@ -142,7 +158,6 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
             await thinking_msg.edit_text(f"❌ Помилка аналізу: {error_msg}\n\nБудь ласка, надішліть коректний скріншот або скасуйте операцію.")
             return
 
-        # Обробка результатів для різних режимів
         update_data = {}
         if analysis_mode == 'basic':
             update_data = {
@@ -169,12 +184,12 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
             await thinking_msg.edit_text("Не вдалося витягти жодних нових даних зі скріншота. Спробуйте ще раз.")
             return
             
-        update_data['telegram_id'] = message.from_user.id
+        update_data['telegram_id'] = user_id
         await add_or_update_user(update_data)
         
         await thinking_msg.delete()
-        await message.answer(f"✅ Дані '{analysis_mode}' успішно оновлено!")
-        await show_profile_menu(message, message.from_user.id)
+        await bot.send_message(chat_id, f"✅ Дані '{analysis_mode}' успішно оновлено!")
+        await show_profile_menu(bot, chat_id, user_id)
 
     except Exception as e:
         logger.exception(f"Критична помилка під час обробки фото (mode={analysis_mode}):")
@@ -218,9 +233,11 @@ async def profile_delete_handler(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_yes")
-async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext):
-    if not callback.from_user: return
+async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    if not callback.from_user or not callback.message: return
     user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
     deleted = await delete_user_by_telegram_id(user_id)
     if deleted:
         await callback.message.edit_text("Ваш профіль було успішно видалено.")
@@ -230,13 +247,14 @@ async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext):
     await state.clear()
 
 @registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_no")
-async def cancel_delete_profile(callback: CallbackQuery, state: FSMContext):
+async def cancel_delete_profile(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    if not callback.from_user or not callback.message: return
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
     await state.clear()
-    # Просто видаляємо повідомлення з підтвердженням, щоб повернутись до меню профілю
     await callback.message.delete()
-    if callback.from_user:
-        # Повторно викликаємо функцію, щоб показати головне меню профілю
-        await show_profile_menu(callback.message, callback.from_user.id)
+    await show_profile_menu(bot, chat_id, user_id)
     await callback.answer("Дію скасовано.")
 
 def register_registration_handlers(dp: Dispatcher):
