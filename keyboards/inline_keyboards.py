@@ -6,6 +6,9 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from typing import List, Dict, Optional
 
+# 🆕 Визначаємо константу ролей тут, щоб вона була доступна для всіх функцій
+ALL_ROLES: List[str] = ["Танк/Підтримка", "Лісник", "Маг (мід)", "Стрілець (золото)", "Боєць (досвід)"]
+
 # --- КЛАВІАТУРИ ДЛЯ FSM СТВОРЕННЯ ПАТІ ---
 
 def create_party_confirmation_keyboard() -> InlineKeyboardMarkup:
