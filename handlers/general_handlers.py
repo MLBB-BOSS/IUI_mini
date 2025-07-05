@@ -48,7 +48,8 @@ from utils.message_utils import send_message_in_chunks
 from keyboards.inline_keyboards import (
     create_party_confirmation_keyboard,
     create_role_selection_keyboard,
-    create_lobby_keyboard 
+    create_lobby_keyboard,
+    ALL_ROLES  # 🆕 Імпортуємо константу з модуля клавіатур
 )
 
 # === ВИЗНАЧЕННЯ СТАНІВ FSM ===
@@ -65,7 +66,6 @@ vision_cooldowns: Dict[int, float] = {}
 # 🔄 Структура active_lobbies тепер використовує message_id як ключ
 # Додано поле 'state' для керування відображенням кнопок
 active_lobbies: Dict[int, Dict] = {} # {message_id: {"leader_id": ..., "players": ..., "state": "open" | "joining"}}
-ALL_ROLES: List[str] = ["Танк/Підтримка", "Лісник", "Маг (мід)", "Стрілець (золото)", "Боєць (досвід)"]
 
 # === ІНІЦІАЛІЗАЦІЯ РОУТЕРІВ ТА КЛІЄНТІВ ===
 party_router = Router()
@@ -178,17 +178,9 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
     user_name = get_user_display_name(user)
     
     state_data = await state.get_data()
-    reply_to_message_id = state_data.get("reply_to_message_id")
-
-    # Спочатку надсилаємо повідомлення, щоб отримати його ID
-    sent_lobby_message = await bot.send_message(
-        chat_id=callback.message.chat.id,
-        text="Створюю лобі...",
-        reply_to_message_id=reply_to_message_id,
-        parse_mode=ParseMode.HTML
-    )
     
-    lobby_id = sent_lobby_message.message_id  # 🆕 Використовуємо ID повідомлення як ID лобі
+    # 🆕 ID лобі тепер буде ID повідомлення, яке ми редагуємо
+    lobby_id = callback.message.message_id
     
     lobby_data = {
         "leader_id": user.id,
@@ -204,7 +196,7 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
     message_text = get_lobby_message_text(lobby_data)
     keyboard = create_lobby_keyboard(lobby_id, lobby_data)
     
-    # Тепер редагуємо повідомлення з правильним текстом та клавіатурою
+    # 🔄 Редагуємо існуюче повідомлення замість створення нового
     await bot.edit_message_text(
         text=message_text,
         chat_id=callback.message.chat.id,
@@ -212,9 +204,6 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
         reply_markup=keyboard,
         parse_mode=ParseMode.HTML
     )
-    
-    # Видаляємо проміжне повідомлення ("Оберіть свою роль")
-    await callback.message.delete()
     
     logger.info(f"Створено лобі {lobby_id} ініціатором {user_name} з роллю {selected_role}")
     await callback.answer(f"Ви зайняли роль: {selected_role}")
