@@ -50,26 +50,27 @@ from keyboards.inline_keyboards import (
     create_role_selection_keyboard,
     create_lobby_keyboard,
     ALL_ROLES,
-    # 🆕 Нові клавіатури
     create_game_mode_keyboard,
-    create_party_size_keyboard
+    create_party_size_keyboard,
+    # 🆕 Нова клавіатура для вибору бажаних ролей
+    create_required_roles_keyboard
 )
 
 # === 🔄 ОНОВЛЕННЯ СТАНІВ FSM ===
 class PartyCreationFSM(StatesGroup):
     """Розширені стани для покрокового процесу створення паті."""
     waiting_for_confirmation = State()
-    waiting_for_game_mode = State()      # 🆕 Новий стан
-    waiting_for_party_size = State()     # 🆕 Новий стан
-    waiting_for_role_selection = State() # Існуючий стан, тепер для вибору ролі лідером
-    waiting_for_required_roles = State() # 🆕 Новий стан для вибору потрібних ролей (буде реалізовано)
+    waiting_for_game_mode = State()
+    waiting_for_party_size = State()
+    waiting_for_role_selection = State()
+    # 🆕 Новий стан для вибору бажаних ролей
+    waiting_for_required_roles = State()
 
 
 # === СХОВИЩА ДАНИХ У ПАМ'ЯТІ ===
 chat_histories: Dict[int, Deque[Dict[str, str]]] = defaultdict(lambda: deque(maxlen=MAX_CHAT_HISTORY_LENGTH))
 chat_cooldowns: Dict[int, float] = {}
 vision_cooldowns: Dict[int, float] = {}
-# 🔄 Структура active_lobbies тепер використовує message_id як ключ і зберігає більше даних
 active_lobbies: Dict[int, Dict] = {} 
 
 # === ІНІЦІАЛІЗАЦІЯ РОУТЕРІВ ТА КЛІЄНТІВ ===
@@ -121,7 +122,7 @@ def is_party_request_message(message: Message) -> bool:
         return False
 
 def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = None) -> str:
-    # 🔄 Логіка тепер враховує режим гри та розмір паті
+    # 🔄 Логіка тепер враховує бажані ролі
     leader_name = html.escape(lobby_data['leader_name'])
     game_mode = lobby_data.get('game_mode', 'Рейтинг')
     party_size = lobby_data.get('party_size', 5)
@@ -142,16 +143,24 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
         emoji = role_emoji_map.get(role, "🔹")
         players_list.append(f"• {emoji} <b>{role}:</b> {name}")
 
-    available_roles_count = party_size - len(players_list)
-    available_roles_list = [f"• {role_emoji_map.get(r, '🔹')} {r}" for r in ALL_ROLES if r not in taken_roles]
+    available_slots_count = party_size - len(players_list)
+    
+    # 🔄 Відображаємо або бажані, або всі вільні ролі
+    required_roles = lobby_data.get('required_roles', [])
+    if required_roles:
+        available_roles_list = [f"• {role_emoji_map.get(r, '🔹')} {r}" for r in required_roles if r not in taken_roles]
+    else:
+        available_roles_list = [f"• {role_emoji_map.get(r, '🔹')} {r}" for r in ALL_ROLES if r not in taken_roles]
+
     header = f"🔥 <b>Збираємо паті в {mode_display} ({len(players_list)}/{party_size})</b> 🔥\n\n<b>Ініціатор:</b> {leader_name}\n"
     players_section = "<b>Учасники:</b>\n" + "\n".join(players_list)
     
-    # 🆕 Додаємо динамічний футер
     if lobby_data.get('state') == 'joining' and joining_user_name:
         footer = f"\n⏳ <b>{html.escape(joining_user_name)}, оберіть свою роль...</b>"
-    elif available_roles_count > 0:
-        footer = f"\n\n<b>Вільні слоти ({available_roles_count}):</b>\n" + "\n".join(available_roles_list)
+    elif available_slots_count > 0:
+        # 🔄 Змінено заголовок для вільних слотів
+        section_title = "Потрібні ролі" if required_roles else "Вільні слоти"
+        footer = f"\n\n<b>{section_title} ({available_slots_count}):</b>\n" + "\n".join(available_roles_list)
     else:
         footer = "\n\n✅ <b>Команда зібрана!</b>"
         
@@ -176,14 +185,14 @@ async def cancel_party_creation(callback: CallbackQuery, state: FSMContext):
 
 @party_router.callback_query(PartyCreationFSM.waiting_for_confirmation, F.data == "party_start_creation")
 async def prompt_for_game_mode(callback: CallbackQuery, state: FSMContext):
-    """🆕 Крок 1: Запитуємо режим гри."""
+    # ... (код без змін)
     await state.set_state(PartyCreationFSM.waiting_for_game_mode)
     await callback.message.edit_text("🎮 Чудово! Спочатку вибери режим гри:", reply_markup=create_game_mode_keyboard())
     await callback.answer()
 
 @party_router.callback_query(PartyCreationFSM.waiting_for_game_mode, F.data.startswith("party_set_mode:"))
 async def prompt_for_party_size(callback: CallbackQuery, state: FSMContext):
-    """🆕 Крок 2: Запитуємо розмір паті."""
+    # ... (код без змін)
     game_mode = callback.data.split(":")[-1]
     await state.update_data(game_mode=game_mode)
     await state.set_state(PartyCreationFSM.waiting_for_party_size)
@@ -192,7 +201,7 @@ async def prompt_for_party_size(callback: CallbackQuery, state: FSMContext):
 
 @party_router.callback_query(PartyCreationFSM.waiting_for_party_size, F.data.startswith("party_set_size:"))
 async def prompt_for_leader_role(callback: CallbackQuery, state: FSMContext):
-    """🆕 Крок 3: Запитуємо роль лідера."""
+    # ... (код без змін)
     party_size = int(callback.data.split(":")[-1])
     await state.update_data(party_size=party_size)
     await state.set_state(PartyCreationFSM.waiting_for_role_selection)
@@ -201,27 +210,89 @@ async def prompt_for_leader_role(callback: CallbackQuery, state: FSMContext):
 
 
 @party_router.callback_query(PartyCreationFSM.waiting_for_role_selection, F.data.startswith("party_select_role:initial:"))
+async def handle_leader_role_selection(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """🆕 Обробляє вибір ролі лідера і вирішує, чи потрібен наступний крок."""
+    selected_role = callback.data.split(":")[-1]
+    await state.update_data(leader_role=selected_role)
+    
+    state_data = await state.get_data()
+    party_size = state_data.get("party_size", 5)
+    
+    if party_size < 5:
+        # 🆕 Переходимо до вибору бажаних ролей
+        await state.set_state(PartyCreationFSM.waiting_for_required_roles)
+        num_to_select = party_size - 1
+        available_for_selection = [r for r in ALL_ROLES if r != selected_role]
+        
+        await state.update_data(selected_required_roles=[], num_to_select=num_to_select)
+        
+        await callback.message.edit_text(
+            f"Тепер вибери <b>{num_to_select}</b> роль(і), яку(і) ти шукаєш:",
+            reply_markup=create_required_roles_keyboard(available_for_selection, [], num_to_select)
+        )
+    else:
+        # 🆕 Якщо Full Party, створюємо лобі одразу
+        await create_party_lobby(callback, state, bot)
+
+@party_router.callback_query(PartyCreationFSM.waiting_for_required_roles, F.data.startswith("party_req_role:"))
+async def handle_required_role_selection(callback: CallbackQuery, state: FSMContext):
+    """🆕 Обробляє вибір/скасування вибору бажаної ролі."""
+    role = callback.data.split(":")[-1]
+    data = await state.get_data()
+    selected = data.get("selected_required_roles", [])
+    num_to_select = data.get("num_to_select", 1)
+    leader_role = data.get("leader_role")
+    
+    if role in selected:
+        selected.remove(role)
+    else:
+        if len(selected) < num_to_select:
+            selected.append(role)
+        else:
+            await callback.answer(f"Ви можете вибрати лише {num_to_select} ролі.", show_alert=True)
+            return
+
+    await state.update_data(selected_required_roles=selected)
+    
+    available_for_selection = [r for r in ALL_ROLES if r != leader_role]
+    await callback.message.edit_reply_markup(
+        reply_markup=create_required_roles_keyboard(available_for_selection, selected, num_to_select)
+    )
+    await callback.answer()
+
+@party_router.callback_query(PartyCreationFSM.waiting_for_required_roles, F.data == "party_confirm_roles")
+async def confirm_required_roles_and_create_lobby(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """🆕 Підтверджує вибір бажаних ролей і створює лобі."""
+    await create_party_lobby(callback, state, bot)
+
+
 async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    """🆕 Фінальний крок: Створюємо лобі з усіма даними."""
+    """
+    (Helper function) Створює лобі з усіма даними зі стану FSM.
+    Викликається або після вибору ролі лідером (для Full Party),
+    або після підтвердження бажаних ролей (для Duo/Trio).
+    """
     if not callback.message: return
     user = callback.from_user
-    selected_role = callback.data.split(":")[-1]
-    
-    user_name = get_user_display_name(user)
     state_data = await state.get_data()
     
+    user_name = get_user_display_name(user)
     lobby_id = callback.message.message_id
+    
+    # 🔄 Збираємо дані з усього ланцюжка FSM
+    leader_role = state_data.get("leader_role")
+    required_roles = state_data.get("selected_required_roles", [])
     
     lobby_data = {
         "leader_id": user.id,
         "leader_name": user_name,
-        "players": {user.id: {"name": user_name, "role": selected_role}},
+        "players": {user.id: {"name": user_name, "role": leader_role}},
         "chat_id": callback.message.chat.id,
         "state": "open",
         "joining_user": None,
-        # 🆕 Додаємо нові дані
         "game_mode": state_data.get("game_mode", "Ranked"),
-        "party_size": state_data.get("party_size", 5)
+        "party_size": state_data.get("party_size", 5),
+        "required_roles": required_roles
     }
     
     active_lobbies[lobby_id] = lobby_data
@@ -238,7 +309,7 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
     )
     
     logger.info(f"Створено лобі {lobby_id} ініціатором {user_name} (режим: {lobby_data['game_mode']}, розмір: {lobby_data['party_size']})")
-    await callback.answer(f"Ти зайняв роль: {selected_role}")
+    await callback.answer(f"Лобі створено!")
     await state.clear()
 
 
@@ -246,6 +317,7 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
 
 @party_router.callback_query(F.data.startswith("party_join:"))
 async def handle_join_request(callback: CallbackQuery, bot: Bot):
+    # 🔄 Логіка тепер враховує required_roles
     lobby_id = int(callback.data.split(":")[-1])
     user = callback.from_user
     
@@ -261,7 +333,6 @@ async def handle_join_request(callback: CallbackQuery, bot: Bot):
         await callback.answer("Ви вже у цьому паті!", show_alert=True)
         return
         
-    # 🔄 Перевірка на основі party_size
     if len(lobby_data["players"]) >= lobby_data.get("party_size", 5):
         await callback.answer("Паті вже заповнено!", show_alert=True)
         return
@@ -287,8 +358,13 @@ async def handle_join_request(callback: CallbackQuery, bot: Bot):
 
 @party_router.callback_query(F.data.startswith("party_select_role:"))
 async def handle_join_role_selection(callback: CallbackQuery, bot: Bot):
-    # ... (код без змін, він вже готовий до нової логіки)
-    lobby_id = int(callback.data.split(":")[1])
+    # ... (код без змін)
+    # Ця функція вже готова до роботи з новою клавіатурою,
+    # оскільки вона отримує доступні ролі з create_lobby_keyboard
+    lobby_id_str = callback.data.split(":")[1]
+    if lobby_id_str == "initial": return # Пропускаємо, це для створення лобі
+    
+    lobby_id = int(lobby_id_str)
     selected_role = callback.data.split(":")[-1]
     user = callback.from_user
 
