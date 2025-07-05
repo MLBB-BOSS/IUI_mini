@@ -52,7 +52,8 @@ from keyboards.inline_keyboards import (
     ALL_ROLES,
     create_game_mode_keyboard,
     create_party_size_keyboard,
-    create_required_roles_keyboard
+    create_required_roles_keyboard,
+    create_party_info_keyboard # +++ НОВИЙ ІМПОРТ +++
 )
 
 # === 🔄 ОНОВЛЕННЯ СТАНІВ FSM ===
@@ -172,19 +173,20 @@ async def ask_for_party_creation(message: Message, state: FSMContext):
     # 🆕 Зберігаємо ID ініціатора для перевірки прав
     await state.update_data(last_message_id=sent_message.message_id, initiator_id=message.from_user.id)
 
-# +++ НОВИЙ ОБРОБНИК ДЛЯ КНОПКИ "ІНФО" +++
+# +++ ОНОВЛЕНИЙ ОБРОБНИК ДЛЯ КНОПКИ "ІНФО" +++
 @party_router.callback_query(F.data == "party_show_info")
 async def show_party_info(callback: CallbackQuery):
-    """Надсилає спливаюче повідомлення з інформацією про функцію створення паті."""
+    """Редагує повідомлення, показуючи довідку про функцію."""
     info_text = (
-        "ℹ️ Довідка по функції 'Зібрати Паті'\n\n"
+        "ℹ️ <b>Довідка по функції 'Зібрати Паті'</b>\n\n"
         "Ця функція допоможе тобі швидко організувати команду для гри в Mobile Legends.\n\n"
-        "Як це працює:\n"
+        "<b>Як це працює:</b>\n"
         "1. Я покроково запитаю тебе про режим гри (Рейтинг, Класика), кількість гравців (Дуо, Тріо, Фулл паті) та бажані ролі.\n"
         "2. Після налаштування я створю лобі-повідомлення в чаті, до якого зможуть приєднатися інші гравці.\n\n"
         "Просто натисни 'Так', щоб почати! 👍"
     )
-    await callback.answer(info_text, show_alert=True)
+    await callback.message.edit_text(info_text, reply_markup=create_party_info_keyboard())
+    await callback.answer()
 
 @party_router.callback_query(F.data == "party_cancel_creation")
 async def cancel_party_creation(callback: CallbackQuery, state: FSMContext):
@@ -351,7 +353,7 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
     await state.clear()
 
 
-# === 🆕 ОБРОБНИКИ ДЛЯ КНОПОК "НАЗАД" ===
+# === 🔄 ОНОВЛЕНІ ОБРОБНИКИ ДЛЯ КНОПОК "НАЗАД" ===
 @party_router.callback_query(F.data == "party_step_back:to_confirmation")
 async def step_back_to_confirmation(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
