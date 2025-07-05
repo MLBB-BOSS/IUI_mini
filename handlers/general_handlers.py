@@ -120,7 +120,7 @@ def is_party_request_message(message: Message) -> bool:
 def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = None) -> str:
     """
     Створює розширений та візуально привабливий текст для лобі-повідомлення.
-    🆕 v3.4: Використання <blockquote> для чистого дизайну без кнопки "Копіювати".
+    🆕 v3.5: Нова структура заголовку та фіксований розділювач.
     """
     leader_name = html.escape(lobby_data['leader_name'])
     game_mode = lobby_data.get('game_mode', 'Ranked')
@@ -152,8 +152,12 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
     progress_bar = filled_dots + empty_dots
 
     text_parts = []
-    text_parts.append(f"🎮 <b>ЗБІР КОМАНДИ | {mode_display}</b>")
-    text_parts.append("─" * 24) # Скорочена лінія
+    # Нова структура заголовку
+    text_parts.append(f"<b>{mode_display}</b>")
+    text_parts.append(f"<b>🎮 ЗБІР КОМАНДИ</b>")
+    text_parts.append("──────────────────")
+
+    # Основний контент
     text_parts.append(f"👑 <b>Лідер:</b> {leader_name}")
     text_parts.append(f"📊 <b>Прогрес:</b> {progress_bar} ({len(players_list)}/{party_size})")
 
@@ -161,6 +165,7 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
         text_parts.append("\n👥 <b>СКЛАД КОМАНДИ:</b>")
         text_parts.extend(players_list)
 
+    # Футер
     if lobby_data.get('state') == 'joining' and joining_user_name:
         text_parts.append(f"\n⏳ <b>{html.escape(joining_user_name)}, оберіть свою роль...</b>")
     elif available_slots_count > 0:
@@ -177,7 +182,7 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
     else:
         text_parts.append("\n\n✅ <b>КОМАНДА ГОТОВА! ПОГНАЛИ! 🚀</b>")
         
-    # Обгортаємо весь текст в <blockquote> для чистого дизайну
+    # Обгортаємо все в <blockquote> для чистого дизайну
     return f"<blockquote>" + "\n".join(text_parts) + "</blockquote>"
 
 
