@@ -360,7 +360,7 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
 
 
 # === 🔄 ОНОВЛЕНІ ОБРОБНИКИ ДЛЯ КНОПОК "НАЗАД" ===
-@party_router.callback_query(F.data == "party_step_back:to_confirmation", PartyCreationFSM.waiting_for_game_mode)
+@party_router.callback_query(F.data == "party_step_back:to_confirmation")
 async def step_back_to_confirmation(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
@@ -372,7 +372,7 @@ async def step_back_to_confirmation(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("Бачу, ти хочеш зібрати команду. Допомогти тобі?", reply_markup=create_party_confirmation_keyboard())
     await callback.answer()
 
-@party_router.callback_query(F.data == "party_step_back:to_game_mode", PartyCreationFSM.waiting_for_party_size)
+@party_router.callback_query(F.data == "party_step_back:to_game_mode")
 async def step_back_to_game_mode(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
@@ -384,7 +384,7 @@ async def step_back_to_game_mode(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("🎮 Чудово! Спочатку вибери режим гри:", reply_markup=create_game_mode_keyboard())
     await callback.answer()
 
-@party_router.callback_query(F.data == "party_step_back:to_party_size", PartyCreationFSM.waiting_for_role_selection)
+@party_router.callback_query(F.data == "party_step_back:to_party_size")
 async def step_back_to_party_size(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
@@ -396,7 +396,7 @@ async def step_back_to_party_size(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("👥 Тепер вибери, скільки гравців ти шукаєш:", reply_markup=create_party_size_keyboard())
     await callback.answer()
 
-@party_router.callback_query(F.data == "party_step_back:to_leader_role", PartyCreationFSM.waiting_for_required_roles)
+@party_router.callback_query(F.data == "party_step_back:to_leader_role")
 async def step_back_to_leader_role(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
