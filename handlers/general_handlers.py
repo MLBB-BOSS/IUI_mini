@@ -48,19 +48,36 @@ from utils.message_utils import send_message_in_chunks
 from keyboards.inline_keyboards import (
     create_party_confirmation_keyboard,
     create_role_selection_keyboard,
-    create_dynamic_lobby_keyboard
+    # 🆕 Імпортуємо нову універсальну клавіатуру
+    create_lobby_keyboard
 )
 
 # === ВИЗНАЧЕННЯ СТАНІВ FSM ===
 class PartyCreationFSM(StatesGroup):
-    """Стани для покрокового процесу створення паті."""
+    """Стани для покрокового процесу створення та приєднання до паті."""
     waiting_for_confirmation = State()
     waiting_for_role_selection = State()
+    # 🆕 Новий стан для вибору ролі при приєднанні
+    waiting_for_join_role_selection = State()
+
 
 # === СХОВИЩА ДАНИХ У ПАМ'ЯТІ ===
 chat_histories: Dict[int, Deque[Dict[str, str]]] = defaultdict(lambda: deque(maxlen=MAX_CHAT_HISTORY_LENGTH))
 chat_cooldowns: Dict[int, float] = {}
 vision_cooldowns: Dict[int, float] = {}
+# Структура active_lobbies:
+# {
+#     "lobby_id_1": {
+#         "leader_id": 123,
+#         "leader_name": "Player1",
+#         "players": {
+#             123: {"name": "Player1", "role": "Танк/Підтримка"},
+#             456: {"name": "Player2", "role": "Лісник"}
+#         },
+#         "chat_id": -100123,
+#         "message_id": 555
+#     }, ...
+# }
 active_lobbies: Dict[str, Dict] = {}
 ALL_ROLES: List[str] = ["Танк/Підтримка", "Лісник", "Маг (мід)", "Стрілець (золото)", "Боєць (досвід)"]
 
@@ -69,7 +86,7 @@ party_router = Router()
 general_router = Router()
 gemini_client = GeminiSearch()
 
-# === 🆕 ФУНКЦІЯ ДЛЯ ВСТАНОВЛЕННЯ КОМАНД БОТА ===
+# === ФУНКЦІЯ ДЛЯ ВСТАНОВЛЕННЯ КОМАНД БОТА ===
 async def set_bot_commands(bot: Bot):
     """
     Встановлює/оновлює список команд, які бот показує в меню Telegram.
@@ -121,7 +138,11 @@ def get_lobby_message_text(lobby_data: dict) -> str:
     
     players_list = []
     taken_roles = [player_info['role'] for player_info in lobby_data['players'].values()]
-    for player_id, player_info in lobby_data['players'].items():
+    
+    # Сортуємо гравців за ролями для стабільного порядку
+    sorted_players = sorted(lobby_data['players'].items(), key=lambda item: ALL_ROLES.index(item[1]['role']))
+
+    for player_id, player_info in sorted_players:
         role = player_info['role']
         name = html.escape(player_info['name'])
         emoji = role_emoji_map.get(role, "🔹")
@@ -131,6 +152,7 @@ def get_lobby_message_text(lobby_data: dict) -> str:
     header = f"🔥 <b>Збираємо паті на рейтинг!</b> 🔥\n\n<b>Ініціатор:</b> {leader_name}\n"
     players_section = "<b>Учасники:</b>\n" + "\n".join(players_list)
     available_section = "\n\n<b>Вільні ролі:</b>\n" + "\n".join(available_roles_list) if available_roles_list else "\n\n✅ <b>Команда зібрана!</b>"
+    
     return f"{header}\n{players_section}{available_section}"
 
 # === ЛОГІКА СТВОРЕННЯ ПАТІ (FSM) ===
@@ -139,6 +161,8 @@ async def ask_for_party_creation(message: Message, state: FSMContext):
     user_name = get_user_display_name(message.from_user)
     logger.info(f"Виявлено запит на створення паті від {user_name}: '{message.text}'")
     await state.set_state(PartyCreationFSM.waiting_for_confirmation)
+    # Зберігаємо ID повідомлення, на яке треба буде відповісти
+    await state.update_data(reply_to_message_id=message.message_id)
     await message.reply("Бачу, ти хочеш зібрати команду. Допомогти тобі?", reply_markup=create_party_confirmation_keyboard())
 
 @party_router.callback_query(F.data == "party_cancel_creation")
@@ -150,25 +174,222 @@ async def cancel_party_creation(callback: CallbackQuery, state: FSMContext):
 @party_router.callback_query(PartyCreationFSM.waiting_for_confirmation, F.data == "party_start_creation")
 async def prompt_for_role(callback: CallbackQuery, state: FSMContext):
     await state.set_state(PartyCreationFSM.waiting_for_role_selection)
-    await callback.message.edit_text("Чудово! Оберіть свою роль:", reply_markup=create_role_selection_keyboard(ALL_ROLES))
+    # Передаємо порожній lobby_id, оскільки лобі ще не створено
+    await callback.message.edit_text("Чудово! Оберіть свою роль:", reply_markup=create_role_selection_keyboard(ALL_ROLES, lobby_id="initial"))
     await callback.answer()
 
-@party_router.callback_query(PartyCreationFSM.waiting_for_role_selection, F.data.startswith("party_role_select:"))
+@party_router.callback_query(PartyCreationFSM.waiting_for_role_selection, F.data.startswith("party_select_role:initial:"))
 async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bot):
     if not callback.message: return
     user = callback.from_user
     selected_role = callback.data.split(":")[-1]
-    lobby_id = str(callback.message.message_id)
-    lobby_data = {"leader_id": user.id, "leader_name": get_user_display_name(user), "players": {user.id: {"name": get_user_display_name(user), "role": selected_role}}, "chat_id": callback.message.chat.id}
-    active_lobbies[lobby_id] = lobby_data
-    logger.info(f"Створено лобі {lobby_id} ініціатором {get_user_display_name(user)} з роллю {selected_role}")
+    
+    # Створюємо унікальний ID для лобі на основі часу та ID користувача
+    lobby_id = f"lobby_{int(time.time())}_{user.id}"
+    
+    user_name = get_user_display_name(user)
+    lobby_data = {
+        "leader_id": user.id,
+        "leader_name": user_name,
+        "players": {user.id: {"name": user_name, "role": selected_role}},
+        "chat_id": callback.message.chat.id
+    }
+    
     message_text = get_lobby_message_text(lobby_data)
-    keyboard = create_dynamic_lobby_keyboard(lobby_id, user.id, lobby_data)
-    await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+    # 🆕 Використовуємо нову універсальну клавіатуру
+    keyboard = create_lobby_keyboard(lobby_id, lobby_data)
+    
+    state_data = await state.get_data()
+    reply_to_message_id = state_data.get("reply_to_message_id")
+
+    # Видаляємо проміжне повідомлення ("Оберіть свою роль")
+    await callback.message.delete()
+
+    # Надсилаємо нове повідомлення з лобі, відповідаючи на оригінальний запит
+    sent_lobby_message = await bot.send_message(
+        chat_id=callback.message.chat.id,
+        text=message_text,
+        reply_markup=keyboard,
+        parse_mode=ParseMode.HTML,
+        reply_to_message_id=reply_to_message_id
+    )
+    
+    # Зберігаємо message_id самого лобі для майбутніх оновлень
+    lobby_data["message_id"] = sent_lobby_message.message_id
+    active_lobbies[lobby_id] = lobby_data
+    
+    logger.info(f"Створено лобі {lobby_id} ініціатором {user_name} з роллю {selected_role}")
     await callback.answer(f"Ви зайняли роль: {selected_role}")
     await state.clear()
 
-# === ЗАГАЛЬНІ ОБРОБНИКИ КОМАНД ===
+
+# === 🆕 НОВА ЛОГІКА ВЗАЄМОДІЇ З УНІВЕРСАЛЬНИМ ЛОБІ ===
+
+@party_router.callback_query(F.data.startswith("party_join:"))
+async def handle_join_request(callback: CallbackQuery, state: FSMContext):
+    """Обробляє натискання кнопки 'Приєднатися'."""
+    lobby_id = callback.data.split(":")[-1]
+    user = callback.from_user
+    
+    if lobby_id not in active_lobbies:
+        await callback.answer("Цього лобі більше не існує.", show_alert=True)
+        # Спробуємо видалити повідомлення, якщо воно ще є
+        try: await callback.message.delete()
+        except TelegramAPIError: pass
+        return
+
+    lobby_data = active_lobbies[lobby_id]
+    
+    if user.id in lobby_data["players"]:
+        await callback.answer("Ви вже у цьому паті!", show_alert=True)
+        return
+        
+    if len(lobby_data["players"]) >= 5:
+        await callback.answer("Паті вже заповнено!", show_alert=True)
+        return
+        
+    # Якщо все добре, запускаємо процес вибору ролі для нового гравця
+    taken_roles = [p_info["role"] for p_info in lobby_data["players"].values()]
+    available_roles = [r for r in ALL_ROLES if r not in taken_roles]
+    
+    await state.set_state(PartyCreationFSM.waiting_for_join_role_selection)
+    # Зберігаємо lobby_id в стані, щоб знати, куди додавати гравця
+    await state.update_data(joining_lobby_id=lobby_id)
+    
+    # Надсилаємо тимчасове повідомлення з вибором ролі
+    await callback.message.reply(
+        "Оберіть свою роль для приєднання:",
+        reply_markup=create_role_selection_keyboard(available_roles, lobby_id)
+    )
+    await callback.answer()
+
+@party_router.callback_query(PartyCreationFSM.waiting_for_join_role_selection, F.data.startswith("party_select_role:"))
+async def handle_join_role_selection(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Обробляє вибір ролі гравцем, що приєднується."""
+    if not callback.message or not callback.message.reply_to_message: return
+    
+    lobby_id = callback.data.split(":")[1]
+    selected_role = callback.data.split(":")[-1]
+    user = callback.from_user
+    
+    state_data = await state.get_data()
+    if state_data.get("joining_lobby_id") != lobby_id or lobby_id not in active_lobbies:
+        await callback.answer("Помилка стану або лобі не знайдено. Спробуйте ще раз.", show_alert=True)
+        await state.clear()
+        return
+
+    lobby_data = active_lobbies[lobby_id]
+    
+    # Додаємо гравця в лобі
+    lobby_data["players"][user.id] = {"name": get_user_display_name(user), "role": selected_role}
+    
+    # Оновлюємо повідомлення лобі
+    new_text = get_lobby_message_text(lobby_data)
+    new_keyboard = create_lobby_keyboard(lobby_id, lobby_data)
+    
+    try:
+        # Редагуємо оригінальне повідомлення лобі
+        await bot.edit_message_text(
+            text=new_text,
+            chat_id=lobby_data["chat_id"],
+            message_id=lobby_data["message_id"],
+            reply_markup=new_keyboard,
+            parse_mode=ParseMode.HTML
+        )
+        await callback.answer(f"Ви приєдналися до паті з роллю: {selected_role}")
+    except TelegramAPIError as e:
+        logger.error(f"Не вдалося оновити повідомлення лобі {lobby_id}: {e}")
+        await callback.answer("Помилка оновлення лобі.", show_alert=True)
+        # Відкочуємо зміни, якщо не вдалося оновити повідомлення
+        lobby_data["players"].pop(user.id, None)
+
+    # Видаляємо тимчасове повідомлення з вибором ролі
+    await callback.message.delete()
+    await state.clear()
+
+
+@party_router.callback_query(F.data.startswith("party_leave:"))
+async def handle_leave_lobby(callback: CallbackQuery, bot: Bot):
+    """Обробляє натискання кнопки 'Покинути паті'."""
+    lobby_id = callback.data.split(":")[-1]
+    user = callback.from_user
+    
+    if lobby_id not in active_lobbies:
+        await callback.answer("Цього лобі більше не існує.", show_alert=True)
+        return
+
+    lobby_data = active_lobbies[lobby_id]
+    
+    if user.id not in lobby_data["players"]:
+        await callback.answer("Ви не є учасником цього паті.", show_alert=True)
+        return
+        
+    if user.id == lobby_data["leader_id"]:
+        await callback.answer("Лідер не може покинути паті. Тільки скасувати його.", show_alert=True)
+        return
+        
+    # Видаляємо гравця
+    removed_player_info = lobby_data["players"].pop(user.id)
+    logger.info(f"Гравець {removed_player_info['name']} покинув лобі {lobby_id}")
+    
+    # Оновлюємо повідомлення
+    new_text = get_lobby_message_text(lobby_data)
+    new_keyboard = create_lobby_keyboard(lobby_id, lobby_data)
+    try:
+        await bot.edit_message_text(
+            text=new_text,
+            chat_id=lobby_data["chat_id"],
+            message_id=lobby_data["message_id"],
+            reply_markup=new_keyboard,
+            parse_mode=ParseMode.HTML
+        )
+        await callback.answer("Ви покинули паті.", show_alert=True)
+    except TelegramAPIError as e:
+        logger.error(f"Не вдалося оновити повідомлення лобі {lobby_id} після виходу гравця: {e}")
+        # Повертаємо гравця назад, якщо сталася помилка
+        lobby_data["players"][user.id] = removed_player_info
+
+@party_router.callback_query(F.data.startswith("party_cancel_lobby:"))
+async def handle_cancel_lobby(callback: CallbackQuery, bot: Bot):
+    """Обробляє натискання кнопки 'Скасувати лобі'."""
+    lobby_id = callback.data.split(":")[-1]
+    user = callback.from_user
+
+    if lobby_id not in active_lobbies:
+        await callback.answer("Цього лобі більше не існує.", show_alert=True)
+        return
+
+    lobby_data = active_lobbies[lobby_id]
+    
+    if user.id != lobby_data["leader_id"]:
+        await callback.answer("Тільки лідер паті може скасувати лобі.", show_alert=True)
+        return
+        
+    # Видаляємо лобі з пам'яті
+    del active_lobbies[lobby_id]
+    logger.info(f"Лобі {lobby_id} скасовано лідером {get_user_display_name(user)}")
+    
+    try:
+        await bot.edit_message_text(
+            text="🚫 <b>Лобі скасовано ініціатором.</b>",
+            chat_id=lobby_data["chat_id"],
+            message_id=lobby_data["message_id"],
+            reply_markup=None, # Видаляємо клавіатуру
+            parse_mode=ParseMode.HTML
+        )
+        await callback.answer("Лобі успішно скасовано.", show_alert=True)
+    except TelegramAPIError as e:
+        logger.error(f"Не вдалося оновити повідомлення при скасуванні лобі {lobby_id}: {e}")
+
+@party_router.callback_query(F.data.startswith("party_cancel_join:"))
+async def cancel_join_selection(callback: CallbackQuery, state: FSMContext):
+    """Обробляє скасування вибору ролі при приєднанні."""
+    await state.clear()
+    await callback.message.delete()
+    await callback.answer("Приєднання до паті скасовано.")
+
+
+# === ЗАГАЛЬНІ ОБРОБНИКИ КОМАНД (без змін) ===
 @general_router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
@@ -318,7 +539,7 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
         except Exception as final_err:
              logger.error(f"Не вдалося надіслати навіть фінальне повідомлення про помилку: {final_err}")
 
-# === ОБРОБНИКИ ПОВІДОМЛЕНЬ (ФОТО ТА ТЕКСТ) ===
+# === ОБРОБНИКИ ПОВІДОМЛЕНЬ (ФОТО ТА ТЕКСТ) (без змін) ===
 @general_router.message(F.photo)
 async def handle_image_messages(message: Message, bot: Bot):
     if not VISION_AUTO_RESPONSE_ENABLED or not message.photo or not message.from_user:
@@ -428,7 +649,7 @@ async def handle_trigger_messages(message: Message, bot: Bot):
         except Exception as e:
             logger.exception(f"Помилка генерації адаптивної відповіді: {e}")
 
-# === ГЛОБАЛЬНИЙ ОБРОБНИК ПОМИЛОК ===
+# === ГЛОБАЛЬНИЙ ОБРОБНИК ПОМИЛОК (без змін) ===
 async def error_handler(event: types.ErrorEvent, bot: Bot):
     logger.error(f"Глобальна помилка: {event.exception}", exc_info=event.exception)
     chat_id, user_name = None, "друже"
