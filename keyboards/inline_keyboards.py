@@ -72,7 +72,7 @@ def create_profile_menu_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="⚙️ Налаштувати", callback_data="profile_menu_expand"),
-        InlineKeyboardButton(text="🚫 Закрити", callback_data="profile_menu_close")
+        InlineKeyboardButton(text="🏃 Вийти", callback_data="profile_menu_close")
     )
     return builder.as_markup()
 
@@ -97,7 +97,7 @@ def create_delete_confirm_keyboard() -> InlineKeyboardMarkup:
     """
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Так, я впевнений", callback_data="delete_confirm_yes"),
-            InlineKeyboardButton(text="❌ Ні, скасувати", callback_data="delete_confirm_no")
+            InlineKeyboardButton(text="✅ Так", callback_data="delete_confirm_yes"),
+            InlineKeyboardButton(text="❌ Ні", callback_data="delete_confirm_no")
         ]
     ])
