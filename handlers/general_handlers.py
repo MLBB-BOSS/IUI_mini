@@ -189,7 +189,7 @@ async def prompt_for_game_mode(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка, що тільки ініціатор може продовжити
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Зараз інший гравець створює лобі. Зачекай.", show_alert=True)
+        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
         return
 
     await state.set_state(PartyCreationFSM.waiting_for_game_mode)
@@ -201,7 +201,7 @@ async def prompt_for_party_size(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Зараз інший гравець створює лобі. Зачекай.", show_alert=True)
+        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
         return
         
     game_mode = callback.data.split(":")[-1]
@@ -215,7 +215,7 @@ async def prompt_for_leader_role(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Зараз інший гравець створює лобі. Зачекай.", show_alert=True)
+        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
         return
 
     party_size = int(callback.data.split(":")[-1])
@@ -230,7 +230,7 @@ async def handle_leader_role_selection(callback: CallbackQuery, state: FSMContex
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Зараз інший гравець створює лобі. Зачекай.", show_alert=True)
+        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
         return
         
     selected_role = callback.data.split(":")[-1]
@@ -258,7 +258,7 @@ async def handle_required_role_selection(callback: CallbackQuery, state: FSMCont
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Зараз інший гравець створює лобі. Зачекай.", show_alert=True)
+        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
         return
 
     role = callback.data.split(":")[-1]
@@ -289,7 +289,7 @@ async def confirm_required_roles_and_create_lobby(callback: CallbackQuery, state
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Зараз інший гравець створює лобі. Зачекай.", show_alert=True)
+        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
         return
         
     await create_party_lobby(callback, state, bot)
