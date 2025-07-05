@@ -175,8 +175,14 @@ async def ask_for_party_creation(message: Message, state: FSMContext):
 
 # +++ ОНОВЛЕНИЙ ОБРОБНИК ДЛЯ КНОПКИ "ІНФО" +++
 @party_router.callback_query(F.data == "party_show_info")
-async def show_party_info(callback: CallbackQuery):
+async def show_party_info(callback: CallbackQuery, state: FSMContext):
     """Редагує повідомлення, показуючи довідку про функцію."""
+    # 🆕 Перевірка, що тільки ініціатор може взаємодіяти
+    data = await state.get_data()
+    if callback.from_user.id != data.get('initiator_id'):
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
+        return
+
     info_text = (
         "ℹ️ <b>Довідка по функції 'Зібрати Паті'</b>\n\n"
         "Ця функція допоможе тобі швидко організувати команду для гри в Mobile Legends.\n\n"
@@ -193,7 +199,7 @@ async def cancel_party_creation(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка, що тільки ініціатор може скасувати
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
         return
         
     await state.clear()
@@ -205,7 +211,7 @@ async def prompt_for_game_mode(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка, що тільки ініціатор може продовжити
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
         return
 
     await state.set_state(PartyCreationFSM.waiting_for_game_mode)
@@ -217,7 +223,7 @@ async def prompt_for_party_size(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
         return
         
     game_mode = callback.data.split(":")[-1]
@@ -231,7 +237,7 @@ async def prompt_for_leader_role(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
         return
 
     party_size = int(callback.data.split(":")[-1])
@@ -246,7 +252,7 @@ async def handle_leader_role_selection(callback: CallbackQuery, state: FSMContex
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
         return
         
     selected_role = callback.data.split(":")[-1]
@@ -274,7 +280,7 @@ async def handle_required_role_selection(callback: CallbackQuery, state: FSMCont
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
         return
 
     role = callback.data.split(":")[-1]
@@ -305,7 +311,7 @@ async def confirm_required_roles_and_create_lobby(callback: CallbackQuery, state
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
         return
         
     await create_party_lobby(callback, state, bot)
@@ -359,7 +365,7 @@ async def step_back_to_confirmation(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
         return
         
     await state.set_state(PartyCreationFSM.waiting_for_confirmation)
@@ -371,7 +377,7 @@ async def step_back_to_game_mode(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
         return
         
     await state.set_state(PartyCreationFSM.waiting_for_game_mode)
@@ -383,7 +389,7 @@ async def step_back_to_party_size(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
         return
         
     await state.set_state(PartyCreationFSM.waiting_for_party_size)
@@ -395,7 +401,7 @@ async def step_back_to_leader_role(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка ініціатора
     data = await state.get_data()
     if callback.from_user.id != data.get('initiator_id'):
-        await callback.answer("Це не твоя кнопка! 😠", show_alert=True)
+        await callback.answer("Не чіпай, це не твоя кнопка! 😠", show_alert=True)
         return
         
     await state.set_state(PartyCreationFSM.waiting_for_role_selection)
