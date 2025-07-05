@@ -87,16 +87,22 @@ def create_required_roles_keyboard(
         text = f"✅ {emoji} {role}" if role in selected_roles else f"{emoji} {role}"
         builder.button(text=text, callback_data=f"party_req_role:{role}")
     
-    builder.adjust(2) # Макет 2xN
+    # Визначаємо розмітку для ролей
+    role_widths = [2] * (len(available_roles) // 2)
+    if len(available_roles) % 2 != 0:
+        role_widths.append(1)
 
     # Кнопка підтвердження активна, тільки коли обрано потрібну кількість ролей
     if len(selected_roles) == num_to_select:
-        builder.row(InlineKeyboardButton(text="👍 Підтвердити вибір", callback_data="party_confirm_roles"))
+        builder.button(text="👍 Підтвердити вибір", callback_data="party_confirm_roles")
     else:
         remaining = num_to_select - len(selected_roles)
-        builder.row(InlineKeyboardButton(text=f"⏳ Залишилось обрати: {remaining}", callback_data="party_dummy_button"))
+        builder.button(text=f"⏳ Залишилось обрати: {remaining}", callback_data="party_dummy_button")
 
-    builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="party_step_back:to_leader_role"))
+    builder.button(text="◀️ Назад", callback_data="party_step_back:to_leader_role")
+    
+    # Застосовуємо всю розмітку разом
+    builder.adjust(*role_widths, 1, 1)
     return builder.as_markup()
 
 def create_lobby_keyboard(lobby_id: int, lobby_data: Dict) -> InlineKeyboardMarkup:
