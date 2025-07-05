@@ -120,13 +120,13 @@ def is_party_request_message(message: Message) -> bool:
 def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = None) -> str:
     """
     Створює розширений та візуально привабливий текст для лобі-повідомлення.
-    🆕 v3.6: Новий емодзі та відображення ролей з нового рядка.
+    🆕 v3.8: Оновлено назву режиму "Бравл" на "Режим бою".
     """
     leader_name = html.escape(lobby_data['leader_name'])
     game_mode = lobby_data.get('game_mode', 'Ranked')
     party_size = lobby_data.get('party_size', 5)
     
-    game_mode_map = {"Ranked": "🏆 Рейтинг", "Classic": "🎮 Класика", "Brawl": "⚔️ Режим бою"}
+    game_mode_map = {"Ranked": "🏆 Рейтинг", "Classic": "🎮 Класика", "Brawl": "⚔️ Режим бою"} # Оновлено
     mode_display = game_mode_map.get(game_mode, game_mode)
     
     role_emoji_map = {
@@ -153,8 +153,8 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
 
     text_parts = []
     text_parts.append(f"<b>{mode_display}</b>")
-    text_parts.append(f"<b>🧑‍🤝‍🧑 ЗБІР КОМАНДИ</b>") # Новий емодзі
-    text_parts.append("─────────────────")
+    text_parts.append(f"<b>🧑‍🤝‍🧑 ЗБІР КОМАНДИ</b>")
+    text_parts.append("──────────────────")
 
     text_parts.append(f"👑 <b>Лідер:</b> {leader_name}")
     text_parts.append(f"📊 <b>Прогрес:</b> {progress_bar} ({len(players_list)}/{party_size})")
@@ -175,7 +175,6 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
         section_title = "🔍 <b>ШУКАЄМО</b>" if required_roles else "🆓 <b>ДОСТУПНО</b>"
         text_parts.append(f"\n{section_title}:")
         
-        # Відображення кожної ролі з нового рядка
         available_roles_lines = [f"  {role_emoji_map.get(r, '🔹')} {r}" for r in available_roles]
         text_parts.extend(available_roles_lines)
         
