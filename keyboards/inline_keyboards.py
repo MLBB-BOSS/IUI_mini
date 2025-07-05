@@ -23,6 +23,15 @@ def create_party_confirmation_keyboard() -> InlineKeyboardMarkup:
     builder.adjust(2, 1)  # Макет: 2 кнопки в першому ряду, 1 - у другому
     return builder.as_markup()
 
+# +++ НОВА КЛАВІАТУРА ДЛЯ ІНФО-ПОВІДОМЛЕННЯ +++
+def create_party_info_keyboard() -> InlineKeyboardMarkup:
+    """
+    Створює клавіатуру з кнопкою "Назад" для екрану довідки.
+    """
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀️ Назад", callback_data="party_step_back:to_confirmation")
+    return builder.as_markup()
+
 def create_game_mode_keyboard() -> InlineKeyboardMarkup:
     """
     Створює клавіатуру для вибору режиму гри у два стовпчики.
