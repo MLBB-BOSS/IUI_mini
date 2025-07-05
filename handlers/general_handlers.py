@@ -154,7 +154,7 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
     text_parts = []
     text_parts.append(f"<b>{mode_display}</b>")
     text_parts.append(f"<b>🧑‍🤝‍🧑 ЗБІР КОМАНДИ</b>") # Новий емодзі
-    text_parts.append("──────────────────")
+    text_parts.append("─────────────────")
 
     text_parts.append(f"👑 <b>Лідер:</b> {leader_name}")
     text_parts.append(f"📊 <b>Прогрес:</b> {progress_bar} ({len(players_list)}/{party_size})")
