@@ -120,7 +120,7 @@ def is_party_request_message(message: Message) -> bool:
 def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = None) -> str:
     """
     Створює розширений та візуально привабливий текст для лобі-повідомлення.
-    🆕 v3.2: Замінено розділювач на більш надійний, обгортка в <code>.
+    🆕 v3.3: Використання <pre><code> для ідеальної структури.
     """
     leader_name = html.escape(lobby_data['leader_name'])
     game_mode = lobby_data.get('game_mode', 'Ranked')
@@ -143,7 +143,7 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
         role = player_info['role']
         name = html.escape(player_info['name'])
         emoji = role_emoji_map.get(role, "🔹")
-        players_list.append(f"  {emoji} <b>{role}:</b> {name}")
+        players_list.append(f"  {emoji} {role}: {name}")
 
     available_slots_count = party_size - len(players_list)
     
@@ -151,19 +151,18 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
     empty_dots = "⚪" * available_slots_count
     progress_bar = filled_dots + empty_dots
 
-    # Використовуємо тег <code> для створення блоку з моноширинним шрифтом
     text_parts = []
-    text_parts.append(f"<b>🎮 ЗБІР КОМАНДИ | {mode_display}</b>")
-    text_parts.append("<code>" + "─" * 28 + "</code>") # Надійна лінія
-    text_parts.append(f"👑 <b>Лідер:</b> {leader_name}")
-    text_parts.append(f"📊 <b>Прогрес:</b> {progress_bar} ({len(players_list)}/{party_size})")
+    text_parts.append(f"🎮 ЗБІР КОМАНДИ | {mode_display}")
+    text_parts.append("─" * 28)
+    text_parts.append(f"👑 Лідер: {leader_name}")
+    text_parts.append(f"📊 Прогрес: {progress_bar} ({len(players_list)}/{party_size})")
 
     if players_list:
-        text_parts.append("\n👥 <b>СКЛАД КОМАНДИ:</b>")
+        text_parts.append("\n👥 СКЛАД КОМАНДИ:")
         text_parts.extend(players_list)
 
     if lobby_data.get('state') == 'joining' and joining_user_name:
-        text_parts.append(f"\n⏳ <b>{html.escape(joining_user_name)}, оберіть свою роль...</b>")
+        text_parts.append(f"\n⏳ {html.escape(joining_user_name)}, оберіть свою роль...")
     elif available_slots_count > 0:
         required_roles = lobby_data.get('required_roles', [])
         if required_roles:
@@ -174,11 +173,12 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
         available_roles_display = " | ".join([f"{role_emoji_map.get(r, '🔹')}{r}" for r in available_roles])
         section_title = "🔍 ШУКАЄМО" if required_roles else "🆓 ДОСТУПНО"
         text_parts.append(f"\n{section_title}: {available_roles_display}")
-        text_parts.append("\n💬 <i>Натисни кнопку, щоб приєднатися!</i>")
+        text_parts.append("\n💬 Натисни кнопку, щоб приєднатися!")
     else:
-        text_parts.append("\n\n✅ <b>КОМАНДА ГОТОВА! ПОГНАЛИ! 🚀</b>")
+        text_parts.append("\n\n✅ КОМАНДА ГОТОВА! ПОГНАЛИ! 🚀")
         
-    return "\n".join(text_parts)
+    # Обгортаємо весь текст в <pre><code> для моноширинного шрифту
+    return f"<pre><code>" + "\n".join(text_parts) + "</code></pre>"
 
 
 # === 🔄 ОНОВЛЕНА ЛОГІКА СТВОРЕННЯ ПАТІ (FSM) ===
