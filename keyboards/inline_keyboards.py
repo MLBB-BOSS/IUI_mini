@@ -14,11 +14,13 @@ ALL_ROLES: List[str] = ["Танк/Підтримка", "Лісник", "Маг (
 def create_party_confirmation_keyboard() -> InlineKeyboardMarkup:
     """
     Створює клавіатуру для підтвердження наміру користувача створити паті.
+    🆕 Додано кнопку "Інфо" та скорочено текст на кнопках.
     """
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Так, допоможи", callback_data="party_start_creation")
-    builder.button(text="❌ Ні, я сам", callback_data="party_cancel_creation")
-    builder.adjust(2)
+    builder.button(text="✅ Так", callback_data="party_start_creation")
+    builder.button(text="❌ Ні", callback_data="party_cancel_creation")
+    builder.button(text="ℹ️ Інфо", callback_data="party_show_info")
+    builder.adjust(2, 1)  # Макет: 2 кнопки в першому ряду, 1 - у другому
     return builder.as_markup()
 
 def create_game_mode_keyboard() -> InlineKeyboardMarkup:
