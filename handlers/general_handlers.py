@@ -126,7 +126,7 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
     game_mode = lobby_data.get('game_mode', 'Ranked')
     party_size = lobby_data.get('party_size', 5)
     
-    game_mode_map = {"Ranked": "🏆 Рейтинг", "Classic": "🎮 Класика", "Brawl": "⚔️ Режим бою"} # Оновлено
+    game_mode_map = {"Ranked": "🏆 Рейтинг", "Classic": "🕹️ Класика", "Brawl": "⚔️ Режим бою"} # Оновлено
     mode_display = game_mode_map.get(game_mode, game_mode)
     
     role_emoji_map = {
@@ -154,7 +154,7 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
     text_parts = []
     text_parts.append(f"<b>{mode_display}</b>")
     text_parts.append(f"<b>🧑‍🤝‍🧑 ЗБІР КОМАНДИ</b>")
-    text_parts.append("──────────────────")
+    text_parts.append("─────────────────")
 
     text_parts.append(f"👑 <b>Лідер:</b> {leader_name}")
     text_parts.append(f"📊 <b>Прогрес:</b> {progress_bar} ({len(players_list)}/{party_size})")
