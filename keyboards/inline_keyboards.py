@@ -72,7 +72,7 @@ def create_profile_menu_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="⚙️ Налаштувати", callback_data="profile_menu_expand"),
-        InlineKeyboardButton(text="🏃 Вийти", callback_data="profile_menu_close")
+        InlineKeyboardButton(text="🚪 Вийти", callback_data="profile_menu_close")
     )
     return builder.as_markup()
 
