@@ -37,7 +37,7 @@ def create_game_mode_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     builder.button(text="🏆 Ранк", callback_data="party_set_mode:Ranked")
-    builder.button(text="🎮 Класика", callback_data="party_set_mode:Classic")
+    builder.button(text="🕹️ Класика", callback_data="party_set_mode:Classic")
     builder.button(text="⚔️ Режим бою", callback_data="party_set_mode:Brawl") # Оновлено
     builder.button(text="◀️ Назад", callback_data="party_step_back:to_confirmation")
     builder.adjust(2) 
