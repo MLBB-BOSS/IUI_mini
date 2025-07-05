@@ -18,29 +18,39 @@ def create_party_confirmation_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Так, допоможи", callback_data="party_start_creation")
     builder.button(text="❌ Ні, я сам", callback_data="party_cancel_creation")
+    builder.adjust(2)
     return builder.as_markup()
 
 def create_game_mode_keyboard() -> InlineKeyboardMarkup:
-    """Створює клавіатуру для вибору режиму гри."""
+    """
+    Створює клавіатуру для вибору режиму гри.
+    🆕 Оновлено текст, додано кнопку "Назад" та змінено макет.
+    """
     builder = InlineKeyboardBuilder()
     builder.button(text="🏆 Рейтинг", callback_data="party_set_mode:Ranked")
     builder.button(text="🎮 Класика", callback_data="party_set_mode:Classic")
-    builder.button(text="⚔️ Бійня", callback_data="party_set_mode:Brawl")
-    builder.adjust(1)
+    builder.button(text="⚔️ Режим бою", callback_data="party_set_mode:Brawl")
+    builder.button(text="◀️ Назад", callback_data="party_step_back:to_confirmation")
+    builder.adjust(1) # Кожна кнопка в окремому рядку для кращої читабельності
     return builder.as_markup()
 
 def create_party_size_keyboard() -> InlineKeyboardMarkup:
-    """Створює клавіатуру для вибору розміру паті."""
+    """
+    Створює клавіатуру для вибору розміру паті.
+    🆕 Додано кнопку "Назад" та змінено макет.
+    """
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 Дуо (2)", callback_data="party_set_size:2")
     builder.button(text="👥 Тріо (3)", callback_data="party_set_size:3")
     builder.button(text="👥 Фулл Паті (5)", callback_data="party_set_size:5")
+    builder.button(text="◀️ Назад", callback_data="party_step_back:to_game_mode")
     builder.adjust(1)
     return builder.as_markup()
 
 def create_role_selection_keyboard(available_roles: List[str], lobby_id: str) -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для вибору ролі при створенні або приєднанні до паті.
+    Створює клавіатуру для вибору ролі.
+    🆕 Додано кнопку "Назад" для початкового вибору та змінено макет.
     """
     builder = InlineKeyboardBuilder()
     role_emoji_map = {
@@ -50,9 +60,12 @@ def create_role_selection_keyboard(available_roles: List[str], lobby_id: str) ->
     for role in available_roles:
         emoji = role_emoji_map.get(role, "🔹")
         builder.button(text=f"{emoji} {role}", callback_data=f"party_select_role:{lobby_id}:{role}")
-    builder.adjust(1)
     
-    if lobby_id != "initial":
+    if lobby_id == "initial":
+        builder.button(text="◀️ Назад", callback_data="party_step_back:to_party_size")
+        builder.adjust(2, 2, 2) # Макет 2x2 + остання кнопка + кнопка назад
+    else:
+        builder.adjust(1)
         builder.row(InlineKeyboardButton(text="❌ Скасувати приєднання", callback_data=f"party_cancel_join:{lobby_id}"))
         
     return builder.as_markup()
@@ -62,7 +75,10 @@ def create_required_roles_keyboard(
     selected_roles: List[str], 
     num_to_select: int
 ) -> InlineKeyboardMarkup:
-    """🆕 Створює клавіатуру для вибору бажаних ролей з мультиселектом."""
+    """
+    Створює клавіатуру для вибору бажаних ролей з мультиселектом.
+    🆕 Додано кнопку "Назад" та змінено макет.
+    """
     builder = InlineKeyboardBuilder()
     role_emoji_map = {"Танк/Підтримка": "🛡️", "Лісник": "🌳", "Маг (мід)": "🧙", "Стрілець (золото)": "🏹", "Боєць (досвід)": "⚔️"}
 
@@ -71,27 +87,28 @@ def create_required_roles_keyboard(
         text = f"✅ {emoji} {role}" if role in selected_roles else f"{emoji} {role}"
         builder.button(text=text, callback_data=f"party_req_role:{role}")
     
+    builder.adjust(2) # Макет 2xN
+
     # Кнопка підтвердження активна, тільки коли обрано потрібну кількість ролей
     if len(selected_roles) == num_to_select:
-        builder.button(text="👍 Підтвердити вибір", callback_data="party_confirm_roles")
+        builder.row(InlineKeyboardButton(text="👍 Підтвердити вибір", callback_data="party_confirm_roles"))
     else:
-        # Неактивна кнопка для інформування
         remaining = num_to_select - len(selected_roles)
-        builder.button(text=f"⏳ Залишилось обрати: {remaining}", callback_data="party_dummy_button")
+        builder.row(InlineKeyboardButton(text=f"⏳ Залишилось обрати: {remaining}", callback_data="party_dummy_button"))
 
-    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="party_step_back:to_leader_role"))
     return builder.as_markup()
 
 def create_lobby_keyboard(lobby_id: int, lobby_data: Dict) -> InlineKeyboardMarkup:
     """
     Створює динамічну клавіатуру для активного лобі.
+    🆕 Змінено макет кнопок.
     """
     builder = InlineKeyboardBuilder()
     lobby_state = lobby_data.get("state", "open")
     
     if lobby_state == "joining":
         taken_roles = [p["role"] for p in lobby_data["players"].values()]
-        # 🔄 Пропонуємо для вибору тільки бажані ролі, якщо вони вказані
         required_roles = lobby_data.get('required_roles', [])
         if required_roles:
             available_roles = [r for r in required_roles if r not in taken_roles]
@@ -102,18 +119,20 @@ def create_lobby_keyboard(lobby_id: int, lobby_data: Dict) -> InlineKeyboardMark
         for role in available_roles:
             emoji = role_emoji_map.get(role, "🔹")
             builder.button(text=f"{emoji} {role}", callback_data=f"party_select_role:{lobby_id}:{role}")
-        builder.adjust(1)
+        builder.adjust(2) # Макет 2xN
         builder.row(InlineKeyboardButton(text="❌ Скасувати приєднання", callback_data=f"party_cancel_join:{lobby_id}"))
 
     else: # lobby_state == "open"
         players = lobby_data.get("players", {})
         party_size = lobby_data.get("party_size", 5)
-        if len(players) < party_size:
-            builder.button(text="➕ Приєднатися", callback_data=f"party_join:{lobby_id}")
         
-        builder.button(text="❌ Покинути паті", callback_data=f"party_leave:{lobby_id}")
-        builder.button(text="🚫 Скасувати лобі", callback_data=f"party_cancel_lobby:{lobby_id}")
-        builder.adjust(1)
+        button_row = []
+        if len(players) < party_size:
+            button_row.append(InlineKeyboardButton(text="➕ Приєднатися", callback_data=f"party_join:{lobby_id}"))
+        
+        button_row.append(InlineKeyboardButton(text="❌ Покинути паті", callback_data=f"party_leave:{lobby_id}"))
+        builder.row(*button_row)
+        builder.row(InlineKeyboardButton(text="🚫 Скасувати лобі", callback_data=f"party_cancel_lobby:{lobby_id}"))
         
     return builder.as_markup()
 
