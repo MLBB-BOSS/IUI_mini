@@ -155,7 +155,7 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = 
     # Нова структура заголовку
     text_parts.append(f"<b>{mode_display}</b>")
     text_parts.append(f"<b>🎮 ЗБІР КОМАНДИ</b>")
-    text_parts.append("──────────────────")
+    text_parts.append("────────────────")
 
     # Основний контент
     text_parts.append(f"👑 <b>Лідер:</b> {leader_name}")
