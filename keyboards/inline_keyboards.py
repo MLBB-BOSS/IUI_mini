@@ -18,13 +18,14 @@ def create_party_confirmation_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="❌ Ні, я сам", callback_data="party_cancel_creation")
     return builder.as_markup()
 
-def create_role_selection_keyboard(available_roles: List[str]) -> InlineKeyboardMarkup:
+def create_role_selection_keyboard(available_roles: List[str], lobby_id: str) -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для вибору ролі ініціатором паті.
-    Крок 2 нашого діалогу.
+    Створює клавіатуру для вибору ролі при приєднанні до паті.
+    Крок 2 діалогу приєднання.
 
     Args:
         available_roles: Список доступних ролей для вибору.
+        lobby_id: ID лобі, до якого приєднується гравець.
     """
     builder = InlineKeyboardBuilder()
     # Карта емодзі для візуального покращення та кращого UX
@@ -34,33 +35,33 @@ def create_role_selection_keyboard(available_roles: List[str]) -> InlineKeyboard
     }
     for role in available_roles:
         emoji = role_emoji_map.get(role, "🔹")
-        builder.button(text=f"{emoji} {role}", callback_data=f"party_role_select:{role}")
+        # Тепер callback_data включає ID лобі для правильної обробки
+        builder.button(text=f"{emoji} {role}", callback_data=f"party_select_role:{lobby_id}:{role}")
     builder.adjust(1)  # По одній кнопці в ряд для максимальної зручності на мобільних
+    # Додаємо кнопку скасування, якщо користувач передумав обирати роль
+    builder.row(InlineKeyboardButton(text="❌ Скасувати", callback_data=f"party_cancel_join:{lobby_id}"))
     return builder.as_markup()
 
-# --- ОНОВЛЕНА КЛАВІАТУРА ЛОБІ ---
+# --- ОНОВЛЕНА УНІВЕРСАЛЬНА КЛАВІАТУРА ЛОБІ ---
 
-def create_dynamic_lobby_keyboard(lobby_id: str, user_id: int, lobby_data: Dict) -> InlineKeyboardMarkup:
+def create_lobby_keyboard(lobby_id: str, lobby_data: Dict) -> InlineKeyboardMarkup:
     """
-    Створює динамічну клавіатуру для активного лобі.
-    Кнопки змінюються залежно від ролі користувача (лідер, учасник, спостерігач).
+    Створює універсальну клавіатуру для активного лобі.
+    Кнопки "Покинути" та "Скасувати" видимі завжди, але логіка їх роботи
+    перевіряється на бекенді. Кнопка "Приєднатися" зникає, коли лобі заповнене.
     """
     builder = InlineKeyboardBuilder()
     players = lobby_data.get("players", {})
-    leader_id = lobby_data.get("leader_id")
 
-    # Кнопка "Приєднатися" видима для всіх, хто ще не в паті
-    if user_id not in players:
+    # Кнопка "Приєднатися" зникає, якщо в паті 5 гравців
+    if len(players) < 5:
         builder.button(text="➕ Приєднатися", callback_data=f"party_join:{lobby_id}")
 
-    # Кнопка "Вийти" видима для всіх учасників, крім лідера
-    if user_id in players and user_id != leader_id:
-        builder.button(text="❌ Вийти з паті", callback_data=f"party_leave:{lobby_id}")
+    # Ці кнопки видимі завжди, логіка їх роботи перевіряється на бекенді
+    builder.button(text="❌ Покинути паті", callback_data=f"party_leave:{lobby_id}")
+    builder.button(text="🚫 Скасувати лобі", callback_data=f"party_cancel_lobby:{lobby_id}")
 
-    # Кнопка "Скасувати" видима тільки для лідера паті
-    if user_id == leader_id:
-        builder.button(text="🚫 Скасувати лобі", callback_data=f"party_cancel_lobby:{lobby_id}")
-
+    builder.adjust(1)
     return builder.as_markup()
 
 # === КЛАВІАТУРИ ДЛЯ РЕЄСТРАЦІЇ ТА ПРОФІЛЮ ===
