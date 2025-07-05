@@ -174,7 +174,7 @@ async def ask_for_party_creation(message: Message, state: FSMContext):
     await state.update_data(last_message_id=sent_message.message_id, initiator_id=message.from_user.id)
 
 # +++ ОНОВЛЕНИЙ ОБРОБНИК ДЛЯ КНОПКИ "ІНФО" +++
-@party_router.callback_query(F.data == "party_show_info", PartyCreationFSM.waiting_for_confirmation)
+@party_router.callback_query(F.data == "party_show_info")
 async def show_party_info(callback: CallbackQuery, state: FSMContext):
     """Редагує повідомлення, показуючи довідку про функцію."""
     # 🆕 Перевірка, що тільки ініціатор може взаємодіяти
@@ -194,7 +194,7 @@ async def show_party_info(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(info_text, reply_markup=create_party_info_keyboard())
     await callback.answer()
 
-@party_router.callback_query(F.data == "party_cancel_creation", PartyCreationFSM.waiting_for_confirmation)
+@party_router.callback_query(F.data == "party_cancel_creation")
 async def cancel_party_creation(callback: CallbackQuery, state: FSMContext):
     # 🆕 Перевірка, що тільки ініціатор може скасувати
     data = await state.get_data()
