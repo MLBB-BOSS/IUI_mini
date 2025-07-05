@@ -23,34 +23,31 @@ def create_party_confirmation_keyboard() -> InlineKeyboardMarkup:
 
 def create_game_mode_keyboard() -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для вибору режиму гри.
-    🆕 Оновлено текст, додано кнопку "Назад" та змінено макет.
+    Створює клавіатуру для вибору режиму гри у два стовпчики.
     """
     builder = InlineKeyboardBuilder()
     builder.button(text="🏆 Рейтинг", callback_data="party_set_mode:Ranked")
     builder.button(text="🎮 Класика", callback_data="party_set_mode:Classic")
     builder.button(text="⚔️ Режим бою", callback_data="party_set_mode:Brawl")
     builder.button(text="◀️ Назад", callback_data="party_step_back:to_confirmation")
-    builder.adjust(1) # Кожна кнопка в окремому рядку для кращої читабельності
+    builder.adjust(2)
     return builder.as_markup()
 
 def create_party_size_keyboard() -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для вибору розміру паті.
-    🆕 Додано кнопку "Назад" та змінено макет.
+    Створює клавіатуру для вибору розміру паті у два стовпчики.
     """
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 Дуо (2)", callback_data="party_set_size:2")
     builder.button(text="👥 Тріо (3)", callback_data="party_set_size:3")
     builder.button(text="👥 Фулл Паті (5)", callback_data="party_set_size:5")
     builder.button(text="◀️ Назад", callback_data="party_step_back:to_game_mode")
-    builder.adjust(1)
+    builder.adjust(2)
     return builder.as_markup()
 
 def create_role_selection_keyboard(available_roles: List[str], lobby_id: str) -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для вибору ролі.
-    🆕 Додано кнопку "Назад" для початкового вибору та змінено макет.
+    Створює клавіатуру для вибору ролі у два стовпчики.
     """
     builder = InlineKeyboardBuilder()
     role_emoji_map = {
@@ -63,9 +60,9 @@ def create_role_selection_keyboard(available_roles: List[str], lobby_id: str) ->
     
     if lobby_id == "initial":
         builder.button(text="◀️ Назад", callback_data="party_step_back:to_party_size")
-        builder.adjust(2, 2, 2) # Макет 2x2 + остання кнопка + кнопка назад
+        builder.adjust(2) 
     else:
-        builder.adjust(1)
+        builder.adjust(2)
         builder.row(InlineKeyboardButton(text="❌ Скасувати приєднання", callback_data=f"party_cancel_join:{lobby_id}"))
         
     return builder.as_markup()
@@ -76,8 +73,7 @@ def create_required_roles_keyboard(
     num_to_select: int
 ) -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для вибору бажаних ролей з мультиселектом.
-    🆕 Додано кнопку "Назад" та змінено макет.
+    Створює клавіатуру для вибору бажаних ролей з мультиселектом у два стовпчики.
     """
     builder = InlineKeyboardBuilder()
     role_emoji_map = {"Танк/Підтримка": "🛡️", "Лісник": "🌳", "Маг (мід)": "🧙", "Стрілець (золото)": "🏹", "Боєць (досвід)": "⚔️"}
@@ -86,13 +82,7 @@ def create_required_roles_keyboard(
         emoji = role_emoji_map.get(role, "🔹")
         text = f"✅ {emoji} {role}" if role in selected_roles else f"{emoji} {role}"
         builder.button(text=text, callback_data=f"party_req_role:{role}")
-    
-    # Визначаємо розмітку для ролей
-    role_widths = [2] * (len(available_roles) // 2)
-    if len(available_roles) % 2 != 0:
-        role_widths.append(1)
 
-    # Кнопка підтвердження активна, тільки коли обрано потрібну кількість ролей
     if len(selected_roles) == num_to_select:
         builder.button(text="👍 Підтвердити вибір", callback_data="party_confirm_roles")
     else:
@@ -101,14 +91,12 @@ def create_required_roles_keyboard(
 
     builder.button(text="◀️ Назад", callback_data="party_step_back:to_leader_role")
     
-    # Застосовуємо всю розмітку разом
-    builder.adjust(*role_widths, 1, 1)
+    builder.adjust(2)
     return builder.as_markup()
 
 def create_lobby_keyboard(lobby_id: int, lobby_data: Dict) -> InlineKeyboardMarkup:
     """
     Створює динамічну клавіатуру для активного лобі.
-    🆕 Змінено макет кнопок.
     """
     builder = InlineKeyboardBuilder()
     lobby_state = lobby_data.get("state", "open")
@@ -125,7 +113,7 @@ def create_lobby_keyboard(lobby_id: int, lobby_data: Dict) -> InlineKeyboardMark
         for role in available_roles:
             emoji = role_emoji_map.get(role, "🔹")
             builder.button(text=f"{emoji} {role}", callback_data=f"party_select_role:{lobby_id}:{role}")
-        builder.adjust(2) # Макет 2xN
+        builder.adjust(2) 
         builder.row(InlineKeyboardButton(text="❌ Скасувати приєднання", callback_data=f"party_cancel_join:{lobby_id}"))
 
     else: # lobby_state == "open"
