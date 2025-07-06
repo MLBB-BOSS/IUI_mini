@@ -20,7 +20,7 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     telegram_id = Column(BigInteger, unique=True, nullable=False, index=True)
     nickname = Column(String(100), nullable=False)
-    player_id = Column(BigInteger, nullable=False)
+    player_id = Column(BigInteger, unique=True, nullable=False) # 🧠 ДОДАНО unique=True
     server_id = Column(Integer, nullable=False)
     current_rank = Column(String(50))
     total_matches = Column(Integer)
