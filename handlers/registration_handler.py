@@ -190,7 +190,7 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
             await show_profile_menu(bot, chat_id, user_id, message_to_delete_id=thinking_msg.message_id)
         elif status == 'conflict':
             await thinking_msg.edit_text(
-                "🛡️ **Конфлікт реєстрації!**\n\n"
+                "🛡️ <b>Конфлікт реєстрації!</b>\n\n"
                 "Цей ігровий профіль вже зареєстровано іншим акаунтом Telegram. "
                 "Один ігровий профіль може бути прив'язаний лише до одного акаунту Telegram."
             )
