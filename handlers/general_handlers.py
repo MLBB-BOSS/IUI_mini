@@ -916,9 +916,12 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                 )
             
             if reply_text and "<i>" not in reply_text:
+                # 🧠 Зберігаємо історію тільки якщо користувач існує
                 if user_data:
-                    chat_history.append({"role": "assistant", "content": reply_text})
-                    await add_or_update_user({'telegram_id': user_id, 'chat_history': chat_history})
+                    # Оновлюємо лише історію, не створюючи нового користувача
+                    update_payload = {'telegram_id': user_id, 'chat_history': chat_history}
+                    # Використовуємо той самий add_or_update_user, але тепер він безпечний для цього випадку
+                    await add_or_update_user(update_payload)
                 await message.reply(reply_text)
         except Exception as e:
             logger.exception(f"Помилка генерації адаптивної відповіді: {e}")
