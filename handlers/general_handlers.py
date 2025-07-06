@@ -55,6 +55,9 @@ from keyboards.inline_keyboards import (
     create_required_roles_keyboard,
     create_party_info_keyboard 
 )
+# 🧠 ІМПОРТУЄМО ФУНКЦІЇ ДЛЯ РОБОТИ З БД
+from database.crud import get_user_by_telegram_id, add_or_update_user
+
 
 # === 🔄 ОНОВЛЕННЯ СТАНІВ FSM ===
 class PartyCreationFSM(StatesGroup):
@@ -67,10 +70,16 @@ class PartyCreationFSM(StatesGroup):
 
 
 # === СХОВИЩА ДАНИХ У ПАМ'ЯТІ ===
-chat_histories: Dict[int, Deque[Dict[str, str]]] = defaultdict(lambda: deque(maxlen=MAX_CHAT_HISTORY_LENGTH))
+# 🧠 Видаляємо chat_histories, оскільки тепер пам'ять буде в БД
 chat_cooldowns: Dict[int, float] = {}
 vision_cooldowns: Dict[int, float] = {}
 active_lobbies: Dict[int, Dict] = {} 
+
+# 🧠 Визначаємо тригери для завантаження повного профілю
+PERSONALIZATION_TRIGGERS = [
+    "мій ранг", "мої герої", "моїх героїв", "мої улюблені",
+    "мій вінрейт", "моя стата", "мій профіль", "про мене"
+]
 
 # === ІНІЦІАЛІЗАЦІЯ РОУТЕРІВ ТА КЛІЄНТІВ ===
 party_router = Router()
@@ -831,7 +840,9 @@ async def handle_image_messages(message: Message, bot: Bot):
             else:
                 await message.reply(final_response, parse_mode=None)
             
-            chat_histories[chat_id].extend([{"role": "user", "content": "[Надіслав зображення]"}, {"role": "assistant", "content": final_response}])
+            # Цей блок більше не використовується для збереження історії,
+            # але залишений для можливого майбутнього логування.
+            # chat_histories[chat_id].extend([{"role": "user", "content": "[Надіслав зображення]"}, {"role": "assistant", "content": final_response}])
         elif thinking_msg:
             await thinking_msg.edit_text(f"Хм, {current_user_name}, не можу розібрати, що тут 🤔")
     except Exception as e:
@@ -846,6 +857,7 @@ async def handle_trigger_messages(message: Message, bot: Bot):
 
     text_lower = message.text.lower()
     chat_id = message.chat.id
+    user_id = message.from_user.id
     current_user_name = get_user_display_name(message.from_user)
     current_time = time.time()
     bot_info = await bot.get_me()
@@ -867,15 +879,39 @@ async def handle_trigger_messages(message: Message, bot: Bot):
         chat_cooldowns[chat_id] = current_time
 
     if should_respond:
-        chat_histories[chat_id].append({"role": "user", "content": message.text})
+        # 1. Завжди отримуємо дані користувача, які можуть містити історію чату
+        user_data = await get_user_by_telegram_id(user_id)
+        chat_history = []
+        if user_data and isinstance(user_data.get('chat_history'), list):
+            chat_history = user_data['chat_history']
+        
+        chat_history.append({"role": "user", "content": message.text})
+        if len(chat_history) > MAX_CHAT_HISTORY_LENGTH:
+            chat_history = chat_history[-MAX_CHAT_HISTORY_LENGTH:]
+
+        # 2. Адаптивне збагачення контексту
+        full_profile_for_prompt = None
+        if any(trigger in text_lower for trigger in PERSONALIZATION_TRIGGERS):
+            logger.info(f"Виявлено тригер персоналізації для {current_user_name}. Завантажую повний профіль.")
+            full_profile_for_prompt = user_data
+
         try:
             async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
-                reply_text = await gpt.generate_conversational_reply(current_user_name, list(chat_histories[chat_id]), matched_trigger_mood)
+                # 3. Передаємо опціональний повний профіль в сервіс
+                reply_text = await gpt.generate_conversational_reply(
+                    user_name=current_user_name,
+                    chat_history=chat_history,
+                    trigger_mood=matched_trigger_mood,
+                    user_profile_data=full_profile_for_prompt
+                )
+            
             if reply_text and "<i>" not in reply_text:
-                chat_histories[chat_id].append({"role": "assistant", "content": reply_text})
+                chat_history.append({"role": "assistant", "content": reply_text})
+                await add_or_update_user({'telegram_id': user_id, 'chat_history': chat_history})
                 await message.reply(reply_text)
         except Exception as e:
             logger.exception(f"Помилка генерації адаптивної відповіді: {e}")
+
 
 # === ГЛОБАЛЬНИЙ ОБРОБНИК ПОМИЛОК (без змін) ===
 async def error_handler(event: types.ErrorEvent, bot: Bot):
