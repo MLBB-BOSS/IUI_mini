@@ -1,9 +1,8 @@
-# database/models.py
 """
 Визначення моделей даних SQLAlchemy для бази даних.
 """
 from sqlalchemy import (
-    create_engine, Column, Integer, String, BigInteger, Float, DateTime
+    create_engine, Column, Integer, String, BigInteger, Float, DateTime, JSON
 )
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
@@ -27,6 +26,7 @@ class User(Base):
     total_matches = Column(Integer)
     win_rate = Column(Float)
     favorite_heroes = Column(String(255)) # Зберігаємо як рядок, розділений комою
+    chat_history = Column(JSON, nullable=True) # 🧠 НОВЕ ПОЛЕ ДЛЯ ІСТОРІЇ ЧАТУ
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
