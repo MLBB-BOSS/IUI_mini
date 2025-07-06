@@ -9,7 +9,7 @@ from database.models import Base
 
 async def init_db():
     """
-    Ініціалізує базу даних, створюючи таблиці та перевіряючи/додаючи нові колонки.
+    Ініціалізує базу даних, створюючи таблиці та перевіряючи/додаючи нові колонки та індекси.
     """
     engine = create_async_engine(ASYNC_DATABASE_URL)
     async with engine.begin() as conn:
@@ -18,17 +18,23 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables initialized successfully (if they did not exist).")
 
-        # --- 🧠 Блок "м'якої" міграції для додавання відсутніх колонок ---
+        # --- 🧠 Блок "м'якої" міграції ---
         try:
-            logger.info("Checking for missing 'chat_history' column in 'users' table...")
-            # SQL-запит для додавання колонки, тільки якщо вона не існує.
-            # Це ідемпотентна операція, безпечна для повторного запуску.
+            # 1. Додавання колонки chat_history
+            logger.info("Checking for missing 'chat_history' column...")
             add_column_sql = text("ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_history JSON")
             await conn.execute(add_column_sql)
-            logger.info("Successfully ensured 'chat_history' column exists in 'users' table.")
+            logger.info("Successfully ensured 'chat_history' column exists.")
+
+            # 2. Створення унікального індексу для player_id
+            logger.info("Checking for unique index on 'player_id'...")
+            # Ідемпотентна команда для PostgreSQL, яка не видасть помилку, якщо індекс вже існує
+            add_unique_index_sql = text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id ON users (player_id)")
+            await conn.execute(add_unique_index_sql)
+            logger.info("Successfully ensured unique index exists for 'player_id'.")
+
         except Exception as e:
             # Логуємо помилку, але не зупиняємо запуск бота.
-            # Можливо, таблиці ще не існувало, і вона створиться вище.
-            logger.error(f"Could not perform soft migration for 'chat_history' column: {e}", exc_info=True)
+            logger.error(f"Could not perform a soft migration step: {e}", exc_info=True)
             
     await engine.dispose()
