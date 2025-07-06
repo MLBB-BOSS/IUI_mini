@@ -52,7 +52,10 @@ async def add_or_update_user(user_data: Dict[str, Any]) -> Literal['success', 'c
 
             except IntegrityError as e:
                 await conn.rollback() # Відкат транзакції
-                if isinstance(e.orig, asyncpg.UniqueViolationError) and 'player_id' in str(e.orig):
+                # 🧠 Більш надійна перевірка на основі тексту помилки від PostgreSQL.
+                # SQLAlchemy може по-різному "загортати" вихідні помилки драйвера.
+                error_text = str(e).lower()
+                if 'unique constraint' in error_text and ('uq_users_player_id' in error_text or 'users_player_id_key' in error_text):
                     logger.warning(f"Конфлікт: Player ID {player_id} вже зареєстровано іншим користувачем. Спроба від Telegram ID {telegram_id}.")
                     return 'conflict'
                 else:
