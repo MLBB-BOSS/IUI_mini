@@ -879,8 +879,20 @@ async def handle_trigger_messages(message: Message, bot: Bot):
         chat_cooldowns[chat_id] = current_time
 
     if should_respond:
-        # 1. Завжди отримуємо дані користувача, які можуть містити історію чату
         user_data = await get_user_by_telegram_id(user_id)
+
+        # --- 🧠 НОВИЙ ЛОГІЧНИЙ БЛОК: Обробка запиту від незареєстрованого користувача ---
+        is_personalization_request = any(trigger in text_lower for trigger in PERSONALIZATION_TRIGGERS)
+        if not user_data and is_personalization_request:
+            logger.info(f"Незареєстрований користувач {current_user_name} спробував отримати персоналізовану відповідь.")
+            await message.reply(
+                f"Привіт, {current_user_name}! 👋\n\n"
+                "Бачу, ти хочеш отримати персональну інформацію. Для цього мені потрібно знати твій профіль.\n\n"
+                f"Будь ласка, пройди швидку реєстрацію за допомогою команди /profile. Це дозволить мені зберігати твою історію та надавати більш точні відповіді!"
+            )
+            return # Важливо завершити обробку тут
+
+        # --- Існуюча логіка для зареєстрованих користувачів та загальних розмов ---
         chat_history = []
         if user_data and isinstance(user_data.get('chat_history'), list):
             chat_history = user_data['chat_history']
@@ -889,15 +901,13 @@ async def handle_trigger_messages(message: Message, bot: Bot):
         if len(chat_history) > MAX_CHAT_HISTORY_LENGTH:
             chat_history = chat_history[-MAX_CHAT_HISTORY_LENGTH:]
 
-        # 2. Адаптивне збагачення контексту
         full_profile_for_prompt = None
-        if any(trigger in text_lower for trigger in PERSONALIZATION_TRIGGERS):
+        if user_data and is_personalization_request:
             logger.info(f"Виявлено тригер персоналізації для {current_user_name}. Завантажую повний профіль.")
             full_profile_for_prompt = user_data
 
         try:
             async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
-                # 3. Передаємо опціональний повний профіль в сервіс
                 reply_text = await gpt.generate_conversational_reply(
                     user_name=current_user_name,
                     chat_history=chat_history,
@@ -906,8 +916,9 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                 )
             
             if reply_text and "<i>" not in reply_text:
-                chat_history.append({"role": "assistant", "content": reply_text})
-                await add_or_update_user({'telegram_id': user_id, 'chat_history': chat_history})
+                if user_data:
+                    chat_history.append({"role": "assistant", "content": reply_text})
+                    await add_or_update_user({'telegram_id': user_id, 'chat_history': chat_history})
                 await message.reply(reply_text)
         except Exception as e:
             logger.exception(f"Помилка генерації адаптивної відповіді: {e}")
