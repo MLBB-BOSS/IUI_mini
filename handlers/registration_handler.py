@@ -172,22 +172,37 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
             heroes_list = analysis_result.get('favorite_heroes', [])
             heroes_str = ", ".join([h.get('hero_name', '') for h in heroes_list if h.get('hero_name')])
             update_data = {'favorite_heroes': heroes_str}
+        
         update_data = {k: v for k, v in update_data.items() if v is not None}
-        if not update_data:
-            await thinking_msg.edit_text("Не вдалося витягти нових даних. Спробуйте ще раз.")
+        
+        if not update_data or (analysis_mode == 'basic' and 'player_id' not in update_data):
+            await thinking_msg.edit_text("Не вдалося витягти ключових даних (особливо Player ID). Спробуйте ще раз.")
             await state.set_state(current_state_str)
             await state.update_data(last_bot_message_id=thinking_msg.message_id)
             return
             
         update_data['telegram_id'] = user_id
-        await add_or_update_user(update_data)
         
-        await show_profile_menu(bot, chat_id, user_id, message_to_delete_id=thinking_msg.message_id)
+        # 🧠 ОНОВЛЕНА ЛОГІКА ЗБЕРЕЖЕННЯ
+        status = await add_or_update_user(update_data)
+        
+        if status == 'success':
+            await show_profile_menu(bot, chat_id, user_id, message_to_delete_id=thinking_msg.message_id)
+        elif status == 'conflict':
+            await thinking_msg.edit_text(
+                "🛡️ **Конфлікт реєстрації!**\n\n"
+                "Цей ігровий профіль вже зареєстровано іншим акаунтом Telegram. "
+                "Один ігровий профіль може бути прив'язаний лише до одного акаунту Telegram."
+            )
+        else: # status == 'error'
+            await thinking_msg.edit_text("❌ Сталася невідома помилка при збереженні даних. Спробуйте пізніше.")
+
     except Exception as e:
         logger.exception(f"Критична помилка під час обробки фото (mode={analysis_mode}):")
         if thinking_msg: await thinking_msg.edit_text("Сталася неочікувана помилка. Спробуйте ще раз.")
     finally:
         await state.clear()
+
 
 # --- Обробники управління меню (без змін) ---
 @registration_router.callback_query(F.data == "profile_menu_expand")
