@@ -32,6 +32,20 @@ async def init_db():
             add_unique_index_sql = text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id ON users (player_id)")
             await conn.execute(add_unique_index_sql)
             logger.info("Successfully ensured unique index exists for 'player_id'.")
+            
+            # 3. 🧠 Додавання нових колонок для зображень профілю
+            logger.info("Checking for profile image columns...")
+            image_columns = [
+                "custom_avatar_file_id",
+                "profile_screenshot_file_id",
+                "stats_screenshot_file_id",
+                "heroes_screenshot_file_id"
+            ]
+            for col in image_columns:
+                add_img_col_sql = text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} VARCHAR")
+                await conn.execute(add_img_col_sql)
+            logger.info("Successfully ensured all profile image columns exist.")
+
 
         except Exception as e:
             # Логуємо помилку, але не зупиняємо запуск бота.
