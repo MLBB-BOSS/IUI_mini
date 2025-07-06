@@ -1,3 +1,4 @@
+# database/models.py
 """
 Визначення моделей даних SQLAlchemy для бази даних.
 """
