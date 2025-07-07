@@ -27,11 +27,18 @@ class User(Base):
     win_rate = Column(Float)
     favorite_heroes = Column(String(255)) # Зберігаємо як рядок, розділений комою
     
-    # --- 🚀 НОВІ ПОЛЯ ДЛЯ ЗБЕРІГАННЯ ЗОБРАЖЕНЬ ПРОФІЛЮ (КАРУСЕЛЬ) ---
+    # --- 🚀 ПОЛЯ ДЛЯ ЗБЕРІГАННЯ ЗОБРАЖЕНЬ ПРОФІЛЮ (КАРУСЕЛЬ) ---
+    # Тимчасові file_id від Telegram
     custom_avatar_file_id = Column(String, nullable=True)      # Кастомна аватарка для "вітрини"
     profile_screenshot_file_id = Column(String, nullable=True) # Скріншот основного профілю
     stats_screenshot_file_id = Column(String, nullable=True)   # Скріншот статистики
     heroes_screenshot_file_id = Column(String, nullable=True)  # Скріншот улюблених героїв
+
+    # ✅✅✅ НОВІ ПОЛЯ: Постійні URL з Cloudinary ✅✅✅
+    custom_avatar_permanent_url = Column(String, nullable=True)
+    profile_screenshot_permanent_url = Column(String, nullable=True)
+    stats_screenshot_permanent_url = Column(String, nullable=True)
+    heroes_screenshot_permanent_url = Column(String, nullable=True)
 
     chat_history = Column(JSON, nullable=True) # Поле для історії чату
     created_at = Column(DateTime(timezone=True), server_default=func.now())
