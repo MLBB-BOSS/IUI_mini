@@ -21,9 +21,9 @@ async def init_db():
         # --- 🧠 Блок "м'якої" міграції ---
         try:
             # 1. Додавання колонки chat_history
-            logger.info("Checking for missing 'chat_history' column...")
-            add_column_sql = text("ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_history JSON")
-            await conn.execute(add_column_sql)
+            logger.info("Checking for 'chat_history' column...")
+            add_chat_history_sql = text("ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_history JSON")
+            await conn.execute(add_chat_history_sql)
             logger.info("Successfully ensured 'chat_history' column exists.")
 
             # 2. Створення унікального індексу для player_id
@@ -32,6 +32,25 @@ async def init_db():
             add_unique_index_sql = text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id ON users (player_id)")
             await conn.execute(add_unique_index_sql)
             logger.info("Successfully ensured unique index exists for 'player_id'.")
+
+            # --- 🚀 НОВИЙ БЛОК: Додавання колонок для зберігання file_id зображень ---
+            logger.info("Checking for profile image file_id columns...")
+            
+            columns_to_add = [
+                "custom_avatar_file_id",
+                "profile_screenshot_file_id",
+                "stats_screenshot_file_id",
+                "heroes_screenshot_file_id"
+            ]
+            
+            for column_name in columns_to_add:
+                # Використовуємо VARCHAR без вказання довжини, оскільки file_id може бути довгим
+                add_column_sql = text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {column_name} VARCHAR")
+                await conn.execute(add_column_sql)
+                logger.info(f"Successfully ensured '{column_name}' column exists.")
+            
+            logger.info("All profile image file_id columns are present.")
+            # --- Кінець нового блоку ---
 
         except Exception as e:
             # Логуємо помилку, але не зупиняємо запуск бота.
