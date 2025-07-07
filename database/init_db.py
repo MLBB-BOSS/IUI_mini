@@ -52,6 +52,24 @@ async def init_db():
             logger.info("All profile image file_id columns are present.")
             # --- Кінець нового блоку ---
 
+            # ✅✅✅ НОВИЙ БЛОК: Додавання колонок для ПОСТІЙНИХ URL зображень ✅✅✅
+            logger.info("Checking for profile image permanent URL columns...")
+            
+            permanent_url_columns = [
+                "custom_avatar_permanent_url",
+                "profile_screenshot_permanent_url",
+                "stats_screenshot_permanent_url",
+                "heroes_screenshot_permanent_url"
+            ]
+            
+            for column_name in permanent_url_columns:
+                add_url_column_sql = text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {column_name} VARCHAR")
+                await conn.execute(add_url_column_sql)
+                logger.info(f"Successfully ensured '{column_name}' column exists for permanent URLs.")
+                
+            logger.info("All permanent URL columns for profile images are present.")
+            # ✅✅✅ Кінець нового блоку ✅✅✅
+
         except Exception as e:
             # Логуємо помилку, але не зупиняємо запуск бота.
             logger.error(f"Could not perform a soft migration step: {e}", exc_info=True)
