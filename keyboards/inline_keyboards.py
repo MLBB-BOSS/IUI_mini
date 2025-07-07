@@ -1,20 +1,28 @@
 """
 Модуль для створення всіх інлайн-клавіатур, що використовуються в боті.
-Розширено для підтримки покрокового створення паті (FSM) та реєстрації.
-🆕 v3.8: Оновлено назву режиму "Бравл" на "Режим бою".
+Включає:
+- клавіатури для покрокового створення паті (FSM)
+- інтерактивне меню користувача з однокнопковим режимом та розгорнутим оглядом
+- навігацію каруселлю профілю
+- підтвердження видалення профілю
+🆕 v3.9: Мінімалістичний однокнопковий режим "Меню" та динамічний огляд з навігацією.
 """
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from typing import List, Dict, Optional
 
-# ОНОВЛЕНІ КОРОТКІ РОЛІ ДЛЯ КРАЩОГО UX
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+# Короткі коди ролей для паті
 ALL_ROLES: List[str] = ["EXP", "ЛІС", "МІД", "АДК", "РОУМ"]
 
-# --- 🔄 ОНОВЛЕНІ КЛАВІАТУРИ ДЛЯ FSM СТВОРЕННЯ ПАТІ ---
+# -------------------------------------------------------------------
+# Клавіатури для створення паті (FSM)
+# -------------------------------------------------------------------
 
 def create_party_confirmation_keyboard() -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для підтвердження наміру користувача створити паті.
+    Клавіатура для підтвердження створення паті:
+    | ✅ Так | ❌ Ні | ℹ️ Інфо |
     """
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Так", callback_data="party_start_creation")
@@ -25,7 +33,8 @@ def create_party_confirmation_keyboard() -> InlineKeyboardMarkup:
 
 def create_party_info_keyboard() -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру з кнопкою "Назад" для екрану довідки.
+    Клавіатура для екрану довідки про створення паті:
+    | ◀️ Назад |
     """
     builder = InlineKeyboardBuilder()
     builder.button(text="◀️ Назад", callback_data="party_step_back:to_confirmation")
@@ -33,19 +42,23 @@ def create_party_info_keyboard() -> InlineKeyboardMarkup:
 
 def create_game_mode_keyboard() -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для вибору режиму гри (2 колонки).
+    Клавіатура для вибору режиму гри:
+    | 🏆 Ранк | 🕹️ Класика |
+    | ⚔️ Режим бою | ◀️ Назад |
     """
     builder = InlineKeyboardBuilder()
     builder.button(text="🏆 Ранк", callback_data="party_set_mode:Ranked")
     builder.button(text="🕹️ Класика", callback_data="party_set_mode:Classic")
-    builder.button(text="⚔️ Режим бою", callback_data="party_set_mode:Brawl")  # Оновлено
+    builder.button(text="⚔️ Режим бою", callback_data="party_set_mode:Brawl")
     builder.button(text="◀️ Назад", callback_data="party_step_back:to_confirmation")
     builder.adjust(2)
     return builder.as_markup()
 
 def create_party_size_keyboard() -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для вибору розміру паті (2 колонки).
+    Клавіатура для вибору розміру паті:
+    | 👥 Дуо | 👥 Тріо |
+    | 👥 Фулл | ◀️ Назад |
     """
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 Дуо", callback_data="party_set_size:2")
@@ -55,21 +68,35 @@ def create_party_size_keyboard() -> InlineKeyboardMarkup:
     builder.adjust(2, 2)
     return builder.as_markup()
 
-def create_role_selection_keyboard(available_roles: List[str], lobby_id: str) -> InlineKeyboardMarkup:
+def create_role_selection_keyboard(
+    available_roles: List[str],
+    lobby_id: str
+) -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для вибору ролі (2 колонки).
+    Клавіатура для вибору ролі:
+    - Доступні ролі розміщуються у два стовпці.
+    - Якщо lobby_id == "initial", додається кнопка ◀️ Назад.
+    - Інакше під кнопками зʼявляється кнопка ❌ Скасувати.
     """
     builder = InlineKeyboardBuilder()
     role_emoji_map = {"EXP": "⚔️", "ЛІС": "🌳", "МІД": "🧙", "АДК": "🏹", "РОУМ": "🛡️"}
     for role in available_roles:
         emoji = role_emoji_map.get(role, "🔹")
-        builder.button(text=f"{emoji} {role}", callback_data=f"party_select_role:{lobby_id}:{role}")
+        builder.button(
+            text=f"{emoji} {role}",
+            callback_data=f"party_select_role:{lobby_id}:{role}"
+        )
     if lobby_id == "initial":
         builder.button(text="◀️ Назад", callback_data="party_step_back:to_party_size")
         builder.adjust(2)
     else:
         builder.adjust(2, 1)
-        builder.row(InlineKeyboardButton(text="❌ Скасувати", callback_data=f"party_cancel_join:{lobby_id}"))
+        builder.row(
+            InlineKeyboardButton(
+                text="❌ Скасувати",
+                callback_data=f"party_cancel_join:{lobby_id}"
+            )
+        )
     return builder.as_markup()
 
 def create_required_roles_keyboard(
@@ -78,87 +105,158 @@ def create_required_roles_keyboard(
     num_to_select: int
 ) -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для вибору бажаних ролей з мультиселектом (2 колонки).
+    Клавіатура для мультивибору бажаних ролей:
+    - Перелік ролей у 2 колонки, відмічені обрані.
+    - Під списком кнопка ✅ Готово або індикатор ⏳ Ще N.
+    - Кнопка ◀️ Назад до вибору лідера.
     """
     builder = InlineKeyboardBuilder()
     role_emoji_map = {"EXP": "⚔️", "ЛІС": "🌳", "МІД": "🧙", "АДК": "🏹", "РОУМ": "🛡️"}
     for role in available_roles:
         emoji = role_emoji_map.get(role, "🔹")
-        text = f"✅ {emoji} {role}" if role in selected_roles else f"{emoji} {role}"
+        if role in selected_roles:
+            text = f"✅ {emoji} {role}"
+        else:
+            text = f"{emoji} {role}"
         builder.button(text=text, callback_data=f"party_req_role:{role}")
     builder.adjust(2)
-    # Додаємо кнопки-підтвердження/назад
+
     action_buttons = []
     if len(selected_roles) == num_to_select:
-        action_buttons.append(InlineKeyboardButton(text="✅ Готово", callback_data="party_confirm_roles"))
+        action_buttons.append(
+            InlineKeyboardButton(text="✅ Готово", callback_data="party_confirm_roles")
+        )
     else:
         remaining = num_to_select - len(selected_roles)
-        action_buttons.append(InlineKeyboardButton(text=f"⏳ Ще {remaining}", callback_data="party_dummy_button"))
-    action_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data="party_step_back:to_leader_role"))
+        action_buttons.append(
+            InlineKeyboardButton(text=f"⏳ Ще {remaining}", callback_data="party_dummy_button")
+        )
+    action_buttons.append(
+        InlineKeyboardButton(text="◀️ Назад", callback_data="party_step_back:to_leader_role")
+    )
     builder.row(*action_buttons)
     return builder.as_markup()
 
-def create_lobby_keyboard(lobby_id: int, lobby_data: Dict) -> InlineKeyboardMarkup:
+def create_lobby_keyboard(
+    lobby_id: int,
+    lobby_data: Dict
+) -> InlineKeyboardMarkup:
     """
-    Створює клавіатуру для активного лобі (2 колонки).
+    Клавіатура для активного лобі:
+    - Якщо стан 'joining', показує кнопки доступних ролей і ❌ Скасувати.
+    - Якщо 'open', показує ➕ Увійти, ❌ Вийти, 🚫 Закрити.
     """
     builder = InlineKeyboardBuilder()
     lobby_state = lobby_data.get("state", "open")
     role_emoji_map = {"EXP": "⚔️", "ЛІС": "🌳", "МІД": "🧙", "АДК": "🏹", "РОУМ": "🛡️"}
+
     if lobby_state == "joining":
-        taken_roles = [p["role"] for p in lobby_data["players"].values()]
-        required_roles = lobby_data.get("required_roles", [])
-        if required_roles:
-            available = [r for r in required_roles if r not in taken_roles]
+        taken = [p["role"] for p in lobby_data["players"].values()]
+        required = lobby_data.get("required_roles", [])
+        if required:
+            available = [r for r in required if r not in taken]
         else:
-            available = [r for r in ALL_ROLES if r not in taken_roles]
+            available = [r for r in ALL_ROLES if r not in taken]
         for role in available:
             emoji = role_emoji_map.get(role, "🔹")
-            builder.button(text=f"{emoji} {role}", callback_data=f"party_select_role:{lobby_id}:{role}")
+            builder.button(
+                text=f"{emoji} {role}",
+                callback_data=f"party_select_role:{lobby_id}:{role}"
+            )
         builder.adjust(2)
-        builder.row(InlineKeyboardButton(text="❌ Скасувати", callback_data=f"party_cancel_join:{lobby_id}"))
-    else:  # open
+        builder.row(
+            InlineKeyboardButton(
+                text="❌ Скасувати",
+                callback_data=f"party_cancel_join:{lobby_id}"
+            )
+        )
+    else:
         players = lobby_data.get("players", {})
-        party_size = lobby_data.get("party_size", 5)
-        if len(players) < party_size:
+        size = lobby_data.get("party_size", 5)
+        if len(players) < size:
             builder.button(text="➕ Увійти", callback_data=f"party_join:{lobby_id}")
         builder.button(text="❌ Вийти", callback_data=f"party_leave:{lobby_id}")
         builder.button(text="🚫 Закрити", callback_data=f"party_cancel_lobby:{lobby_id}")
         builder.adjust(2, 1)
+
     return builder.as_markup()
 
-# === КЛАВІАТУРИ ДЛЯ РЕЄСТРАЦІЇ ТА ПРОФІЛЮ ===
+# -------------------------------------------------------------------
+# Клавіатури для профілю користувача
+# -------------------------------------------------------------------
 
 def create_profile_menu_keyboard() -> InlineKeyboardMarkup:
     """
-    Створює початкову, компактну клавіатуру для меню профілю (2 колонки).
+    Початковий однокнопковий режим профілю:
+    | 📋 Меню |
+    При натисканні відкриває розгорнуте меню з оглядом дій.
     """
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="⚙️ Налаштувати", callback_data="profile_menu_expand"),
-        InlineKeyboardButton(text="🚪 Вийти", callback_data="profile_menu_close")
+        InlineKeyboardButton(text="📋 Меню", callback_data="profile_show_menu")
     )
     return builder.as_markup()
 
-def create_expanded_profile_menu_keyboard() -> InlineKeyboardMarkup:
+def create_profile_menu_overview_keyboard(
+    current_page: int,
+    total_pages: int
+) -> InlineKeyboardMarkup:
     """
-    Створює розширену клавіатуру для меню профілю (2 колонки).
+    Розгорнуте інтерактивне меню профілю.
+    1. Навігація каруселлю, якщо total_pages > 1:
+       | ◀️ | {current_page}/{total_pages} | ▶️ |
+    2. Дії:
+       | 🔄 Профіль | 📈 Статистика |
+       | 🦸 Герої   | 🖼️ Аватар      |
+       | 🗑️ Видалити | ◀️ Приховати меню |
     """
     builder = InlineKeyboardBuilder()
+
+    # Додавання стрілок навігації, якщо більше однієї сторінки
+    if total_pages > 1:
+        prev_disabled = current_page <= 1
+        next_disabled = current_page >= total_pages
+        builder.button(
+            text="◀️",
+            callback_data=f"profile_prev_page:{current_page-1}",
+            disabled=prev_disabled
+        )
+        builder.button(
+            text=f"{current_page}/{total_pages}",
+            callback_data="profile_page_status",
+            disabled=True
+        )
+        builder.button(
+            text="▶️",
+            callback_data=f"profile_next_page:{current_page+1}",
+            disabled=next_disabled
+        )
+        builder.adjust(3)
+
+    # Основні дії користувача
     builder.button(text="🔄 Профіль", callback_data="profile_update_basic")
-    builder.button(text="📈 Статистика", callback_data="profile_add_stats")
-    builder.button(text="🦸 Герої", callback_data="profile_add_heroes")
+    builder.button(text="📈 Статистика", callback_data="profile_update_stats")
+    builder.button(text="🦸 Герої", callback_data="profile_update_heroes")
+    builder.button(text="🖼️ Аватар", callback_data="profile_update_avatar")
     builder.button(text="🗑️ Видалити", callback_data="profile_delete")
-    builder.button(text="◀️ Назад", callback_data="profile_menu_collapse")
-    builder.adjust(2, 2, 1)
+    builder.button(text="◀️ Приховати меню", callback_data="profile_hide_menu")
+    # Викладка у два стовпці
+    builder.adjust(2, 2, 2)
+
     return builder.as_markup()
+
+# -------------------------------------------------------------------
+# Підтвердження видалення профілю
+# -------------------------------------------------------------------
 
 def create_delete_confirm_keyboard() -> InlineKeyboardMarkup:
     """
-    Клавіатура для підтвердження видалення профілю (2 колонки).
+    Підтвердження дії видалення профілю:
+    | ✅ Так | ❌ Ні |
     """
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Так", callback_data="delete_confirm_yes")
-    builder.button(text="❌ Ні", callback_data="delete_confirm_no")
-    builder.adjust(2)
+    builder.row(
+        InlineKeyboardButton(text="✅ Так", callback_data="delete_confirm_yes"),
+        InlineKeyboardButton(text="❌ Ні", callback_data="delete_confirm_no")
+    )
     return builder.as_markup()
