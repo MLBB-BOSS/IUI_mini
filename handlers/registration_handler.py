@@ -7,6 +7,7 @@ import html
 import base64
 import io
 from typing import Dict, Any
+import asyncio
 
 from aiogram import Bot, F, Router, types, Dispatcher
 from aiogram.filters import Command, StateFilter
