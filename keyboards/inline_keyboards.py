@@ -235,11 +235,11 @@ def create_profile_menu_overview_keyboard(
 
     # Основні дії користувача
     builder.button(text="🔄 Профіль", callback_data="profile_update_basic")
-    builder.button(text="📈 Статистика", callback_data="profile_update_stats")
+    builder.button(text="📈 Статис", callback_data="profile_update_stats")
     builder.button(text="🦸 Герої", callback_data="profile_update_heroes")
     builder.button(text="🖼️ Аватар", callback_data="profile_update_avatar")
     builder.button(text="🗑️ Видалити", callback_data="profile_delete")
-    builder.button(text="◀️ Приховати меню", callback_data="profile_hide_menu")
+    builder.button(text="◀️ Закрити", callback_data="profile_hide_menu")
     # Викладка у два стовпці
     builder.adjust(2, 2, 2)
 
