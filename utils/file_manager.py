@@ -4,25 +4,18 @@
 Забезпечує постійне зберігання файлів у Cloudinary та fallback механізми.
 """
 import asyncio
-import base64
 import io
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional
 import aiohttp
 import cloudinary
 import cloudinary.uploader
 from aiohttp.client_exceptions import ClientResponseError
 
-from aiogram import Bot
-from aiogram.types import PhotoSize
-from config import logger, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+from config import logger
 
-# Конфігурація Cloudinary
-cloudinary.config(
-    cloud_name=CLOUDINARY_CLOUD_NAME,
-    api_key=CLOUDINARY_API_KEY,
-    api_secret=CLOUDINARY_API_SECRET
-)
-
+# ✅ ВИДАЛЕНО РУЧНУ КОНФІГУРАЦІЮ ТА ЗАЙВІ ІМПОРТИ.
+# Бібліотека cloudinary автоматично знайде змінну оточення CLOUDINARY_URL,
+# яку ми завантажили в config.py за допомогою load_dotenv().
 
 class FileResilienceManager:
     """
@@ -80,6 +73,7 @@ class FileResilienceManager:
             if len(image_bytes) > max_size_kb * 1024:
                 upload_params.update({"quality": "auto:low", "width": 800, "height": 800, "crop": "limit"})
             
+            # Використовуємо asyncio.to_thread для запуску синхронної бібліотеки в асинхронному коді
             result = await asyncio.to_thread(
                 cloudinary.uploader.upload,
                 image_bytes,
