@@ -1,3 +1,4 @@
+#config.py
 """
 Configuration settings and environment variables for the MLBB IUI Mini bot.
 
