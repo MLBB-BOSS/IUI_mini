@@ -15,7 +15,6 @@ class RegistrationFSM(StatesGroup):
     waiting_for_basic_photo = State()      # Очікування скріншота з базовою інформацією
     waiting_for_stats_photo = State()      # Очікування скріншота зі загальною статистикою
     waiting_for_heroes_photo = State()     # Очікування скріншота зі статистикою героїв
-    waiting_for_avatar_photo = State()     # Очікування кастомної аватарки
     
     # Видалення
     confirming_deletion = State()
