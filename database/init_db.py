@@ -20,21 +20,42 @@ async def init_db():
 
         # --- 🧠 Блок "м'якої" міграції ---
         try:
-            # 1. Додавання колонки chat_history
-            logger.info("Checking for missing 'chat_history' column...")
-            add_column_sql = text("ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_history JSON")
-            await conn.execute(add_column_sql)
-            logger.info("Successfully ensured 'chat_history' column exists.")
+            # 1. Додавання chat_history
+            logger.info("Ensuring 'chat_history' column exists...")
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_history JSON"
+            ))
 
-            # 2. Створення унікального індексу для player_id
-            logger.info("Checking for unique index on 'player_id'...")
-            # Ідемпотентна команда для PostgreSQL, яка не видасть помилку, якщо індекс вже існує
-            add_unique_index_sql = text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id ON users (player_id)")
-            await conn.execute(add_unique_index_sql)
-            logger.info("Successfully ensured unique index exists for 'player_id'.")
+            # 2. Нові колонки для фото профілю
+            logger.info("Ensuring profile image columns exist...")
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS basic_profile_file_id TEXT"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS basic_profile_permanent_url TEXT"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS stats_photo_file_id TEXT"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS stats_photo_permanent_url TEXT"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS heroes_photo_file_id TEXT"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS heroes_photo_permanent_url TEXT"
+            ))
 
+            # 3. Унікальний індекс для player_id
+            logger.info("Ensuring unique index on 'player_id' exists...")
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id ON users (player_id)"
+            ))
+
+            logger.info("Soft migration completed successfully.")
         except Exception as e:
             # Логуємо помилку, але не зупиняємо запуск бота.
-            logger.error(f"Could not perform a soft migration step: {e}", exc_info=True)
-            
+            logger.error(f"Soft migration step failed: {e}", exc_info=True)
+
     await engine.dispose()
