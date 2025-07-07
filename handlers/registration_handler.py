@@ -24,6 +24,8 @@ from keyboards.inline_keyboards import (
 from services.openai_service import MLBBChatGPT
 from database.crud import add_or_update_user, get_user_by_telegram_id, delete_user_by_telegram_id
 from config import OPENAI_API_KEY, logger
+# ❗️ Імпортуємо функцію каруселі для виклику після оновлення
+from handlers.profile_handler import show_profile_carousel
 
 registration_router = Router()
 
@@ -48,6 +50,7 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
         f"🦸 <b>Улюблені герої:</b> {heroes_str}"
     )
 
+# Ця функція більше не буде викликатися напряму, але може бути корисною
 async def show_profile_menu(bot: Bot, chat_id: int, user_id: int, message_to_delete_id: int = None):
     """Відображає профіль, видаляючи попереднє повідомлення для чистоти чату."""
     if message_to_delete_id:
@@ -56,37 +59,10 @@ async def show_profile_menu(bot: Bot, chat_id: int, user_id: int, message_to_del
         except TelegramAPIError as e:
             logger.warning(f"Не вдалося видалити проміжне повідомлення {message_to_delete_id}: {e}")
 
-    user_data = await get_user_by_telegram_id(user_id)
-    if user_data:
-        profile_text = format_profile_display(user_data)
-        await bot.send_message(
-            chat_id,
-            profile_text,
-            reply_markup=create_profile_menu_keyboard(),
-            parse_mode="HTML"
-        )
-    else:
-        await bot.send_message(chat_id, "Не вдалося знайти ваш профіль. Спробуйте почати з /profile.")
+    # Замість старого меню, тепер показуємо карусель
+    await show_profile_carousel(bot, chat_id, user_id)
 
-@registration_router.message(Command("profile"))
-async def cmd_profile(message: Message, state: FSMContext, bot: Bot):
-    """Центральна команда для управління профілем з логікою "Чистого чату"."""
-    if not message.from_user: return
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    try:
-        await message.delete()
-    except TelegramAPIError as e:
-        logger.warning(f"Не вдалося видалити команду /profile від {user_id}: {e}")
-
-    await state.clear()
-    existing_user = await get_user_by_telegram_id(user_id)
-    if existing_user:
-        await show_profile_menu(bot, chat_id, user_id)
-    else:
-        await state.set_state(RegistrationFSM.waiting_for_basic_photo)
-        sent_message = await bot.send_message(chat_id, "👋 Вітаю! Схоже, ви тут уперше.\n\nДля створення профілю, будь ласка, надішліть мені скріншот вашого ігрового профілю (головна сторінка). 📸")
-        await state.update_data(last_bot_message_id=sent_message.message_id)
+# 🗑️ ВИДАЛЕНО ОБРОБНИК CMD_PROFILE, щоб уникнути конфлікту
 
 # --- Обробники для кнопок меню, що запускають FSM ---
 @registration_router.callback_query(F.data == "profile_update_basic")
@@ -194,7 +170,8 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
         status = await add_or_update_user(update_data)
         
         if status == 'success':
-            await show_profile_menu(bot, chat_id, user_id, message_to_delete_id=thinking_msg.message_id)
+            # ✅ ВИПРАВЛЕНО: Показуємо карусель замість старого меню
+            await show_profile_carousel(bot, chat_id, user_id, message_to_edit=thinking_msg)
         elif status == 'conflict':
             await thinking_msg.edit_text(
                 "🛡️ <b>Конфлікт реєстрації!</b>\n\n"
@@ -211,9 +188,11 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
         await state.clear()
 
 
-# --- Обробники управління меню (без змін) ---
+# --- Обробники управління меню ---
 @registration_router.callback_query(F.data == "profile_menu_expand")
 async def profile_menu_expand_handler(callback: CallbackQuery):
+    # Ця логіка тепер знаходиться в profile_handler, але залишаємо для сумісності
+    # якщо стара клавіатура десь залишиться
     await callback.message.edit_reply_markup(reply_markup=create_expanded_profile_menu_keyboard())
     await callback.answer()
 
@@ -227,7 +206,7 @@ async def profile_menu_close_handler(callback: CallbackQuery):
     await callback.message.delete()
     await callback.answer("Меню закрито.")
 
-# --- Обробники видалення (без змін) ---
+# --- Обробники видалення ---
 @registration_router.callback_query(F.data == "profile_delete")
 async def profile_delete_handler(callback: CallbackQuery, state: FSMContext):
     await state.set_state(RegistrationFSM.confirming_deletion)
@@ -252,7 +231,8 @@ async def cancel_delete_profile(callback: CallbackQuery, state: FSMContext, bot:
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
     await state.clear()
-    await show_profile_menu(bot, chat_id, user_id, message_to_delete_id=callback.message.message_id)
+    # ✅ ВИПРАВЛЕНО: Показуємо карусель замість старого меню
+    await show_profile_carousel(bot, chat_id, user_id, message_to_edit=callback.message)
     await callback.answer("Дію скасовано.")
 
 def register_registration_handlers(dp: Dispatcher):
@@ -300,8 +280,6 @@ async def handle_avatar_photo(message: Message, state: FSMContext, bot: Bot):
     try:
         largest_photo: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
         
-        # Для аватарки нам не потрібен аналіз через Vision API,
-        # ми просто зберігаємо file_id в базу даних
         update_data = {
             'telegram_id': user_id,
             'custom_avatar_file_id': largest_photo.file_id
@@ -310,11 +288,9 @@ async def handle_avatar_photo(message: Message, state: FSMContext, bot: Bot):
         status = await add_or_update_user(update_data)
         
         if status == 'success':
-            await thinking_msg.edit_text("✅ Аватарку успішно оновлено!")
-            # Невелика пауза перед показом меню, щоб користувач побачив повідомлення про успіх
-            await asyncio.sleep(1.5)
-            await show_profile_menu(bot, chat_id, user_id, message_to_delete_id=thinking_msg.message_id)
-        else: # status == 'error' або 'conflict'
+            # ✅ ВИПРАВЛЕНО: Показуємо карусель замість повідомлення
+            await show_profile_carousel(bot, chat_id, user_id, message_to_edit=thinking_msg)
+        else:
             await thinking_msg.edit_text("❌ Не вдалося оновити аватарку. Спробуйте ще раз пізніше.")
 
     except Exception as e:
