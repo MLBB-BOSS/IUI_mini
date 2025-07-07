@@ -208,12 +208,30 @@ async def handle_profile_photo_update(message: Message, state: FSMContext, bot: 
         await state.clear()
         return
 
-    # ✅ ВИПРАВЛЕНО: Використовуємо іменовані аргументи для уникнення TypeError
-    thinking_msg = await bot.edit_message_text(
-        text="Обробляю ваше зображення... 🤖",
-        chat_id=message.chat.id,
-        message_id=last_bot_msg_id
-    )
+    # ✅ ВИПРАВЛЕНО: Спочатку отримуємо інформацію про повідомлення для визначення його типу
+    try:
+        msg_to_edit = await bot.get_message(chat_id=message.chat.id, message_id=last_bot_msg_id)
+        
+        # Залежно від типу повідомлення, використовуємо відповідний метод
+        if msg_to_edit.photo:
+            thinking_msg = await bot.edit_message_caption(
+                chat_id=message.chat.id, 
+                message_id=last_bot_msg_id,
+                caption="Обробляю ваше зображення... 🤖"
+            )
+        else:
+            thinking_msg = await bot.edit_message_text(
+                text="Обробляю ваше зображення... 🤖",
+                chat_id=message.chat.id,
+                message_id=last_bot_msg_id
+            )
+    except TelegramAPIError as e:
+        logger.error(f"Помилка при спробі отримати або редагувати повідомлення: {e}")
+        # Запасний варіант - відправити нове повідомлення
+        thinking_msg = await bot.send_message(
+            chat_id=message.chat.id,
+            text="Обробляю ваше зображення... 🤖"
+        )
     
     try:
         largest_photo = max(message.photo, key=lambda p: p.file_size or 0)
@@ -271,7 +289,30 @@ async def handle_profile_photo_update(message: Message, state: FSMContext, bot: 
 async def profile_delete_handler(callback: CallbackQuery, state: FSMContext):
     if callback.message:
         await state.set_state(RegistrationFSM.confirming_deletion)
-        await callback.message.edit_text("Ви впевнені, що хочете видалити свій профіль? Ця дія невідворотна.", reply_markup=create_delete_confirm_keyboard())
+        
+        # ✅ ВИПРАВЛЕНО: Перевіряємо тип повідомлення і використовуємо відповідний метод
+        deletion_text = "Ви впевнені, що хочете видалити свій профіль? Ця дія невідворотна."
+        try:
+            if callback.message.photo:
+                await callback.message.edit_caption(
+                    caption=deletion_text, 
+                    reply_markup=create_delete_confirm_keyboard()
+                )
+            else:
+                await callback.message.edit_text(
+                    deletion_text, 
+                    reply_markup=create_delete_confirm_keyboard()
+                )
+        except TelegramAPIError as e:
+            logger.error(f"Помилка при спробі редагувати повідомлення для підтвердження видалення: {e}")
+            # Запасний варіант - відправити нове повідомлення
+            await callback.message.delete()
+            await callback.bot.send_message(
+                chat_id=callback.message.chat.id,
+                text=deletion_text,
+                reply_markup=create_delete_confirm_keyboard()
+            )
+    
     await callback.answer()
 
 @registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_yes")
