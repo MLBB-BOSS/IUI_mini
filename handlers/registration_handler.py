@@ -1,270 +1,254 @@
 #handlers/registration_handler.py
 """
 Обробники для процесу реєстрації та управління профілем користувача
-з реалізацією логіки "Чистого чату" та стійким збереженням файлів.
+з реалізацією логіки "Чистого чату".
 """
 import html
 import base64
 import io
-from typing import Dict, Any, Optional, List
-import asyncio
+from typing import Dict, Any
 
 from aiogram import Bot, F, Router, types, Dispatcher
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, PhotoSize, InputMediaPhoto, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, PhotoSize
 from aiogram.exceptions import TelegramAPIError
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from enum import Enum, auto
-from aiohttp.client_exceptions import ClientResponseError
 
 from states.user_states import RegistrationFSM
 from keyboards.inline_keyboards import (
+    create_profile_menu_keyboard,
     create_expanded_profile_menu_keyboard,
     create_delete_confirm_keyboard
 )
 from services.openai_service import MLBBChatGPT
 from database.crud import add_or_update_user, get_user_by_telegram_id, delete_user_by_telegram_id
 from config import OPENAI_API_KEY, logger
-from utils.file_manager import file_resilience_manager
 
 registration_router = Router()
 
-# === ЛОГІКА КАРУСЕЛІ (зміни для використання permanent_url) ===
-
-class CarouselType(Enum):
-    AVATAR = auto()
-    PROFILE = auto()
-    STATS = auto()
-    HEROES = auto()
-
-CAROUSEL_TYPE_TO_KEY = {
-    CarouselType.AVATAR: "custom_avatar_file_id",
-    CarouselType.PROFILE: "profile_screenshot_file_id",
-    CarouselType.STATS: "stats_screenshot_file_id",
-    CarouselType.HEROES: "heroes_screenshot_file_id",
-}
-
-CAROUSEL_TYPE_TO_PERMANENT_KEY = {
-    CarouselType.AVATAR: "custom_avatar_permanent_url",
-    CarouselType.PROFILE: "profile_screenshot_permanent_url",
-    CarouselType.STATS: "stats_screenshot_permanent_url",
-    CarouselType.HEROES: "heroes_screenshot_permanent_url",
-}
-
-CAROUSEL_TYPE_TO_TITLE = {
-    CarouselType.AVATAR: "🎭 Аватар",
-    CarouselType.PROFILE: "👤 Основний профіль",
-    CarouselType.STATS: "📊 Статистика",
-    CarouselType.HEROES: "🦸 Улюблені герої",
-}
-
-DEFAULT_IMAGE_URL = "https://res.cloudinary.com/ha1pzppgf/image/upload/v1748286434/file_0000000017a46246b78bf97e2ecd9348_zuk16r.png"
-
-def create_carousel_keyboard(current_type: CarouselType, available_types: list[CarouselType]):
-    builder = InlineKeyboardBuilder()
-    current_idx = available_types.index(current_type)
-    nav_row = [
-        InlineKeyboardButton(text="◀️", callback_data=f"carousel:goto:{available_types[current_idx - 1].name}") if current_idx > 0 else InlineKeyboardButton(text="•", callback_data="carousel:noop"),
-        InlineKeyboardButton(text=f"{current_idx + 1}/{len(available_types)}", callback_data="carousel:noop"),
-        InlineKeyboardButton(text="▶️", callback_data=f"carousel:goto:{available_types[current_idx + 1].name}") if current_idx < len(available_types) - 1 else InlineKeyboardButton(text="•", callback_data="carousel:noop")
-    ]
-    builder.row(*nav_row)
-    edit_map = { CarouselType.AVATAR: "profile_add_avatar", CarouselType.PROFILE: "profile_update_basic", CarouselType.STATS: "profile_add_stats", CarouselType.HEROES: "profile_add_heroes" }
-    builder.row(
-        InlineKeyboardButton(text="🔄 Оновити", callback_data=edit_map[current_type]),
-        InlineKeyboardButton(text="⚙️ Опції", callback_data="profile_menu_expand")
-    )
-    builder.row(InlineKeyboardButton(text="🚪 Закрити", callback_data="profile_carousel_close"))
-    return builder.as_markup()
-
-def format_profile_info(user_data: Dict[str, Any]) -> str:
-    nickname = html.escape(user_data.get('nickname', 'Невідомо'))
+def format_profile_display(user_data: Dict[str, Any]) -> str:
+    """Форматує дані профілю для відображення користувачу."""
+    nickname = html.escape(user_data.get('nickname', 'Не вказано'))
     player_id = user_data.get('player_id', 'N/A')
     server_id = user_data.get('server_id', 'N/A')
-    rank = html.escape(user_data.get('current_rank', 'Невідомо'))
+    current_rank = html.escape(user_data.get('current_rank', 'Не вказано'))
+    total_matches = user_data.get('total_matches', 'Не вказано')
     win_rate = user_data.get('win_rate')
-    win_rate_str = f"{win_rate}%" if win_rate is not None else "N/A"
-    matches = user_data.get('total_matches', 'N/A')
-    heroes = html.escape(user_data.get('favorite_heroes', 'Не вказано'))
-    return (f"👤 <b>{nickname}</b> | 🆔 {player_id}({server_id})\n"
-            f"🏆 {rank} | 📊 {win_rate_str} ({matches} матчів)\n"
-            f"🦸 <b>Герої:</b> {heroes}")
+    win_rate_str = f"{win_rate}%" if win_rate is not None else "Не вказано"
+    heroes = user_data.get('favorite_heroes')
+    heroes_str = html.escape(heroes) if heroes else "Не вказано"
+    return (
+        f"<b>Ваш профіль:</b>\n\n"
+        f"👤 <b>Нікнейм:</b> {nickname}\n"
+        f"🆔 <b>ID:</b> {player_id} ({server_id})\n"
+        f"🏆 <b>Ранг:</b> {current_rank}\n"
+        f"⚔️ <b>Матчів:</b> {total_matches}\n"
+        f"📊 <b>WR:</b> {win_rate_str}\n"
+        f"🦸 <b>Улюблені герої:</b> {heroes_str}"
+    )
 
-def get_caption_for_carousel_type(carousel_type: CarouselType, user_data: Dict[str, Any]) -> str:
-    title = CAROUSEL_TYPE_TO_TITLE.get(carousel_type, "Профіль")
-    if carousel_type == CarouselType.AVATAR:
-        return f"<b>{title}</b>\n\n{format_profile_info(user_data)}"
-    return f"<b>{title}</b>"
+async def show_profile_menu(bot: Bot, chat_id: int, user_id: int, message_to_delete_id: int = None):
+    """Відображає профіль, видаляючи попереднє повідомлення для чистоти чату."""
+    if message_to_delete_id:
+        try:
+            await bot.delete_message(chat_id, message_to_delete_id)
+        except TelegramAPIError as e:
+            logger.warning(f"Не вдалося видалити проміжне повідомлення {message_to_delete_id}: {e}")
 
-async def show_profile_carousel(bot: Bot, chat_id: int, user_id: int, carousel_type: CarouselType = CarouselType.AVATAR, message_to_edit: Optional[Message] = None):
     user_data = await get_user_by_telegram_id(user_id)
-    if not user_data:
-        text = "Профіль не знайдено. Будь ласка, пройдіть реєстрацію з /profile."
-        if message_to_edit and not message_to_edit.photo:
-            await message_to_edit.edit_text(text)
-        else:
-            if message_to_edit: await message_to_edit.delete()
-            await bot.send_message(chat_id, text)
-        return
+    if user_data:
+        profile_text = format_profile_display(user_data)
+        await bot.send_message(
+            chat_id,
+            profile_text,
+            reply_markup=create_profile_menu_keyboard(),
+            parse_mode="HTML"
+        )
+    else:
+        await bot.send_message(chat_id, "Не вдалося знайти ваш профіль. Спробуйте почати з /profile.")
 
-    available_types = [c for c in CarouselType if user_data.get(CAROUSEL_TYPE_TO_PERMANENT_KEY.get(c)) or user_data.get(CAROUSEL_TYPE_TO_KEY.get(c))]
-    if not available_types: available_types.append(CarouselType.AVATAR)
-    if carousel_type not in available_types: carousel_type = available_types[0]
-
-    permanent_url = user_data.get(CAROUSEL_TYPE_TO_PERMANENT_KEY.get(carousel_type))
-    temp_file_id = user_data.get(CAROUSEL_TYPE_TO_KEY.get(carousel_type))
-    
-    media_source = permanent_url or temp_file_id or DEFAULT_IMAGE_URL
-    
-    keyboard = create_carousel_keyboard(carousel_type, available_types)
-    caption = get_caption_for_carousel_type(carousel_type, user_data)
-    media = InputMediaPhoto(media=media_source, caption=caption)
-
-    try:
-        if message_to_edit:
-            if message_to_edit.photo:
-                await bot.edit_message_media(chat_id, message_to_edit.message_id, media, reply_markup=keyboard)
-            else:
-                await message_to_edit.delete()
-                await bot.send_photo(chat_id, media_source, caption=caption, reply_markup=keyboard)
-        else:
-            await bot.send_photo(chat_id, media_source, caption=caption, reply_markup=keyboard)
-    except TelegramAPIError as e:
-        logger.error(f"Помилка показу/оновлення каруселі: {e}. Спроба відправити заново.")
-        if "message to edit not found" in str(e).lower():
-             await bot.send_photo(chat_id, media_source, caption=caption, reply_markup=keyboard)
-        else:
-            fallback_source = temp_file_id if media_source == permanent_url else permanent_url
-            if fallback_source:
-                 try:
-                    await bot.send_photo(chat_id, fallback_source, caption=caption, reply_markup=keyboard)
-                    return
-                 except TelegramAPIError:
-                    pass
-            await bot.send_message(chat_id, "Не вдалося оновити профіль. Спробуйте ще раз.")
-
-# === ОСНОВНІ ОБРОБНИКИ ===
 @registration_router.message(Command("profile"))
 async def cmd_profile(message: Message, state: FSMContext, bot: Bot):
+    """Центральна команда для управління профілем з логікою "Чистого чату"."""
     if not message.from_user: return
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    try:
+        await message.delete()
+    except TelegramAPIError as e:
+        logger.warning(f"Не вдалося видалити команду /profile від {user_id}: {e}")
+
     await state.clear()
-    try: await message.delete()
-    except TelegramAPIError: pass
-    user_data = await get_user_by_telegram_id(message.from_user.id)
-    if user_data:
-        await show_profile_carousel(bot, message.chat.id, message.from_user.id)
+    existing_user = await get_user_by_telegram_id(user_id)
+    if existing_user:
+        await show_profile_menu(bot, chat_id, user_id)
     else:
         await state.set_state(RegistrationFSM.waiting_for_basic_photo)
-        sent_msg = await bot.send_message(message.chat.id, "👋 Вітаю! Схоже, ви тут уперше.\n\nДля створення профілю, надішліть скріншот вашого ігрового профілю.")
-        await state.update_data(last_bot_message_id=sent_msg.message_id)
+        sent_message = await bot.send_message(chat_id, "👋 Вітаю! Схоже, ви тут уперше.\n\nДля створення профілю, будь ласка, надішліть мені скріншот вашого ігрового профілю (головна сторінка). 📸")
+        await state.update_data(last_bot_message_id=sent_message.message_id)
 
-# === ✅✅✅ ГОЛОВНИЙ ОНОВЛЕНИЙ ОБРОБНИК FSM ДЛЯ ФОТО (З ВИПРАВЛЕННЯМ) ✅✅✅ ===
-@registration_router.message(StateFilter(RegistrationFSM.waiting_for_basic_photo, RegistrationFSM.waiting_for_stats_photo, RegistrationFSM.waiting_for_heroes_photo, RegistrationFSM.waiting_for_avatar_photo), F.photo)
-async def fsm_photo_handler(message: Message, state: FSMContext, bot: Bot):
-    if not (message.photo and message.from_user): return
-    
+# --- Обробники для кнопок меню, що запускають FSM ---
+@registration_router.callback_query(F.data == "profile_update_basic")
+async def profile_update_basic_handler(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(RegistrationFSM.waiting_for_basic_photo)
+    await callback.message.edit_text("Будь ласка, надішліть новий скріншот вашого основного профілю (де нікнейм, ID, ранг).")
+    await state.update_data(last_bot_message_id=callback.message.message_id)
+    await callback.answer()
+
+@registration_router.callback_query(F.data == "profile_add_stats")
+async def profile_add_stats_handler(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(RegistrationFSM.waiting_for_stats_photo)
+    await callback.message.edit_text("Надішліть скріншот вашої загальної статистики (розділ 'Statistics' -> 'All Seasons').")
+    await state.update_data(last_bot_message_id=callback.message.message_id)
+    await callback.answer()
+
+@registration_router.callback_query(F.data == "profile_add_heroes")
+async def profile_add_heroes_handler(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(RegistrationFSM.waiting_for_heroes_photo)
+    await callback.message.edit_text("Надішліть скріншот ваших улюблених героїв (розділ 'Favorite' -> 'All Seasons', топ-3).")
+    await state.update_data(last_bot_message_id=callback.message.message_id)
+    await callback.answer()
+
+# --- Універсальний обробник фото, що реалізує "Чистий чат" ---
+@registration_router.message(StateFilter(RegistrationFSM.waiting_for_basic_photo, RegistrationFSM.waiting_for_stats_photo, RegistrationFSM.waiting_for_heroes_photo), F.photo)
+async def handle_profile_update_photo(message: Message, state: FSMContext, bot: Bot):
+    if not message.photo or not message.from_user: return
     user_id = message.from_user.id
-    state_data = await state.get_data()
-    last_bot_msg_id = state_data.get("last_bot_message_id")
-    current_state_str = await state.get_state()
+    chat_id = message.chat.id
     
-    thinking_msg = await bot.send_message(message.chat.id, "Обробляю ваше зображення... 🤖")
+    state_data = await state.get_data()
+    last_bot_message_id = state_data.get("last_bot_message_id")
 
     try:
-        largest_photo = max(message.photo, key=lambda p: p.file_size or 0)
-        
-        # ✅ КРОК 1: СПОЧАТКУ завантажуємо байти зображення з Telegram
-        image_bytes_io = await bot.download_file(largest_photo.file_id)
-        if not image_bytes_io:
-            await thinking_msg.edit_text("❌ Не вдалося завантажити файл з серверів Telegram.")
-            return
-            
-        # ✅ КРОК 2: ТЕПЕР безпечно видаляємо повідомлення, бо файл вже у нас
-        try:
-            await message.delete()
-            if last_bot_msg_id:
-                await bot.delete_message(message.chat.id, last_bot_msg_id)
-        except TelegramAPIError:
-            logger.warning("Не вдалося видалити вихідні повідомлення, але файл вже завантажено.")
-            pass
+        await message.delete()
+    except TelegramAPIError as e:
+        logger.warning(f"Не вдалося видалити фото-повідомлення від {user_id}: {e}")
 
-        image_bytes = image_bytes_io.read()
-        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+    current_state_str = await state.get_state()
+    mode_map = {
+        RegistrationFSM.waiting_for_basic_photo.state: 'basic',
+        RegistrationFSM.waiting_for_stats_photo.state: 'stats',
+        RegistrationFSM.waiting_for_heroes_photo.state: 'heroes'
+    }
+    analysis_mode = mode_map.get(current_state_str)
+    if not (analysis_mode and last_bot_message_id):
+        await bot.send_message(chat_id, "Сталася помилка стану. Почніть знову з /profile.")
+        await state.clear()
+        return
 
-        update_data = {'telegram_id': user_id}
-        
-        mode_map = {
-            RegistrationFSM.waiting_for_basic_photo.state: ('basic', 'profile_screenshot'),
-            RegistrationFSM.waiting_for_stats_photo.state: ('stats', 'stats_screenshot'),
-            RegistrationFSM.waiting_for_heroes_photo.state: ('heroes', 'heroes_screenshot'),
-            RegistrationFSM.waiting_for_avatar_photo.state: ('avatar', 'custom_avatar'),
-        }
-        analysis_mode, file_type_prefix = mode_map[current_state_str]
-
-        # ✅ КРОК 3: Паралельно аналізуємо (OpenAI) і зберігаємо (Cloudinary)
-        async with MLBBChatGPT(OPENAI_API_KEY) as gpt, file_resilience_manager:
-            if analysis_mode == 'avatar':
-                analysis_result = {}
-                permanent_url = await file_resilience_manager.optimize_and_store_image(image_bytes, user_id, file_type_prefix)
-            else:
-                analysis_task = gpt.analyze_user_profile(image_base64, mode=analysis_mode)
-                storage_task = file_resilience_manager.optimize_and_store_image(image_bytes, user_id, file_type_prefix)
-                analysis_result, permanent_url = await asyncio.gather(analysis_task, storage_task)
-
-        # ✅ КРОК 4: Обробляємо результати
-        if not permanent_url:
-            await thinking_msg.edit_text("❌ Помилка збереження зображення. Спробуйте ще раз.")
+    thinking_msg = await bot.edit_message_text(chat_id=chat_id, message_id=last_bot_message_id, text=f"Аналізую ваш скріншот ({analysis_mode})... 🤖")
+    
+    try:
+        largest_photo: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
+        file_info = await bot.get_file(largest_photo.file_id)
+        if not file_info.file_path:
+            await thinking_msg.edit_text("Не вдалося отримати інформацію про файл.")
             return
 
-        if analysis_mode != 'avatar' and (not analysis_result or 'error' in analysis_result):
+        image_bytes_io = await bot.download_file(file_info.file_path)
+        image_base64 = base64.b64encode(image_bytes_io.read()).decode('utf-8')
+
+        async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+            analysis_result = await gpt.analyze_user_profile(image_base64, mode=analysis_mode)
+
+        if not analysis_result or 'error' in analysis_result:
             error_msg = analysis_result.get('error', 'Не вдалося розпізнати дані.')
-            await thinking_msg.edit_text(f"❌ Помилка аналізу: {error_msg}")
+            await thinking_msg.edit_text(f"❌ Помилка аналізу: {error_msg}\n\nБудь ласка, надішліть коректний скріншот або скасуйте операцію.")
+            await state.set_state(current_state_str) # Повертаємо стан для повторної спроби
+            await state.update_data(last_bot_message_id=thinking_msg.message_id)
             return
-        
+
+        # ... (логіка обробки даних)
+        update_data = {}
         if analysis_mode == 'basic':
-            update_data.update({
-                'nickname': analysis_result.get('game_nickname'), 
-                'player_id': int(str(analysis_result.get('mlbb_id_server', '0 (0)')).split(' ')[0]), 
-                'server_id': int(str(analysis_result.get('mlbb_id_server', '0 (0)')).split('(')[1].replace(')', '')), 
-                'current_rank': analysis_result.get('highest_rank_season'), 
-                'total_matches': analysis_result.get('matches_played')
-            })
+            update_data = {
+                'nickname': analysis_result.get('game_nickname'), 'player_id': int(analysis_result.get('mlbb_id_server', '0 (0)').split(' ')[0]),
+                'server_id': int(analysis_result.get('mlbb_id_server', '0 (0)').split('(')[1].replace(')', '')), 'current_rank': analysis_result.get('highest_rank_season'),
+                'total_matches': analysis_result.get('matches_played')}
         elif analysis_mode == 'stats':
-            main_ind = analysis_result.get('main_indicators', {})
-            update_data.update({'total_matches': main_ind.get('matches_played'), 'win_rate': main_ind.get('win_rate')})
+            main_indicators = analysis_result.get('main_indicators', {})
+            update_data = {'total_matches': main_indicators.get('matches_played'), 'win_rate': main_indicators.get('win_rate')}
         elif analysis_mode == 'heroes':
             heroes_list = analysis_result.get('favorite_heroes', [])
-            update_data['favorite_heroes'] = ", ".join([h.get('hero_name', '') for h in heroes_list if h.get('hero_name')])
-
-        update_data[f'{file_type_prefix}_file_id'] = largest_photo.file_id
-        update_data[f'{file_type_prefix}_permanent_url'] = permanent_url
+            heroes_str = ", ".join([h.get('hero_name', '') for h in heroes_list if h.get('hero_name')])
+            update_data = {'favorite_heroes': heroes_str}
         
-        # ✅ КРОК 5: Зберігаємо всі дані в БД
-        status = await add_or_update_user({k: v for k, v in update_data.items() if v is not None})
+        update_data = {k: v for k, v in update_data.items() if v is not None}
+        
+        if not update_data or (analysis_mode == 'basic' and 'player_id' not in update_data):
+            await thinking_msg.edit_text("Не вдалося витягти ключових даних (особливо Player ID). Спробуйте ще раз.")
+            await state.set_state(current_state_str)
+            await state.update_data(last_bot_message_id=thinking_msg.message_id)
+            return
+            
+        update_data['telegram_id'] = user_id
+        
+        # 🧠 ОНОВЛЕНА ЛОГІКА ЗБЕРЕЖЕННЯ
+        status = await add_or_update_user(update_data)
         
         if status == 'success':
-            await show_profile_carousel(bot, message.chat.id, user_id, message_to_edit=thinking_msg)
+            await show_profile_menu(bot, chat_id, user_id, message_to_delete_id=thinking_msg.message_id)
         elif status == 'conflict':
-            await thinking_msg.edit_text("🛡️ <b>Конфлікт!</b> Цей ігровий профіль (Player ID) вже зареєстрований іншим користувачем.")
-        else:
-            await thinking_msg.edit_text("❌ Сталася невідома помилка під час збереження даних.")
+            await thinking_msg.edit_text(
+                "🛡️ <b>Конфлікт реєстрації!</b>\n\n"
+                "Цей ігровий профіль вже зареєстровано іншим акаунтом Telegram. "
+                "Один ігровий профіль може бути прив'язаний лише до одного акаунту Telegram."
+            )
+        else: # status == 'error'
+            await thinking_msg.edit_text("❌ Сталася невідома помилка при збереженні даних. Спробуйте пізніше.")
 
-    except ClientResponseError as e:
-        if e.status == 404:
-            logger.warning(f"Помилка завантаження файлу (404 Not Found): {e}. Ймовірно, повідомлення було видалено занадто швидко.")
-            enhanced_error_msg = file_resilience_manager.get_enhanced_error_message(message.from_user.first_name if message.from_user else "друже")
-            await thinking_msg.edit_text(enhanced_error_msg)
-        else:
-            logger.exception("Критична помилка обробки фото (ClientResponseError):")
-            await thinking_msg.edit_text("Сталася неочікувана помилка при завантаженні. Спробуйте ще раз.")
     except Exception as e:
-        logger.exception("Критична помилка обробки фото:")
-        await thinking_msg.edit_text("Сталася неочікувана системна помилка.")
+        logger.exception(f"Критична помилка під час обробки фото (mode={analysis_mode}):")
+        if thinking_msg: await thinking_msg.edit_text("Сталася неочікувана помилка. Спробуйте ще раз.")
     finally:
         await state.clear()
 
 
+# --- Обробники управління меню (без змін) ---
+@registration_router.callback_query(F.data == "profile_menu_expand")
+async def profile_menu_expand_handler(callback: CallbackQuery):
+    await callback.message.edit_reply_markup(reply_markup=create_expanded_profile_menu_keyboard())
+    await callback.answer()
+
+@registration_router.callback_query(F.data == "profile_menu_collapse")
+async def profile_menu_collapse_handler(callback: CallbackQuery):
+    await callback.message.edit_reply_markup(reply_markup=create_profile_menu_keyboard())
+    await callback.answer()
+
+@registration_router.callback_query(F.data == "profile_menu_close")
+async def profile_menu_close_handler(callback: CallbackQuery):
+    await callback.message.delete()
+    await callback.answer("Меню закрито.")
+
+# --- Обробники видалення (без змін) ---
+@registration_router.callback_query(F.data == "profile_delete")
+async def profile_delete_handler(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(RegistrationFSM.confirming_deletion)
+    await callback.message.edit_text("Ви впевнені, що хочете видалити свій профіль? Ця дія невідворотна.", reply_markup=create_delete_confirm_keyboard())
+    await callback.answer()
+
+@registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_yes")
+async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    if not callback.from_user or not callback.message: return
+    user_id = callback.from_user.id
+    deleted = await delete_user_by_telegram_id(user_id)
+    if deleted:
+        await callback.message.edit_text("Ваш профіль було успішно видалено.")
+        await callback.answer("Профіль видалено", show_alert=True)
+    else:
+        await callback.message.edit_text("Не вдалося видалити профіль. Можливо, його вже не існує.")
+    await state.clear()
+
+@registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_no")
+async def cancel_delete_profile(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    if not callback.from_user or not callback.message: return
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    await state.clear()
+    await show_profile_menu(bot, chat_id, user_id, message_to_delete_id=callback.message.message_id)
+    await callback.answer("Дію скасовано.")
+
 def register_registration_handlers(dp: Dispatcher):
+    """Реєструє всі обробники, пов'язані з процесом реєстрації."""
     dp.include_router(registration_router)
-    logger.info("✅ Обробники реєстрації та профілю успішно зареєстровано.")
+    logger.info("✅ Обробники для реєстрації та управління профілем успішно зареєстровано.")
