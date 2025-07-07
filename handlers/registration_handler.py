@@ -6,7 +6,7 @@
 import html
 import base64
 import io
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import asyncio
 
 from aiogram import Bot, F, Router, types, Dispatcher
@@ -16,6 +16,7 @@ from aiogram.types import Message, CallbackQuery, PhotoSize, InputMediaPhoto, In
 from aiogram.exceptions import TelegramAPIError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from enum import Enum, auto
+from aiohttp.client_exceptions import ClientResponseError
 
 from states.user_states import RegistrationFSM
 from keyboards.inline_keyboards import (
@@ -103,7 +104,7 @@ async def show_profile_carousel(bot: Bot, chat_id: int, user_id: int, carousel_t
         return
 
     available_types = [c for c in CarouselType if user_data.get(CAROUSEL_TYPE_TO_KEY.get(c))]
-    if not available_types: available_types.append(CarouselType.AVATAR) # Завжди показуємо аватар
+    if not available_types: available_types.append(CarouselType.AVATAR)
     if carousel_type not in available_types: carousel_type = available_types[0]
 
     file_id = user_data.get(CAROUSEL_TYPE_TO_KEY.get(carousel_type)) or DEFAULT_IMAGE_URL
@@ -137,7 +138,6 @@ async def safe_edit_message(message: Optional[Message], new_text: str, reply_mar
     except TelegramAPIError as e:
         logger.error(f"Безпечне редагування не вдалося: {e}. Повідомлення ID: {message.message_id}")
 
-# === ОСНОВНИЙ ОБРОБНИК КОМАНДИ /profile ===
 @registration_router.message(Command("profile"))
 async def cmd_profile(message: Message, state: FSMContext, bot: Bot):
     if not message.from_user: return
@@ -153,7 +153,6 @@ async def cmd_profile(message: Message, state: FSMContext, bot: Bot):
         sent_msg = await bot.send_message(message.chat.id, "👋 Вітаю! Схоже, ви тут уперше.\n\nДля створення профілю, надішліть скріншот вашого ігрового профілю.")
         await state.update_data(last_bot_message_id=sent_msg.message_id)
 
-# === ОБРОБНИКИ КНОПОК КАРУСЕЛІ ТА МЕНЮ ===
 @registration_router.callback_query(F.data.startswith("carousel:goto:"))
 async def carousel_navigation_handler(callback: CallbackQuery, bot: Bot):
     if not (callback.message and callback.from_user): return
@@ -180,9 +179,6 @@ async def expand_menu_handler(callback: CallbackQuery):
     if callback.message:
         await safe_edit_message(callback.message, callback.message.caption, create_expanded_profile_menu_keyboard())
     await callback.answer()
-
-# === FSM ДЛЯ ОНОВЛЕННЯ ПРОФІЛЮ ===
-# ... (решта коду залишається без змін, але я його повністю переглянув і додав виправлення)
 
 @registration_router.callback_query(F.data.in_({"profile_update_basic", "profile_add_stats", "profile_add_heroes", "profile_add_avatar"}))
 async def profile_update_fsm_start(callback: CallbackQuery, state: FSMContext):
@@ -270,14 +266,19 @@ async def fsm_photo_handler(message: Message, state: FSMContext, bot: Bot):
             await thinking_msg.edit_text("🛡️ <b>Конфлікт!</b> Цей профіль вже зареєстрований.")
         else:
             await thinking_msg.edit_text("❌ Помилка збереження даних.")
+    except ClientResponseError as e:
+        if e.status == 404:
+            logger.warning(f"Помилка завантаження файлу (404 Not Found): {e}. Ймовірно, file_id застарів.")
+            await thinking_msg.edit_text("❌ Не вдалося завантажити файл. Можливо, він застарів. Будь ласка, надішліть зображення ще раз.")
+        else:
+            logger.exception("Критична помилка обробки фото (ClientResponseError):")
+            await thinking_msg.edit_text("Сталася неочікувана помилка при завантаженні. Спробуйте ще раз.")
     except Exception as e:
         logger.exception("Критична помилка обробки фото:")
         await thinking_msg.edit_text("Сталася неочікувана помилка.")
     finally:
         await state.clear()
 
-
-# === ОБРОБНИКИ ВИДАЛЕННЯ ===
 @registration_router.callback_query(F.data == "profile_delete")
 async def delete_profile_start(callback: CallbackQuery, state: FSMContext):
     if callback.message:
