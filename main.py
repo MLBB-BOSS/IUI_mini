@@ -23,6 +23,8 @@ from handlers.general_handlers import (
 )
 from handlers.vision_handlers import register_vision_handlers
 from handlers.registration_handler import register_registration_handlers
+# 🆕 Імпортуємо нову функцію для каруселі профілю
+from handlers.profile_handler import register_profile_carousel_handlers
 
 
 async def sanitize_database():
@@ -89,7 +91,7 @@ async def sanitize_database():
 
 async def main() -> None:
     """Головна функція запуску бота."""
-    bot_version = "v3.2.0 (Sanitize)"
+    bot_version = "v4.0.0 (Profile Carousel)"
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
     # ❗️ Виконуємо санітарну обробку та ініціалізацію
@@ -106,6 +108,8 @@ async def main() -> None:
     register_registration_handlers(dp)
     register_vision_handlers(dp, cmd_go_handler_func=cmd_go) 
     register_general_handlers(dp)
+    # 🆕 Реєструємо обробники для каруселі профілю
+    register_profile_carousel_handlers(dp)
 
     # Реєстрація глобального обробника помилок
     @dp.errors()
@@ -127,7 +131,9 @@ async def main() -> None:
                     f"🆔 @{bot_info.username}",
                     f"⏰ {launch_time_kyiv}",
                     "✨ <b>Зміни:</b>",
-                    "  • Додано санітарну обробку БД для видалення дублікатів.",
+                    "  • Додано інтерактивну карусель профілю",
+                    "  • Реалізовано збереження зображень профілю",
+                    "  • Додано можливість встановлення кастомної аватарки",
                     "🟢 Готовий до роботи!"
                 ]
                 admin_message = "\n".join(admin_message_lines)
