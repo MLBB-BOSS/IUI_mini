@@ -15,7 +15,11 @@ from aiohttp.client_exceptions import ClientResponseError
 from config import CLOUDINARY_URL, logger
 
 # Явна ініціалізація Cloudinary з URL
-cloudinary.config_from_url(CLOUDINARY_URL)
+try:
+    cloudinary.config(cloudinary_url=CLOUDINARY_URL)
+    logger.info("Cloudinary конфігурація виконана з CLOUDINARY_URL.")
+except Exception as e:
+    logger.error(f"Не вдалося сконфігурувати Cloudinary з CLOUDINARY_URL: {e}", exc_info=True)
 
 
 class FileResilienceManager:
@@ -27,7 +31,6 @@ class FileResilienceManager:
 
     async def __aenter__(self) -> "FileResilienceManager":
         """Асинхронний context manager для HTTP сесії."""
-        # Якщо в майбутньому знадобляться HTTP запити, можна ініціалізувати session тут
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -80,7 +83,6 @@ class FileResilienceManager:
                     "upload_params": upload_params
                 }
             )
-            # Виконуємо синхронний виклик в окремому потоці
             result = await asyncio.to_thread(
                 cloudinary.uploader.upload,
                 image_bytes,
@@ -91,7 +93,6 @@ class FileResilienceManager:
                 extra={"user_id": user_id, "result": result}
             )
 
-            # Перший преференційний URL
             optimized_url = result.get("secure_url") or result.get("url")
             if optimized_url:
                 logger.info(
@@ -99,19 +100,16 @@ class FileResilienceManager:
                 )
                 return optimized_url
 
-            # Якщо жодного URL немає
             logger.warning(
                 f"No URL returned for user {user_id}, type={file_type}",
                 extra={"result_keys": list(result.keys())}
             )
         except ClientResponseError as e:
-            # Конкретна помилка від Cloudinary HTTP
             logger.error(
                 f"Cloudinary HTTP error for user {user_id}, type={file_type}: {e}",
                 exc_info=True
             )
         except Exception as e:
-            # Усі інші помилки
             logger.exception(
                 f"Unexpected error optimizing image for user {user_id}, type={file_type}: {e}"
             )
