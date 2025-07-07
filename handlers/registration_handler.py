@@ -175,8 +175,22 @@ async def profile_update_handler(callback: CallbackQuery, state: FSMContext):
     new_state, text = state_map[callback.data]
     await state.set_state(new_state)
     if callback.message:
-        await callback.message.edit_text(text)
-        await state.update_data(last_bot_message_id=callback.message.message_id)
+        # ✅ ВИПРАВЛЕНО: Використовуємо edit_caption для фото-повідомлень
+        try:
+            if callback.message.photo:
+                await callback.message.edit_caption(caption=text)
+            else: # Якщо це раптом текстове повідомлення, використовуємо edit_text
+                await callback.message.edit_text(text)
+            await state.update_data(last_bot_message_id=callback.message.message_id)
+        except TelegramAPIError as e:
+            logger.error(f"Не вдалося оновити повідомлення для запуску FSM: {e}. Видаляємо старе і надсилаємо нове.")
+            try:
+                await callback.message.delete()
+            except TelegramAPIError:
+                pass
+            sent_msg = await callback.bot.send_message(callback.message.chat.id, text)
+            await state.update_data(last_bot_message_id=sent_msg.message_id)
+
     await callback.answer()
 
 @registration_router.message(StateFilter(RegistrationFSM.waiting_for_basic_photo, RegistrationFSM.waiting_for_stats_photo, RegistrationFSM.waiting_for_heroes_photo, RegistrationFSM.waiting_for_avatar_photo), F.photo)
