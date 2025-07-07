@@ -158,20 +158,27 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
             await state.update_data(last_bot_message_id=thinking_msg.message_id)
             return
 
-        # ... (логіка обробки даних)
         update_data = {}
         if analysis_mode == 'basic':
             update_data = {
                 'nickname': analysis_result.get('game_nickname'), 'player_id': int(analysis_result.get('mlbb_id_server', '0 (0)').split(' ')[0]),
                 'server_id': int(analysis_result.get('mlbb_id_server', '0 (0)').split('(')[1].replace(')', '')), 'current_rank': analysis_result.get('highest_rank_season'),
-                'total_matches': analysis_result.get('matches_played')}
+                'total_matches': analysis_result.get('matches_played'),
+                'profile_screenshot_file_id': largest_photo.file_id
+            }
         elif analysis_mode == 'stats':
             main_indicators = analysis_result.get('main_indicators', {})
-            update_data = {'total_matches': main_indicators.get('matches_played'), 'win_rate': main_indicators.get('win_rate')}
+            update_data = {
+                'total_matches': main_indicators.get('matches_played'), 'win_rate': main_indicators.get('win_rate'),
+                'stats_screenshot_file_id': largest_photo.file_id
+            }
         elif analysis_mode == 'heroes':
             heroes_list = analysis_result.get('favorite_heroes', [])
             heroes_str = ", ".join([h.get('hero_name', '') for h in heroes_list if h.get('hero_name')])
-            update_data = {'favorite_heroes': heroes_str}
+            update_data = {
+                'favorite_heroes': heroes_str,
+                'heroes_screenshot_file_id': largest_photo.file_id
+            }
         
         update_data = {k: v for k, v in update_data.items() if v is not None}
         
@@ -183,7 +190,6 @@ async def handle_profile_update_photo(message: Message, state: FSMContext, bot: 
             
         update_data['telegram_id'] = user_id
         
-        # 🧠 ОНОВЛЕНА ЛОГІКА ЗБЕРЕЖЕННЯ
         status = await add_or_update_user(update_data)
         
         if status == 'success':
