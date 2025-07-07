@@ -179,3 +179,17 @@ def create_delete_confirm_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="❌ Ні", callback_data="delete_confirm_no")
     builder.adjust(2)
     return builder.as_markup()
+
+def create_expanded_profile_menu_keyboard() -> InlineKeyboardMarkup:
+    """
+    Створює розширену клавіатуру для меню профілю (2 колонки).
+    """
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Профіль", callback_data="profile_update_basic")
+    builder.button(text="📈 Статистика", callback_data="profile_add_stats")
+    builder.button(text="🦸 Герої", callback_data="profile_add_heroes")
+    builder.button(text="🖼️ Аватар", callback_data="profile_add_avatar")
+    builder.button(text="🗑️ Видалити", callback_data="profile_delete")
+    builder.button(text="◀️ Назад", callback_data="profile_menu_collapse")
+    builder.adjust(2, 2, 2)
+    return builder.as_markup()
