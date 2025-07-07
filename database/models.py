@@ -20,13 +20,22 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     telegram_id = Column(BigInteger, unique=True, nullable=False, index=True)
     nickname = Column(String(100), nullable=False)
-    player_id = Column(BigInteger, unique=True, nullable=False) # 🧠 ДОДАНО unique=True
+    player_id = Column(BigInteger, unique=True, nullable=False)  # 🧠 ДОДАНО unique=True
     server_id = Column(Integer, nullable=False)
     current_rank = Column(String(50))
     total_matches = Column(Integer)
     win_rate = Column(Float)
-    favorite_heroes = Column(String(255)) # Зберігаємо як рядок, розділений комою
-    chat_history = Column(JSON, nullable=True) # 🧠 НОВЕ ПОЛЕ ДЛЯ ІСТОРІЇ ЧАТУ
+    favorite_heroes = Column(String(255))  # Зберігаємо як рядок, розділений комою
+    chat_history = Column(JSON, nullable=True)  # 🧠 НОВЕ ПОЛЕ ДЛЯ ІСТОРІЇ ЧАТУ
+
+    # 🆕 Поля для зберігання скріншотів у registration flow
+    basic_profile_file_id = Column(String(255), nullable=True)
+    basic_profile_permanent_url = Column(String(512), nullable=True)
+    stats_photo_file_id = Column(String(255), nullable=True)
+    stats_photo_permanent_url = Column(String(512), nullable=True)
+    heroes_photo_file_id = Column(String(255), nullable=True)
+    heroes_photo_permanent_url = Column(String(512), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
