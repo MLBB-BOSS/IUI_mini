@@ -31,7 +31,7 @@ from utils.file_manager import file_resilience_manager
 
 registration_router = Router()
 
-# === ЛОГІКА КАРУСЕЛІ (без змін) ===
+# === ЛОГІКА КАРУСЕЛІ (зміни для використання permanent_url) ===
 
 class CarouselType(Enum):
     AVATAR = auto()
@@ -46,14 +46,12 @@ CAROUSEL_TYPE_TO_KEY = {
     CarouselType.HEROES: "heroes_screenshot_file_id",
 }
 
-# Додаємо ключі для постійних URL
 CAROUSEL_TYPE_TO_PERMANENT_KEY = {
     CarouselType.AVATAR: "custom_avatar_permanent_url",
     CarouselType.PROFILE: "profile_screenshot_permanent_url",
     CarouselType.STATS: "stats_screenshot_permanent_url",
     CarouselType.HEROES: "heroes_screenshot_permanent_url",
 }
-
 
 CAROUSEL_TYPE_TO_TITLE = {
     CarouselType.AVATAR: "🎭 Аватар",
@@ -66,7 +64,6 @@ DEFAULT_IMAGE_URL = "https://res.cloudinary.com/ha1pzppgf/image/upload/v17482864
 
 def create_carousel_keyboard(current_type: CarouselType, available_types: list[CarouselType]):
     builder = InlineKeyboardBuilder()
-    # ... (код клавіатури без змін)
     current_idx = available_types.index(current_type)
     nav_row = [
         InlineKeyboardButton(text="◀️", callback_data=f"carousel:goto:{available_types[current_idx - 1].name}") if current_idx > 0 else InlineKeyboardButton(text="•", callback_data="carousel:noop"),
@@ -82,9 +79,7 @@ def create_carousel_keyboard(current_type: CarouselType, available_types: list[C
     builder.row(InlineKeyboardButton(text="🚪 Закрити", callback_data="profile_carousel_close"))
     return builder.as_markup()
 
-
 def format_profile_info(user_data: Dict[str, Any]) -> str:
-    # ... (код форматування без змін)
     nickname = html.escape(user_data.get('nickname', 'Невідомо'))
     player_id = user_data.get('player_id', 'N/A')
     server_id = user_data.get('server_id', 'N/A')
@@ -97,19 +92,15 @@ def format_profile_info(user_data: Dict[str, Any]) -> str:
             f"🏆 {rank} | 📊 {win_rate_str} ({matches} матчів)\n"
             f"🦸 <b>Герої:</b> {heroes}")
 
-
 def get_caption_for_carousel_type(carousel_type: CarouselType, user_data: Dict[str, Any]) -> str:
-    # ... (код без змін)
     title = CAROUSEL_TYPE_TO_TITLE.get(carousel_type, "Профіль")
     if carousel_type == CarouselType.AVATAR:
         return f"<b>{title}</b>\n\n{format_profile_info(user_data)}"
     return f"<b>{title}</b>"
 
-
 async def show_profile_carousel(bot: Bot, chat_id: int, user_id: int, carousel_type: CarouselType = CarouselType.AVATAR, message_to_edit: Optional[Message] = None):
     user_data = await get_user_by_telegram_id(user_id)
     if not user_data:
-        # ... (код без змін)
         text = "Профіль не знайдено. Будь ласка, пройдіть реєстрацію з /profile."
         if message_to_edit and not message_to_edit.photo:
             await message_to_edit.edit_text(text)
@@ -119,48 +110,49 @@ async def show_profile_carousel(bot: Bot, chat_id: int, user_id: int, carousel_t
         return
 
     # ✅ ЛОГІКА: Використовуємо постійний URL, якщо він є
-    available_types = [c for c in CarouselType if user_data.get(CAROUSEL_TYPE_TO_KEY.get(c)) or user_data.get(CAROUSEL_TYPE_TO_PERMANENT_KEY.get(c))]
+    available_types = [c for c in CarouselType if user_data.get(CAROUSEL_TYPE_TO_PERMANENT_KEY.get(c)) or user_data.get(CAROUSEL_TYPE_TO_KEY.get(c))]
     if not available_types: available_types.append(CarouselType.AVATAR)
     if carousel_type not in available_types: carousel_type = available_types[0]
 
-    file_id = user_data.get(CAROUSEL_TYPE_TO_PERMANENT_KEY.get(carousel_type)) or user_data.get(CAROUSEL_TYPE_TO_KEY.get(carousel_type)) or DEFAULT_IMAGE_URL
+    permanent_url = user_data.get(CAROUSEL_TYPE_TO_PERMANENT_KEY.get(carousel_type))
+    temp_file_id = user_data.get(CAROUSEL_TYPE_TO_KEY.get(carousel_type))
+    
+    # Пріоритет: постійний URL > тимчасовий file_id > дефолтне зображення
+    media_source = permanent_url or temp_file_id or DEFAULT_IMAGE_URL
+    
     keyboard = create_carousel_keyboard(carousel_type, available_types)
     caption = get_caption_for_carousel_type(carousel_type, user_data)
-    media = InputMediaPhoto(media=file_id, caption=caption)
+    media = InputMediaPhoto(media=media_source, caption=caption)
 
     try:
-        # ... (решта коду без змін)
         if message_to_edit:
+            # Якщо редагуємо повідомлення, яке вже є фото
             if message_to_edit.photo:
                 await bot.edit_message_media(chat_id, message_to_edit.message_id, media, reply_markup=keyboard)
+            # Якщо редагуємо текстове повідомлення (напр. "Обробляю...")
             else:
                 await message_to_edit.delete()
-                await bot.send_photo(chat_id, file_id, caption=caption, reply_markup=keyboard)
+                await bot.send_photo(chat_id, media_source, caption=caption, reply_markup=keyboard)
         else:
-            await bot.send_photo(chat_id, file_id, caption=caption, reply_markup=keyboard)
+            await bot.send_photo(chat_id, media_source, caption=caption, reply_markup=keyboard)
     except TelegramAPIError as e:
         logger.error(f"Помилка показу/оновлення каруселі: {e}. Спроба відправити заново.")
-        if "message to edit not found" in str(e):
-             await bot.send_photo(chat_id, file_id, caption=caption, reply_markup=keyboard)
+        if "message to edit not found" in str(e).lower():
+             await bot.send_photo(chat_id, media_source, caption=caption, reply_markup=keyboard)
         else:
+            # Спроба відправити з іншим джерелом, якщо перше не спрацювало (напр. permanent_url валідний, а file_id - ні)
+            fallback_source = temp_file_id if media_source == permanent_url else permanent_url
+            if fallback_source:
+                 try:
+                    await bot.send_photo(chat_id, fallback_source, caption=caption, reply_markup=keyboard)
+                    return
+                 except TelegramAPIError:
+                    pass
             await bot.send_message(chat_id, "Не вдалося оновити профіль. Спробуйте ще раз.")
-
-
-async def safe_edit_message(message: Optional[Message], new_text: str, reply_markup=None):
-    # ... (код без змін)
-    if not message: return
-    try:
-        if message.photo:
-            await message.edit_caption(caption=new_text, reply_markup=reply_markup)
-        else:
-            await message.edit_text(text=new_text, reply_markup=reply_markup)
-    except TelegramAPIError as e:
-        logger.error(f"Безпечне редагування не вдалося: {e}. Повідомлення ID: {message.message_id}")
 
 # === ОСНОВНІ ОБРОБНИКИ ===
 @registration_router.message(Command("profile"))
 async def cmd_profile(message: Message, state: FSMContext, bot: Bot):
-    # ... (код без змін)
     if not message.from_user: return
     await state.clear()
     try: await message.delete()
@@ -173,10 +165,9 @@ async def cmd_profile(message: Message, state: FSMContext, bot: Bot):
         sent_msg = await bot.send_message(message.chat.id, "👋 Вітаю! Схоже, ви тут уперше.\n\nДля створення профілю, надішліть скріншот вашого ігрового профілю.")
         await state.update_data(last_bot_message_id=sent_msg.message_id)
 
+# ... (інші обробники кнопок каруселі та меню)
 
-# ... (інші обробники кнопок каруселі та меню залишаються без змін)
-
-# === ГОЛОВНИЙ ОБРОБНИК FSM ДЛЯ ФОТО ===
+# === ✅✅✅ ГОЛОВНИЙ ОНОВЛЕНИЙ ОБРОБНИК FSM ДЛЯ ФОТО ✅✅✅ ===
 @registration_router.message(StateFilter(RegistrationFSM.waiting_for_basic_photo, RegistrationFSM.waiting_for_stats_photo, RegistrationFSM.waiting_for_heroes_photo, RegistrationFSM.waiting_for_avatar_photo), F.photo)
 async def fsm_photo_handler(message: Message, state: FSMContext, bot: Bot):
     if not (message.photo and message.from_user): return
@@ -186,7 +177,6 @@ async def fsm_photo_handler(message: Message, state: FSMContext, bot: Bot):
     last_bot_msg_id = state_data.get("last_bot_message_id")
     current_state_str = await state.get_state()
     
-    # Видаляємо повідомлення користувача і старе повідомлення бота
     try: await message.delete()
     except TelegramAPIError: pass
     if last_bot_msg_id:
@@ -198,8 +188,12 @@ async def fsm_photo_handler(message: Message, state: FSMContext, bot: Bot):
     try:
         largest_photo = max(message.photo, key=lambda p: p.file_size or 0)
         
-        # ✅ КРОК 1: Завантажуємо байти зображення
+        # ✅ КРОК 1: Завантажуємо байти зображення з Telegram
         image_bytes_io = await bot.download_file(largest_photo.file_id)
+        if not image_bytes_io:
+            await thinking_msg.edit_text("❌ Не вдалося завантажити файл з серверів Telegram.")
+            return
+            
         image_bytes = image_bytes_io.read()
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
@@ -213,28 +207,35 @@ async def fsm_photo_handler(message: Message, state: FSMContext, bot: Bot):
         }
         analysis_mode, file_type_prefix = mode_map[current_state_str]
 
-        # ✅ КРОК 2: Паралельно аналізуємо і зберігаємо
+        # ✅ КРОК 2: Паралельно аналізуємо (OpenAI) і зберігаємо (Cloudinary)
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt, file_resilience_manager:
-            if analysis_mode != 'avatar':
-                analysis_task = gpt.analyze_user_profile(image_base64, mode=analysis_mode)
-                storage_task = file_resilience_manager.optimize_and_store_image(image_bytes, user_id, file_type_prefix)
-                analysis_result, permanent_url = await asyncio.gather(analysis_task, storage_task)
-            else: # Для аватара аналіз не потрібен
+            # Для аватара аналіз не потрібен, тільки збереження
+            if analysis_mode == 'avatar':
                 analysis_result = {}
                 permanent_url = await file_resilience_manager.optimize_and_store_image(image_bytes, user_id, file_type_prefix)
+            else:
+                analysis_task = gpt.analyze_user_profile(image_base64, mode=analysis_mode)
+                storage_task = file_resilience_manager.optimize_and_store_image(image_bytes, user_id, file_type_prefix)
+                
+                # Очікуємо виконання обох завдань
+                analysis_result, permanent_url = await asyncio.gather(analysis_task, storage_task)
 
         # ✅ КРОК 3: Обробляємо результати
+        if not permanent_url:
+            await thinking_msg.edit_text("❌ Помилка збереження зображення. Спробуйте ще раз.")
+            return
+
         if analysis_mode != 'avatar' and (not analysis_result or 'error' in analysis_result):
             error_msg = analysis_result.get('error', 'Не вдалося розпізнати дані.')
-            await thinking_msg.edit_text(f"❌ Помилка: {error_msg}")
+            await thinking_msg.edit_text(f"❌ Помилка аналізу: {error_msg}")
             return
         
         # Заповнюємо дані на основі аналізу
         if analysis_mode == 'basic':
             update_data.update({
                 'nickname': analysis_result.get('game_nickname'), 
-                'player_id': int(analysis_result.get('mlbb_id_server', '0 (0)').split(' ')[0]), 
-                'server_id': int(analysis_result.get('mlbb_id_server', '0 (0)').split('(')[1].replace(')', '')), 
+                'player_id': int(str(analysis_result.get('mlbb_id_server', '0 (0)')).split(' ')[0]), 
+                'server_id': int(str(analysis_result.get('mlbb_id_server', '0 (0)')).split('(')[1].replace(')', '')), 
                 'current_rank': analysis_result.get('highest_rank_season'), 
                 'total_matches': analysis_result.get('matches_played')
             })
@@ -245,23 +246,23 @@ async def fsm_photo_handler(message: Message, state: FSMContext, bot: Bot):
             heroes_list = analysis_result.get('favorite_heroes', [])
             update_data['favorite_heroes'] = ", ".join([h.get('hero_name', '') for h in heroes_list if h.get('hero_name')])
 
-        # Додаємо file_id та permanent_url
+        # Додаємо тимчасовий file_id та постійний permanent_url
         update_data[f'{file_type_prefix}_file_id'] = largest_photo.file_id
         update_data[f'{file_type_prefix}_permanent_url'] = permanent_url
         
-        # ✅ КРОК 4: Зберігаємо в БД
+        # ✅ КРОК 4: Зберігаємо всі дані в БД
         status = await add_or_update_user({k: v for k, v in update_data.items() if v is not None})
         
         if status == 'success':
             await show_profile_carousel(bot, message.chat.id, user_id, message_to_edit=thinking_msg)
         elif status == 'conflict':
-            await thinking_msg.edit_text("🛡️ <b>Конфлікт!</b> Цей профіль вже зареєстрований.")
+            await thinking_msg.edit_text("🛡️ <b>Конфлікт!</b> Цей ігровий профіль (Player ID) вже зареєстрований іншим користувачем.")
         else:
-            await thinking_msg.edit_text("❌ Помилка збереження даних.")
+            await thinking_msg.edit_text("❌ Сталася невідома помилка під час збереження даних.")
 
     except ClientResponseError as e:
         if e.status == 404:
-            logger.warning(f"Помилка завантаження файлу (404 Not Found): {e}. Ймовірно, file_id застарів.")
+            logger.warning(f"Помилка завантаження файлу (404 Not Found): {e}. Ймовірно, повідомлення було видалено занадто швидко.")
             enhanced_error_msg = file_resilience_manager.get_enhanced_error_message(message.from_user.first_name)
             await thinking_msg.edit_text(enhanced_error_msg)
         else:
@@ -269,11 +270,13 @@ async def fsm_photo_handler(message: Message, state: FSMContext, bot: Bot):
             await thinking_msg.edit_text("Сталася неочікувана помилка при завантаженні. Спробуйте ще раз.")
     except Exception as e:
         logger.exception("Критична помилка обробки фото:")
-        await thinking_msg.edit_text("Сталася неочікувана помилка.")
+        await thinking_msg.edit_text("Сталася неочікувана системна помилка.")
     finally:
         await state.clear()
 
-# ... (решта файлу без змін)
+
 def register_registration_handlers(dp: Dispatcher):
     dp.include_router(registration_router)
     logger.info("✅ Обробники реєстрації та профілю успішно зареєстровано.")
+
+# ... (решта коду, якщо є)
