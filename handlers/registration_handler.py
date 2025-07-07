@@ -175,11 +175,10 @@ async def profile_update_handler(callback: CallbackQuery, state: FSMContext):
     new_state, text = state_map[callback.data]
     await state.set_state(new_state)
     if callback.message:
-        # ✅ ВИПРАВЛЕНО: Використовуємо edit_caption для фото-повідомлень
         try:
             if callback.message.photo:
                 await callback.message.edit_caption(caption=text)
-            else: # Якщо це раптом текстове повідомлення, використовуємо edit_text
+            else:
                 await callback.message.edit_text(text)
             await state.update_data(last_bot_message_id=callback.message.message_id)
         except TelegramAPIError as e:
@@ -209,7 +208,12 @@ async def handle_profile_photo_update(message: Message, state: FSMContext, bot: 
         await state.clear()
         return
 
-    thinking_msg = await bot.edit_message_text(message.chat.id, last_bot_msg_id, text="Обробляю ваше зображення... 🤖")
+    # ✅ ВИПРАВЛЕНО: Використовуємо іменовані аргументи для уникнення TypeError
+    thinking_msg = await bot.edit_message_text(
+        text="Обробляю ваше зображення... 🤖",
+        chat_id=message.chat.id,
+        message_id=last_bot_msg_id
+    )
     
     try:
         largest_photo = max(message.photo, key=lambda p: p.file_size or 0)
