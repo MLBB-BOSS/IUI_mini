@@ -258,3 +258,66 @@ def register_registration_handlers(dp: Dispatcher):
     """Реєструє всі обробники, пов'язані з процесом реєстрації."""
     dp.include_router(registration_router)
     logger.info("✅ Обробники для реєстрації та управління профілем успішно зареєстровано.")
+
+# --- Додаємо новий обробник для кнопки "Аватар" ---
+@registration_router.callback_query(F.data == "profile_add_avatar")
+async def profile_add_avatar_handler(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(RegistrationFSM.waiting_for_avatar_photo)
+    await callback.message.edit_text(
+        "Надішліть зображення, яке ви хочете використовувати як аватар профілю.\n\n"
+        "💡 <i>Порада: Найкраще виглядатиме квадратне зображення з вашим героєм або логотипом.</i>"
+    )
+    await state.update_data(last_bot_message_id=callback.message.message_id)
+    await callback.answer()
+
+# --- Додаємо спеціальний обробник для аватарки ---
+@registration_router.message(RegistrationFSM.waiting_for_avatar_photo, F.photo)
+async def handle_avatar_photo(message: Message, state: FSMContext, bot: Bot):
+    if not message.photo or not message.from_user: return
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    state_data = await state.get_data()
+    last_bot_message_id = state_data.get("last_bot_message_id")
+
+    try:
+        await message.delete()
+    except TelegramAPIError as e:
+        logger.warning(f"Не вдалося видалити фото-аватарку від {user_id}: {e}")
+
+    if not last_bot_message_id:
+        await bot.send_message(chat_id, "Сталася помилка стану. Почніть знову з /profile.")
+        await state.clear()
+        return
+
+    thinking_msg = await bot.edit_message_text(
+        chat_id=chat_id, 
+        message_id=last_bot_message_id, 
+        text="Зберігаю вашу нову аватарку... 🖼️"
+    )
+    
+    try:
+        largest_photo: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
+        
+        # Для аватарки нам не потрібен аналіз через Vision API,
+        # ми просто зберігаємо file_id в базу даних
+        update_data = {
+            'telegram_id': user_id,
+            'custom_avatar_file_id': largest_photo.file_id
+        }
+        
+        status = await add_or_update_user(update_data)
+        
+        if status == 'success':
+            await thinking_msg.edit_text("✅ Аватарку успішно оновлено!")
+            # Невелика пауза перед показом меню, щоб користувач побачив повідомлення про успіх
+            await asyncio.sleep(1.5)
+            await show_profile_menu(bot, chat_id, user_id, message_to_delete_id=thinking_msg.message_id)
+        else: # status == 'error' або 'conflict'
+            await thinking_msg.edit_text("❌ Не вдалося оновити аватарку. Спробуйте ще раз пізніше.")
+
+    except Exception as e:
+        logger.exception(f"Критична помилка під час збереження аватарки:")
+        if thinking_msg: await thinking_msg.edit_text("Сталася неочікувана помилка. Спробуйте ще раз.")
+    finally:
+        await state.clear()
