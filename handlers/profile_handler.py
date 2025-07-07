@@ -1,258 +1,300 @@
+#handlers/registration_handler.py
 """
-Обробники для відображення профілю користувача у форматі каруселі.
-Реалізує інтерактивну навігацію між різними скріншотами профілю.
+Обробники для процесу реєстрації та управління профілем користувача
+з реалізацією логіки "Чистого чату".
 """
+import html
+import base64
+import io
+from typing import Dict, Any
 import asyncio
-from enum import Enum, auto
-from typing import Dict, Any, Optional, List, Union, Tuple
 
-from aiogram import Bot, Router, F, Dispatcher
-from aiogram.filters import Command
+from aiogram import Bot, F, Router, types, Dispatcher
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import (
-    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, 
-    InputMediaPhoto
-)
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import Message, CallbackQuery, PhotoSize
 from aiogram.exceptions import TelegramAPIError
 
-from database.crud import get_user_by_telegram_id
-from config import logger
-from keyboards.inline_keyboards import create_profile_menu_keyboard, create_expanded_profile_menu_keyboard
-# ✅ ВИПРАВЛЕНО: Додано відсутній імпорт
 from states.user_states import RegistrationFSM
+from keyboards.inline_keyboards import (
+    create_profile_menu_keyboard,
+    create_expanded_profile_menu_keyboard,
+    create_delete_confirm_keyboard
+)
+from services.openai_service import MLBBChatGPT
+from database.crud import add_or_update_user, get_user_by_telegram_id, delete_user_by_telegram_id
+from config import OPENAI_API_KEY, logger
+# ❗️ Імпортуємо функцію каруселі для виклику після оновлення
+from handlers.profile_handler import show_profile_carousel
 
-# Створюємо новий роутер
-profile_carousel_router = Router()
+registration_router = Router()
 
-# Визначаємо константи для типів каруселі
-class CarouselType(Enum):
-    """Типи слайдів в каруселі профілю."""
-    AVATAR = auto()  # Кастомний аватар (початковий слайд)
-    PROFILE = auto()  # Скріншот основного профілю
-    STATS = auto()    # Скріншот статистики
-    HEROES = auto()   # Скріншот улюблених героїв
-
-# Маппінг типів каруселі на ключі в даних користувача
-CAROUSEL_TYPE_TO_KEY = {
-    CarouselType.AVATAR: "custom_avatar_file_id",
-    CarouselType.PROFILE: "profile_screenshot_file_id",
-    CarouselType.STATS: "stats_screenshot_file_id",
-    CarouselType.HEROES: "heroes_screenshot_file_id",
-}
-
-# Заголовки для кожного типу слайду
-CAROUSEL_TYPE_TO_TITLE = {
-    CarouselType.AVATAR: "🎭 Аватар",
-    CarouselType.PROFILE: "👤 Основний профіль",
-    CarouselType.STATS: "📊 Статистика",
-    CarouselType.HEROES: "🦸 Улюблені герої",
-}
-
-# Спеціальний placeholder для відсутнього зображення
-DEFAULT_IMAGE_URL = "https://res.cloudinary.com/ha1pzppgf/image/upload/v1748286434/file_0000000017a46246b78bf97e2ecd9348_zuk16r.png"
-
-def create_carousel_keyboard(
-    current_type: CarouselType,
-    available_types: List[CarouselType]
-) -> InlineKeyboardMarkup:
-    """
-    Створює клавіатуру для навігації каруселлю профілю.
-    """
-    builder = InlineKeyboardBuilder()
-    current_idx = available_types.index(current_type)
-    
-    nav_row = []
-    if current_idx > 0:
-        prev_type = available_types[current_idx - 1]
-        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"carousel:goto:{prev_type.name}"))
-    else:
-        nav_row.append(InlineKeyboardButton(text="•", callback_data="carousel:noop"))
-    
-    position_text = f"{current_idx + 1}/{len(available_types)}"
-    nav_row.append(InlineKeyboardButton(text=position_text, callback_data="carousel:noop"))
-    
-    if current_idx < len(available_types) - 1:
-        next_type = available_types[current_idx + 1]
-        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"carousel:goto:{next_type.name}"))
-    else:
-        nav_row.append(InlineKeyboardButton(text="•", callback_data="carousel:noop"))
-        
-    builder.row(*nav_row)
-    
-    edit_callback_map = {
-        CarouselType.AVATAR: "profile_add_avatar",
-        CarouselType.PROFILE: "profile_update_basic",
-        CarouselType.STATS: "profile_add_stats",
-        CarouselType.HEROES: "profile_add_heroes",
-    }
-    
-    builder.row(
-        InlineKeyboardButton(text="🔄 Оновити це фото", callback_data=edit_callback_map[current_type]),
-        InlineKeyboardButton(text="⚙️ Більше опцій", callback_data="profile_menu_expand")
-    )
-    
-    builder.row(InlineKeyboardButton(text="🚪 Закрити", callback_data="profile_carousel_close"))
-    
-    return builder.as_markup()
-
-def format_profile_info(user_data: Dict[str, Any]) -> str:
-    """Форматує основну інформацію профілю."""
-    nickname = user_data.get('nickname', 'Невідомо')
-    player_id = user_data.get('player_id', 'Невідомо')
-    server_id = user_data.get('server_id', 'Невідомо')
-    rank = user_data.get('current_rank', 'Невідомо')
+def format_profile_display(user_data: Dict[str, Any]) -> str:
+    """Форматує дані профілю для відображення користувачу."""
+    nickname = html.escape(user_data.get('nickname', 'Не вказано'))
+    player_id = user_data.get('player_id', 'N/A')
+    server_id = user_data.get('server_id', 'N/A')
+    current_rank = html.escape(user_data.get('current_rank', 'Не вказано'))
+    total_matches = user_data.get('total_matches', 'Не вказано')
     win_rate = user_data.get('win_rate')
-    win_rate_str = f"{win_rate}%" if win_rate is not None else "Невідомо"
-    matches = user_data.get('total_matches', 'Невідомо')
-    heroes = user_data.get('favorite_heroes', 'Не вказано')
-    
+    win_rate_str = f"{win_rate}%" if win_rate is not None else "Не вказано"
+    heroes = user_data.get('favorite_heroes')
+    heroes_str = html.escape(heroes) if heroes else "Не вказано"
     return (
-        f"👤 <b>{nickname}</b>\n"
+        f"<b>Ваш профіль:</b>\n\n"
+        f"👤 <b>Нікнейм:</b> {nickname}\n"
         f"🆔 <b>ID:</b> {player_id} ({server_id})\n"
-        f"🏆 <b>Ранг:</b> {rank}\n"
-        f"📊 <b>WR:</b> {win_rate_str} ({matches} матчів)\n"
-        f"🦸 <b>Герої:</b> {heroes}"
+        f"🏆 <b>Ранг:</b> {current_rank}\n"
+        f"⚔️ <b>Матчів:</b> {total_matches}\n"
+        f"📊 <b>WR:</b> {win_rate_str}\n"
+        f"🦸 <b>Улюблені герої:</b> {heroes_str}"
     )
 
-def get_caption_for_carousel_type(
-    carousel_type: CarouselType,
-    user_data: Dict[str, Any]
-) -> str:
-    """Генерує підпис для слайду."""
-    title = CAROUSEL_TYPE_TO_TITLE.get(carousel_type, "Профіль")
-    if carousel_type == CarouselType.AVATAR:
-        return f"<b>{title}</b>\n\n{format_profile_info(user_data)}"
-    return f"<b>{title}</b>"
+# Ця функція більше не буде викликатися напряму, але може бути корисною
+async def show_profile_menu(bot: Bot, chat_id: int, user_id: int, message_to_delete_id: int = None):
+    """Відображає профіль, видаляючи попереднє повідомлення для чистоти чату."""
+    if message_to_delete_id:
+        try:
+            await bot.delete_message(chat_id, message_to_delete_id)
+        except TelegramAPIError as e:
+            logger.warning(f"Не вдалося видалити проміжне повідомлення {message_to_delete_id}: {e}")
 
-async def show_profile_carousel(
-    bot: Bot,
-    chat_id: int,
-    user_id: int,
-    carousel_type: CarouselType = CarouselType.AVATAR,
-    message_to_edit: Optional[Message] = None,
-) -> Union[Message, bool]:
-    """Відображає або оновлює слайд каруселі профілю."""
-    user_data = await get_user_by_telegram_id(user_id)
-    if not user_data:
-        text = "Профіль не знайдено. Спробуйте /profile для реєстрації."
-        if message_to_edit:
-            await message_to_edit.edit_text(text)
-        else:
-            return await bot.send_message(chat_id, text)
-        return False
-    
-    available_types = [c_type for c_type in CarouselType if CAROUSEL_TYPE_TO_KEY.get(c_type) and user_data.get(CAROUSEL_TYPE_TO_KEY[c_type])]
-    if not available_types:
-        available_types = [CarouselType.AVATAR]
-    
-    if carousel_type not in available_types:
-        carousel_type = available_types[0]
-    
-    file_id_key = CAROUSEL_TYPE_TO_KEY.get(carousel_type)
-    file_id = user_data.get(file_id_key) if file_id_key else None
-    if not file_id:
-        file_id = DEFAULT_IMAGE_URL
-    
-    keyboard = create_carousel_keyboard(carousel_type, available_types)
-    caption = get_caption_for_carousel_type(carousel_type, user_data)
-    
-    media = InputMediaPhoto(media=file_id, caption=caption, parse_mode="HTML")
-    
-    try:
-        if message_to_edit:
-            if message_to_edit.photo:
-                await bot.edit_message_media(
-                    chat_id=chat_id, message_id=message_to_edit.message_id,
-                    media=media, reply_markup=keyboard
-                )
-            else:
-                await message_to_edit.delete()
-                await bot.send_photo(
-                    chat_id=chat_id, photo=file_id, caption=caption,
-                    reply_markup=keyboard, parse_mode="HTML"
-                )
-            return True
-        else:
-            return await bot.send_photo(
-                chat_id=chat_id, photo=file_id, caption=caption,
-                reply_markup=keyboard, parse_mode="HTML"
-            )
-    except TelegramAPIError as e:
-        logger.error(f"Помилка відображення каруселі: {e}")
-        error_text = "Не вдалося відобразити зображення профілю. Спробуйте оновити профіль."
-        if message_to_edit:
-            await message_to_edit.edit_text(error_text)
-        else:
-            return await bot.send_message(chat_id, error_text)
-        return False
+    # Замість старого меню, тепер показуємо карусель
+    await show_profile_carousel(bot, chat_id, user_id)
 
-@profile_carousel_router.message(Command("profile"))
-async def cmd_profile_carousel(message: Message, bot: Bot, state: FSMContext):
-    """Обробник команди /profile з відображенням каруселі."""
-    if not message.from_user: return
-    
-    await state.clear()
+# 🗑️ ВИДАЛЕНО ОБРОБНИК CMD_PROFILE, щоб уникнути конфлікту
+
+# --- Обробники для кнопок меню, що запускають FSM ---
+@registration_router.callback_query(F.data == "profile_update_basic")
+async def profile_update_basic_handler(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(RegistrationFSM.waiting_for_basic_photo)
+    await callback.message.edit_text("Будь ласка, надішліть новий скріншот вашого основного профілю (де нікнейм, ID, ранг).")
+    await state.update_data(last_bot_message_id=callback.message.message_id)
+    await callback.answer()
+
+@registration_router.callback_query(F.data == "profile_add_stats")
+async def profile_add_stats_handler(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(RegistrationFSM.waiting_for_stats_photo)
+    await callback.message.edit_text("Надішліть скріншот вашої загальної статистики (розділ 'Statistics' -> 'All Seasons').")
+    await state.update_data(last_bot_message_id=callback.message.message_id)
+    await callback.answer()
+
+@registration_router.callback_query(F.data == "profile_add_heroes")
+async def profile_add_heroes_handler(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(RegistrationFSM.waiting_for_heroes_photo)
+    await callback.message.edit_text("Надішліть скріншот ваших улюблених героїв (розділ 'Favorite' -> 'All Seasons', топ-3).")
+    await state.update_data(last_bot_message_id=callback.message.message_id)
+    await callback.answer()
+
+# --- Універсальний обробник фото, що реалізує "Чистий чат" ---
+@registration_router.message(StateFilter(RegistrationFSM.waiting_for_basic_photo, RegistrationFSM.waiting_for_stats_photo, RegistrationFSM.waiting_for_heroes_photo), F.photo)
+async def handle_profile_update_photo(message: Message, state: FSMContext, bot: Bot):
+    if not message.photo or not message.from_user: return
     user_id = message.from_user.id
     chat_id = message.chat.id
     
+    state_data = await state.get_data()
+    last_bot_message_id = state_data.get("last_bot_message_id")
+
     try:
         await message.delete()
     except TelegramAPIError as e:
-        logger.warning(f"Не вдалося видалити команду /profile: {e}")
-    
-    user_data = await get_user_by_telegram_id(user_id)
-    if not user_data:
-        await state.set_state(RegistrationFSM.waiting_for_basic_photo)
-        sent_message = await bot.send_message(
-            chat_id,
-            "👋 Вітаю! Схоже, ви тут уперше.\n\n"
-            "Для створення профілю, будь ласка, надішліть мені скріншот "
-            "вашого ігрового профілю (головна сторінка). 📸"
-        )
-        await state.update_data(last_bot_message_id=sent_message.message_id)
-    else:
-        await show_profile_carousel(bot, chat_id, user_id)
+        logger.warning(f"Не вдалося видалити фото-повідомлення від {user_id}: {e}")
 
-@profile_carousel_router.callback_query(F.data.startswith("carousel:goto:"))
-async def carousel_navigation(callback: CallbackQuery, bot: Bot):
-    """Обробник кнопок навігації каруселі."""
-    if not callback.message or not callback.from_user:
-        return await callback.answer("Помилка: повідомлення не знайдено")
+    current_state_str = await state.get_state()
+    mode_map = {
+        RegistrationFSM.waiting_for_basic_photo.state: 'basic',
+        RegistrationFSM.waiting_for_stats_photo.state: 'stats',
+        RegistrationFSM.waiting_for_heroes_photo.state: 'heroes'
+    }
+    analysis_mode = mode_map.get(current_state_str)
+    if not (analysis_mode and last_bot_message_id):
+        await bot.send_message(chat_id, "Сталася помилка стану. Почніть знову з /profile.")
+        await state.clear()
+        return
+
+    thinking_msg = await bot.edit_message_text(chat_id=chat_id, message_id=last_bot_message_id, text=f"Аналізую ваш скріншот ({analysis_mode})... 🤖")
     
     try:
-        carousel_type = CarouselType[callback.data.split(":")[-1]]
-    except (KeyError, ValueError):
-        return await callback.answer("Помилка: невідомий тип слайду")
-    
-    if await show_profile_carousel(bot, callback.message.chat.id, callback.from_user.id, carousel_type, callback.message):
-        await callback.answer()
-    else:
-        await callback.answer("Не вдалося відобразити цей тип слайду")
+        largest_photo: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
+        file_info = await bot.get_file(largest_photo.file_id)
+        if not file_info.file_path:
+            await thinking_msg.edit_text("Не вдалося отримати інформацію про файл.")
+            return
 
-@profile_carousel_router.callback_query(F.data == "profile_carousel_close")
-async def close_profile_carousel(callback: CallbackQuery):
-    """Обробник кнопки закриття каруселі."""
-    if not callback.message: return await callback.answer("Помилка")
-    try:
-        await callback.message.delete()
-        await callback.answer("Меню закрито")
-    except TelegramAPIError:
-        await callback.answer("Не вдалося закрити меню", show_alert=True)
+        image_bytes_io = await bot.download_file(file_info.file_path)
+        image_base64 = base64.b64encode(image_bytes_io.read()).decode('utf-8')
 
-@profile_carousel_router.callback_query(F.data == "carousel:noop")
-async def carousel_noop(callback: CallbackQuery):
-    """Обробник "пустих" кнопок."""
-    await callback.answer()
+        async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+            analysis_result = await gpt.analyze_user_profile(image_base64, mode=analysis_mode)
 
-@profile_carousel_router.callback_query(F.data == "profile_menu_expand")
-async def expand_menu_from_carousel(callback: CallbackQuery):
-    """Розгортає меню налаштувань з каруселі."""
-    if not callback.message: return await callback.answer("Помилка")
+        if not analysis_result or 'error' in analysis_result:
+            error_msg = analysis_result.get('error', 'Не вдалося розпізнати дані.')
+            await thinking_msg.edit_text(f"❌ Помилка аналізу: {error_msg}\n\nБудь ласка, надішліть коректний скріншот або скасуйте операцію.")
+            await state.set_state(current_state_str) # Повертаємо стан для повторної спроби
+            await state.update_data(last_bot_message_id=thinking_msg.message_id)
+            return
+
+        update_data = {}
+        if analysis_mode == 'basic':
+            update_data = {
+                'nickname': analysis_result.get('game_nickname'), 'player_id': int(analysis_result.get('mlbb_id_server', '0 (0)').split(' ')[0]),
+                'server_id': int(analysis_result.get('mlbb_id_server', '0 (0)').split('(')[1].replace(')', '')), 'current_rank': analysis_result.get('highest_rank_season'),
+                'total_matches': analysis_result.get('matches_played'),
+                'profile_screenshot_file_id': largest_photo.file_id
+            }
+        elif analysis_mode == 'stats':
+            main_indicators = analysis_result.get('main_indicators', {})
+            update_data = {
+                'total_matches': main_indicators.get('matches_played'), 'win_rate': main_indicators.get('win_rate'),
+                'stats_screenshot_file_id': largest_photo.file_id
+            }
+        elif analysis_mode == 'heroes':
+            heroes_list = analysis_result.get('favorite_heroes', [])
+            heroes_str = ", ".join([h.get('hero_name', '') for h in heroes_list if h.get('hero_name')])
+            update_data = {
+                'favorite_heroes': heroes_str,
+                'heroes_screenshot_file_id': largest_photo.file_id
+            }
+        
+        update_data = {k: v for k, v in update_data.items() if v is not None}
+        
+        if not update_data or (analysis_mode == 'basic' and 'player_id' not in update_data):
+            await thinking_msg.edit_text("Не вдалося витягти ключових даних (особливо Player ID). Спробуйте ще раз.")
+            await state.set_state(current_state_str)
+            await state.update_data(last_bot_message_id=thinking_msg.message_id)
+            return
+            
+        update_data['telegram_id'] = user_id
+        
+        status = await add_or_update_user(update_data)
+        
+        if status == 'success':
+            # ✅ ВИПРАВЛЕНО: Показуємо карусель замість старого меню
+            await show_profile_carousel(bot, chat_id, user_id, message_to_edit=thinking_msg)
+        elif status == 'conflict':
+            await thinking_msg.edit_text(
+                "🛡️ <b>Конфлікт реєстрації!</b>\n\n"
+                "Цей ігровий профіль вже зареєстровано іншим акаунтом Telegram. "
+                "Один ігровий профіль може бути прив'язаний лише до одного акаунту Telegram."
+            )
+        else: # status == 'error'
+            await thinking_msg.edit_text("❌ Сталася невідома помилка при збереженні даних. Спробуйте пізніше.")
+
+    except Exception as e:
+        logger.exception(f"Критична помилка під час обробки фото (mode={analysis_mode}):")
+        if thinking_msg: await thinking_msg.edit_text("Сталася неочікувана помилка. Спробуйте ще раз.")
+    finally:
+        await state.clear()
+
+
+# --- Обробники управління меню ---
+@registration_router.callback_query(F.data == "profile_menu_expand")
+async def profile_menu_expand_handler(callback: CallbackQuery):
+    # Ця логіка тепер знаходиться в profile_handler, але залишаємо для сумісності
+    # якщо стара клавіатура десь залишиться
     await callback.message.edit_reply_markup(reply_markup=create_expanded_profile_menu_keyboard())
     await callback.answer()
 
-def register_profile_carousel_handlers(dp: Dispatcher):
-    """Реєструє обробники для каруселі профілю."""
-    dp.include_router(profile_carousel_router)
-    logger.info("✅ Обробники для каруселі профілю успішно зареєстровано.")
+@registration_router.callback_query(F.data == "profile_menu_collapse")
+async def profile_menu_collapse_handler(callback: CallbackQuery):
+    await callback.message.edit_reply_markup(reply_markup=create_profile_menu_keyboard())
+    await callback.answer()
+
+@registration_router.callback_query(F.data == "profile_menu_close")
+async def profile_menu_close_handler(callback: CallbackQuery):
+    await callback.message.delete()
+    await callback.answer("Меню закрито.")
+
+# --- Обробники видалення ---
+@registration_router.callback_query(F.data == "profile_delete")
+async def profile_delete_handler(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(RegistrationFSM.confirming_deletion)
+    await callback.message.edit_text("Ви впевнені, що хочете видалити свій профіль? Ця дія невідворотна.", reply_markup=create_delete_confirm_keyboard())
+    await callback.answer()
+
+@registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_yes")
+async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    if not callback.from_user or not callback.message: return
+    user_id = callback.from_user.id
+    deleted = await delete_user_by_telegram_id(user_id)
+    if deleted:
+        await callback.message.edit_text("Ваш профіль було успішно видалено.")
+        await callback.answer("Профіль видалено", show_alert=True)
+    else:
+        await callback.message.edit_text("Не вдалося видалити профіль. Можливо, його вже не існує.")
+    await state.clear()
+
+@registration_router.callback_query(RegistrationFSM.confirming_deletion, F.data == "delete_confirm_no")
+async def cancel_delete_profile(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    if not callback.from_user or not callback.message: return
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    await state.clear()
+    # ✅ ВИПРАВЛЕНО: Показуємо карусель замість старого меню
+    await show_profile_carousel(bot, chat_id, user_id, message_to_edit=callback.message)
+    await callback.answer("Дію скасовано.")
+
+def register_registration_handlers(dp: Dispatcher):
+    """Реєструє всі обробники, пов'язані з процесом реєстрації."""
+    dp.include_router(registration_router)
+    logger.info("✅ Обробники для реєстрації та управління профілем успішно зареєстровано.")
+
+# --- Додаємо новий обробник для кнопки "Аватар" ---
+@registration_router.callback_query(F.data == "profile_add_avatar")
+async def profile_add_avatar_handler(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(RegistrationFSM.waiting_for_avatar_photo)
+    await callback.message.edit_text(
+        "Надішліть зображення, яке ви хочете використовувати як аватар профілю.\n\n"
+        "💡 <i>Порада: Найкраще виглядатиме квадратне зображення з вашим героєм або логотипом.</i>"
+    )
+    await state.update_data(last_bot_message_id=callback.message.message_id)
+    await callback.answer()
+
+# --- Додаємо спеціальний обробник для аватарки ---
+@registration_router.message(RegistrationFSM.waiting_for_avatar_photo, F.photo)
+async def handle_avatar_photo(message: Message, state: FSMContext, bot: Bot):
+    if not message.photo or not message.from_user: return
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    state_data = await state.get_data()
+    last_bot_message_id = state_data.get("last_bot_message_id")
+
+    try:
+        await message.delete()
+    except TelegramAPIError as e:
+        logger.warning(f"Не вдалося видалити фото-аватарку від {user_id}: {e}")
+
+    if not last_bot_message_id:
+        await bot.send_message(chat_id, "Сталася помилка стану. Почніть знову з /profile.")
+        await state.clear()
+        return
+
+    thinking_msg = await bot.edit_message_text(
+        chat_id=chat_id, 
+        message_id=last_bot_message_id, 
+        text="Зберігаю вашу нову аватарку... 🖼️"
+    )
+    
+    try:
+        largest_photo: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
+        
+        update_data = {
+            'telegram_id': user_id,
+            'custom_avatar_file_id': largest_photo.file_id
+        }
+        
+        status = await add_or_update_user(update_data)
+        
+        if status == 'success':
+            # ✅ ВИПРАВЛЕНО: Показуємо карусель замість повідомлення
+            await show_profile_carousel(bot, chat_id, user_id, message_to_edit=thinking_msg)
+        else:
+            await thinking_msg.edit_text("❌ Не вдалося оновити аватарку. Спробуйте ще раз пізніше.")
+
+    except Exception as e:
+        logger.exception(f"Критична помилка під час збереження аватарки:")
+        if thinking_msg: await thinking_msg.edit_text("Сталася неочікувана помилка. Спробуйте ще раз.")
+    finally:
+        await state.clear()
