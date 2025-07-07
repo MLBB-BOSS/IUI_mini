@@ -19,6 +19,8 @@ from aiogram.exceptions import TelegramAPIError
 from database.crud import get_user_by_telegram_id
 from config import logger
 from keyboards.inline_keyboards import create_profile_menu_keyboard, create_expanded_profile_menu_keyboard
+# ✅ ВИПРАВЛЕНО: Додано відсутній імпорт
+from states.user_states import RegistrationFSM
 
 # Створюємо новий роутер
 profile_carousel_router = Router()
@@ -158,22 +160,20 @@ async def show_profile_carousel(
     media = InputMediaPhoto(media=file_id, caption=caption, parse_mode="HTML")
     
     try:
-        # ✅ ВИПРАВЛЕНО: обробка редагування текстового повідомлення
         if message_to_edit:
-            # Якщо вихідне повідомлення - фото, редагуємо медіа
             if message_to_edit.photo:
                 await bot.edit_message_media(
                     chat_id=chat_id, message_id=message_to_edit.message_id,
                     media=media, reply_markup=keyboard
                 )
-            else: # Якщо вихідне повідомлення - текст, видаляємо його і надсилаємо фото
+            else:
                 await message_to_edit.delete()
                 await bot.send_photo(
                     chat_id=chat_id, photo=file_id, caption=caption,
                     reply_markup=keyboard, parse_mode="HTML"
                 )
             return True
-        else: # Відправляємо нове повідомлення
+        else:
             return await bot.send_photo(
                 chat_id=chat_id, photo=file_id, caption=caption,
                 reply_markup=keyboard, parse_mode="HTML"
@@ -192,7 +192,7 @@ async def cmd_profile_carousel(message: Message, bot: Bot, state: FSMContext):
     """Обробник команди /profile з відображенням каруселі."""
     if not message.from_user: return
     
-    await state.clear() # Очищуємо стан на випадок, якщо користувач був у іншому процесі
+    await state.clear()
     user_id = message.from_user.id
     chat_id = message.chat.id
     
