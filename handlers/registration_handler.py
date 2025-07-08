@@ -61,33 +61,33 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
     """
     pages: List[Dict[str, str]] = []
 
-    # 1) Basic
-    caption = format_profile_display(user_data)
+    # Basic
     pages.append({
         "photo": user_data.get("basic_profile_permanent_url", ""),
-        "caption": caption,
+        "caption": format_profile_display(user_data),
     })
-
-    # 2) Stats
+    # Stats
     stats_url = user_data.get("stats_photo_permanent_url")
     if stats_url:
-        stats_caption = (
-            "<b>Статистика:</b>\n"
-            f"⚔️ Матчів: {user_data.get('total_matches', 'N/A')}\n"
-            f"📊 WR: {user_data.get('win_rate', 'N/A')}%"
-        )
-        pages.append({"photo": stats_url, "caption": stats_caption})
-
-    # 3) Heroes
+        pages.append({
+            "photo": stats_url,
+            "caption": (
+                f"<b>Статистика:</b>\n"
+                f"⚔️ Матчів: {user_data.get('total_matches', 'N/A')}\n"
+                f"📊 WR: {user_data.get('win_rate', 'N/A')}%"
+            ),
+        })
+    # Heroes
     heroes_url = user_data.get("heroes_photo_permanent_url")
     if heroes_url:
-        heroes_caption = (
-            "<b>Улюблені герої:</b> "
-            f"{html.escape(user_data.get('favorite_heroes', 'Не вказано'))}"
-        )
-        pages.append({"photo": heroes_url, "caption": heroes_caption})
-
-    # 4) Avatar
+        pages.append({
+            "photo": heroes_url,
+            "caption": (
+                f"<b>Улюблені герої:</b> "
+                f"{html.escape(user_data.get('favorite_heroes', 'Не вказано'))}"
+            ),
+        })
+    # Avatar
     avatar_url = user_data.get("avatar_permanent_url")
     if avatar_url:
         pages.append({"photo": avatar_url, "caption": "<b>Ваш аватар</b>"})
@@ -102,27 +102,37 @@ async def show_profile_carousel(
     user_id: int,
     page_index: int,
 ) -> None:
-    """Редагує inline-повідомлення для показу каруселі профілю."""
+    """
+    Рендерить carousel: міняє фото+підпис і оновлює клавіатуру.
+    Кліпує page_index у межі [0, total_pages-1].
+    """
     user_data = await get_user_by_telegram_id(user_id) or {}
     pages = await build_profile_pages(user_data)
     total = len(pages)
+
+    # Захист від виходу за межі
+    if page_index < 0 or page_index >= total:
+        logger.warning(
+            f"Requested carousel page_index={page_index} out of range [0..{total-1}]. Clamping."
+        )
+        page_index = max(0, min(page_index, total - 1))
+
     page = pages[page_index]
 
-    # Якщо є фото, оновлюємо медіа
+    # Оновлюємо медіа (якщо фото)
     if page["photo"]:
         media = InputMediaPhoto(media=page["photo"])
         await bot.edit_message_media(
             chat_id=chat_id, message_id=message_id, media=media
         )
-
-    # Оновлюємо підпис та клавіатуру
+    # Оновлюємо підпис і клавіатуру
     await bot.edit_message_caption(
         chat_id=chat_id,
         message_id=message_id,
         caption=page["caption"],
         parse_mode="HTML",
         reply_markup=create_profile_menu_overview_keyboard(
-            page_index + 1, total
+            current_page=page_index + 1, total_pages=total
         ),
     )
 
@@ -147,7 +157,6 @@ async def show_profile_menu(
 
     url = user_data.get("basic_profile_permanent_url")
     caption = format_profile_display(user_data)
-
     if url:
         await bot.send_photo(
             chat_id,
@@ -170,18 +179,14 @@ async def cmd_profile(message: Message, state: FSMContext, bot: Bot) -> None:
     """Обробник команди /profile."""
     if not message.from_user:
         return
-
     user_id = message.from_user.id
     chat_id = message.chat.id
-
     try:
         await message.delete()
     except TelegramAPIError:
         pass
-
     await state.clear()
-    existing = await get_user_by_telegram_id(user_id)
-    if existing:
+    if await get_user_by_telegram_id(user_id):
         await show_profile_menu(bot, chat_id, user_id)
     else:
         await state.set_state(RegistrationFSM.waiting_for_basic_photo)
@@ -202,7 +207,6 @@ async def profile_update_basic_handler(
         await callback.message.delete()
     except TelegramAPIError:
         pass
-
     sent = await callback.bot.send_message(
         callback.message.chat.id,
         "Будь ласка, надішліть новий скріншот основної сторінки профілю."
@@ -221,7 +225,6 @@ async def profile_add_stats_handler(
         await callback.message.delete()
     except TelegramAPIError:
         pass
-
     sent = await callback.bot.send_message(
         callback.message.chat.id,
         "Надішліть, будь ласка, скріншот розділу 'Statistics' → 'All Seasons'."
@@ -240,7 +243,6 @@ async def profile_add_heroes_handler(
         await callback.message.delete()
     except TelegramAPIError:
         pass
-
     sent = await callback.bot.send_message(
         callback.message.chat.id,
         "Надішліть, будь ласка, скріншот розділу 'Favorite' → 'All Seasons' (топ-3)."
@@ -263,12 +265,10 @@ async def handle_profile_update_photo(
     """Універсальний обробник отримання фото в станах реєстрації."""
     if not message.from_user or not message.photo:
         return
-
     user_id = message.from_user.id
     chat_id = message.chat.id
     data = await state.get_data()
     last_id = data.get("last_bot_message_id")
-
     try:
         await message.delete()
     except TelegramAPIError:
@@ -279,38 +279,30 @@ async def handle_profile_update_photo(
         RegistrationFSM.waiting_for_stats_photo.state: "stats",
         RegistrationFSM.waiting_for_heroes_photo.state: "heroes",
     }.get(await state.get_state())
-
     if not mode or not last_id:
         await bot.send_message(chat_id, "Сталася помилка. Спробуйте /profile ще раз.")
         await state.clear()
         return
 
-    # показуємо "обробляю..."
     thinking = await bot.edit_message_text(
         chat_id=chat_id,
         message_id=last_id,
         text=f"Аналізую ваш скріншот ({mode})... 🤖"
     )
-
     try:
-        # Завантаження та зберігання
         largest: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
         file_info = await bot.get_file(largest.file_id)
         img_bytes = (await bot.download_file(file_info.file_path)).read()
         url = await file_resilience_manager.optimize_and_store_image(img_bytes, user_id, mode)
-
-        # Аналіз через OpenAI
         b64 = base64.b64encode(img_bytes).decode("utf-8")
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
             result = await gpt.analyze_user_profile(b64, mode=mode)
-
         if not result or "error" in result:
             err = result.get("error", "Не вдалося розпізнати дані.")
             await thinking.edit_text(f"❌ Помилка аналізу: {err}")
             await state.clear()
             return
 
-        # Підготовка та запис у БД
         payload: Dict[str, Any] = {"telegram_id": user_id}
         if mode == "basic":
             ml = result.get("mlbb_id_server", "0 (0)").split()
@@ -347,7 +339,6 @@ async def handle_profile_update_photo(
             await thinking.edit_text("🛡️ Конфлікт: цей профіль вже зареєстровано іншим акаунтом.")
         else:
             await thinking.edit_text("❌ Помилка збереження. Спробуйте пізніше.")
-
     except Exception as e:
         logger.exception(f"Критична помилка обробки фото ({mode}): {e}")
         await thinking.edit_text("Сталася неочікувана помилка. Спробуйте ще раз.")
@@ -355,7 +346,6 @@ async def handle_profile_update_photo(
         await state.clear()
 
 
-# Меню та навігація каруселі
 @registration_router.callback_query(F.data == "profile_show_menu")
 async def profile_show_menu_handler(callback: CallbackQuery) -> None:
     """Відкриває карусель з першої сторінки профілю."""
@@ -399,7 +389,7 @@ async def profile_next_page_handler(callback: CallbackQuery) -> None:
 
 @registration_router.callback_query(F.data == "profile_hide_menu")
 async def profile_hide_menu_handler(callback: CallbackQuery) -> None:
-    """Приховує розгорнуте меню та повертає однокнопковий режим."""
+    """Приховує меню та повертає однокнопковий режим."""
     await callback.message.edit_reply_markup(
         reply_markup=create_profile_menu_keyboard()
     )
@@ -440,7 +430,7 @@ async def confirm_delete_profile(
 async def cancel_delete_profile(
     callback: CallbackQuery, state: FSMContext, bot: Bot
 ) -> None:
-    """Скасування процедури видалення профілю."""
+    """Скасування видалення профілю."""
     uid = callback.from_user.id
     chat = callback.message.chat.id
     await state.clear()
@@ -449,6 +439,6 @@ async def cancel_delete_profile(
 
 
 def register_registration_handlers(dp: Router) -> None:
-    """Реєструє обробники реєстрації та профілю."""
+    """Реєструє обробники реєстрації профілю."""
     dp.include_router(registration_router)
     logger.info("✅ Обробники реєстрації профілю зареєстровано.")
