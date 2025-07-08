@@ -34,15 +34,20 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
     nickname = html.escape(user_data.get("nickname", "Не вказано"))
     pid = user_data.get("player_id", "N/A")
     sid = user_data.get("server_id", "N/A")
-    rank = html.escape(user_data.get("current_rank", "Не вказано"))
-    loc = html.escape(user_data.get("location", "Не вказано"))
-    squad = html.escape(user_data.get("squad_name", "Не вказано"))
+    rank = html.escape(user_data.get("current_rank", "Не вказано") or "Не вказано")
+    # Скорочуємо "Міфічна Слава" до "Міф"
+    if "Міфічна" in rank:
+        rank_short = "Міф"
+    else:
+        rank_short = rank
+    loc = html.escape(user_data.get("location", "Не вказано") or "Не вказано")
+    squad = html.escape(user_data.get("squad_name", "Не вказано") or "Не вказано")
 
     lines = [
         "🎮 <b>ПРОФІЛЬ ГРАВЦЯ</b>",
         f"👤 <b>Нікнейм:</b> {nickname}",
         f"🆔 <b>ID:</b> {pid} ({sid})",
-        f"🏆 <b>Ранг:</b> {rank}",
+        f"🏆 <b>Ранг:</b> {rank_short}",
         f"🌍 <b>Локація:</b> {loc}",
         f"🛡️ <b>Сквад:</b> {squad}",
     ]
@@ -101,17 +106,18 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
     # Top-3 heroes
     heroes_url = user_data.get("heroes_photo_permanent_url")
     if heroes_url:
-        medals = ["🥇", "🥈", "🥉"]
+        medals = ["🏅", "🥈", "🥉"]
         lines = ["🦸 <b>ТОП-3 ГЕРОЇ</b>"]
         for i in range(1, 4):
             name = user_data.get(f"hero{i}_name")
-            matches_h = user_data.get(f"hero{i}_matches", 0)
-            win_rate_h = user_data.get(f"hero{i}_win_rate", 0.0)
+            wr_i = user_data.get(f"hero{i}_win_rate", 0.0)
+            matches_i = user_data.get(f"hero{i}_matches", 0)
             if name:
                 lines.append(f"{medals[i-1]} <b>{html.escape(name)}</b>")
-                lines.append(
-                    f"  🎯 Матчів: <b>{matches_h}</b> | 📊 WR: <b>{win_rate_h:.1f}%</b>"
-                )
+                lines.append(f"📊 WR: <b>{wr_i:.1f}%</b>")
+                lines.append(f"🎯 Матчів: <b>{matches_i}</b>")
+                if i < 3:
+                    lines.append("")  # пустий рядок між героями
         content = "\n".join(lines)
         pages.append({
             "photo": heroes_url,
@@ -306,12 +312,11 @@ async def handle_profile_update_photo(
     except TelegramAPIError:
         pass
 
-    mode_map = {
+    mode = {
         RegistrationFSM.waiting_for_basic_photo.state: "basic",
         RegistrationFSM.waiting_for_stats_photo.state: "stats",
         RegistrationFSM.waiting_for_heroes_photo.state: "heroes",
-    }
-    mode = mode_map.get(await state.get_state())
+    }.get(await state.get_state())
     if not mode or not last_id:
         await bot.send_message(cid, "Сталася помилка. Спробуйте /profile ще раз.")
         await state.clear()
@@ -351,9 +356,9 @@ async def handle_profile_update_photo(
             })
         elif mode == "stats":
             mi = result.get("main_indicators", {})
+            det = result.get("details_panel", {})
             achL = result.get("achievements_left_column", {})
             achR = result.get("achievements_right_column", {})
-            det = result.get("details_panel", {})
             payload.update({
                 "total_matches": mi.get("matches_played"),
                 "win_rate": mi.get("win_rate"),
