@@ -1,5 +1,5 @@
 """
-Обробники для процесу реєстрації та оновлення профілю користувача
+Обробники для реєстрації та оновлення профілю користувача
 з реалізацією каруселі слайдів з покращеним візуальним оформленням.
 """
 import html
@@ -36,14 +36,13 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
     rank = html.escape(user_data.get("current_rank", "Не вказано") or "Не вказано")
     matches = user_data.get("total_matches", "Н/Д")
     win = user_data.get("win_rate")
-    wr = f"{win}%" if win is not None else "Н/Д"
+    wr = f"{win:.1f}%" if isinstance(win, (int, float)) else "Н/Д"
     likes = user_data.get("likes_received", "Н/Д")
     loc = html.escape(user_data.get("location", "Не вказано") or "Не вказано")
     squad = html.escape(user_data.get("squad_name", "Не вказано") or "Не вказано")
 
-    # Емодзі-акценти
     rank_emoji = "🏆" if "Міфічна" in rank else "🎖️"
-    wr_emoji = "🔥" if win and win >= 60 else "📊"
+    wr_emoji = "🔥" if isinstance(win, (int, float)) and win >= 60 else "📊"
 
     lines = [
         "🎮 <b>ПРОФІЛЬ ГРАВЦЯ</b>",
@@ -71,8 +70,7 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
 
 async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]:
     """
-    Формує карусель профілю: basic → stats → heroes → avatar,
-    кожна сторінка з власним заголовком та емодзі.
+    Формує карусель профілю: basic → stats → heroes → avatar.
     """
     pages: List[Dict[str, str]] = []
 
@@ -85,12 +83,12 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
     # Detailed stats
     stats_url = user_data.get("stats_photo_permanent_url")
     if stats_url:
-        mvp = user_data.get('mvp_count', 0)
-        legendary = user_data.get('legendary_count', 0)
-        maniac = user_data.get('maniac_count', 0)
-        kda = user_data.get('kda_ratio', 0.0)
-        gold = user_data.get('avg_gold_per_min', 0)
-        dmg = user_data.get('avg_hero_dmg_per_min', 0)
+        mvp = user_data.get("mvp_count", 0)
+        legendary = user_data.get("legendary_count", 0)
+        maniac = user_data.get("maniac_count", 0)
+        kda = user_data.get("kda_ratio", 0.0)
+        gold = user_data.get("avg_gold_per_min", 0)
+        dmg = user_data.get("avg_hero_dmg_per_min", 0)
 
         stats_lines = [
             "📊 <b>ДЕТАЛЬНА СТАТИСТИКА</b>",
@@ -117,7 +115,9 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
             win_rate = user_data.get(f"hero{i}_win_rate", 0.0)
             if name:
                 hero_lines.append(f"┃ {medals[i-1]} <b>{html.escape(name)}</b>")
-                hero_lines.append(f"┃    🎯 Матчів: <b>{matches}</b> | 📊 WR: <b>{win_rate:.1f}%</b>")
+                hero_lines.append(
+                    f"┃    🎯 Матчів: <b>{matches}</b> | 📊 WR: <b>{win_rate:.1f}%</b>"
+                )
                 if i < 3:
                     hero_lines.append("┃")
         hero_lines.append("┗━━━━━━━━━━━━━━━━━━━┛")
@@ -142,7 +142,7 @@ async def show_profile_carousel(
     page_index: int,
 ) -> None:
     """
-    Оновлює карусель: змінює фото, підпис та клавіатуру відповідно до сторінки.
+    Оновлює карусель: змінює фото, підпис та клавіатуру.
     """
     user_data = await get_user_by_telegram_id(user_id) or {}
     pages = await build_profile_pages(user_data)
@@ -153,21 +153,23 @@ async def show_profile_carousel(
     idx = max(0, min(page_index, total - 1))
     page = pages[idx]
 
-    # Замінюємо фото
     if page["photo"]:
         media = InputMediaPhoto(media=page["photo"])
         try:
-            await bot.edit_message_media(chat_id=chat_id, message_id=message_id, media=media)
+            await bot.edit_message_media(
+                chat_id=chat_id, message_id=message_id, media=media
+            )
         except TelegramAPIError as e:
             logger.warning(f"Не вдалося оновити media: {e}")
 
-    # Замінюємо підпис і оновлюємо меню
     await bot.edit_message_caption(
         chat_id=chat_id,
         message_id=message_id,
         caption=page["caption"],
         parse_mode="HTML",
-        reply_markup=create_profile_menu_overview_keyboard(current_page=idx+1, total_pages=total),
+        reply_markup=create_profile_menu_overview_keyboard(
+            current_page=idx + 1, total_pages=total
+        ),
     )
 
 
@@ -194,11 +196,20 @@ async def show_profile_menu(
     url = user_data.get("basic_profile_permanent_url")
     caption = format_profile_display(user_data)
     if url:
-        await bot.send_photo(chat_id, url, caption=caption, parse_mode="HTML",
-                             reply_markup=create_profile_menu_keyboard())
+        await bot.send_photo(
+            chat_id,
+            url,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=create_profile_menu_keyboard(),
+        )
     else:
-        await bot.send_message(chat_id, caption, parse_mode="HTML",
-                               reply_markup=create_profile_menu_keyboard())
+        await bot.send_message(
+            chat_id,
+            caption,
+            parse_mode="HTML",
+            reply_markup=create_profile_menu_keyboard(),
+        )
 
 
 @registration_router.message(Command("profile"))
@@ -295,18 +306,21 @@ async def handle_profile_update_photo(
     except TelegramAPIError:
         pass
 
-    mode = {
+    mode_map = {
         RegistrationFSM.waiting_for_basic_photo.state: "basic",
         RegistrationFSM.waiting_for_stats_photo.state: "stats",
         RegistrationFSM.waiting_for_heroes_photo.state: "heroes",
-    }.get(await state.get_state())
+    }
+    mode = mode_map.get(await state.get_state())
     if not mode or not last_id:
         await bot.send_message(cid, "Сталася помилка. Спробуйте /profile ще раз.")
         await state.clear()
         return
 
     thinking = await bot.edit_message_text(
-        chat_id=cid, message_id=last_id, text=f"Аналізую ваш скріншот ({mode})... 🤖"
+        chat_id=cid,
+        message_id=last_id,
+        text=f"Аналізую ваш скріншот ({mode})... 🤖"
     )
     try:
         largest: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
@@ -371,7 +385,7 @@ async def handle_profile_update_photo(
                 "stats_photo_file_id": largest.file_id,
                 "stats_photo_permanent_url": url,
             })
-        else:
+        else:  # heroes
             fav = result.get("favorite_heroes", [])
             for idx, hero in enumerate(fav[:3], start=1):
                 payload.update({
@@ -388,7 +402,9 @@ async def handle_profile_update_photo(
         if status == "success":
             await show_profile_menu(bot, cid, uid, message_to_delete_id=thinking.message_id)
         elif status == "conflict":
-            await thinking.edit_text("🛡️ Конфлікт: цей профіль вже зареєстровано іншим акаунтом.")
+            await thinking.edit_text(
+                "🛡️ Конфлікт: цей профіль вже зареєстровано іншим акаунтом."
+            )
         else:
             await thinking.edit_text("❌ Помилка збереження. Спробуйте пізніше.")
     except Exception as e:
