@@ -31,22 +31,12 @@ registration_router = Router()
 
 
 def format_profile_display(user_data: Dict[str, Any]) -> str:
-    """
-    Форматує базову сторінку профілю з емодзі та ключовими даними.
-    Текст обгорнутий у HTML-цитату.
-    """
+    """Форматує базову сторінку профілю, показуючи ранг точно так, як він є в БД."""
     nickname = html.escape(user_data.get("nickname", "Не вказано"))
     pid = user_data.get("player_id", "N/A")
     sid = user_data.get("server_id", "N/A")
-    rank_full = html.escape(user_data.get("current_rank", "Не вказано") or "Не вказано")
-    # Скорочуємо "Міфічна Слава" до "Міф" і додаємо зірки з повного рядка
-    if "Міфічна" in rank_full:
-        stars = ""
-        if "★" in rank_full:
-            stars = rank_full[rank_full.index("★"):].strip()
-        rank_short = f"Міф {stars}"
-    else:
-        rank_short = rank_full
+    # Беремо саме те значення, що зберіглось у current_rank, без змін
+    rank = html.escape(user_data.get("current_rank", "Не вказано") or "Не вказано")
 
     loc = html.escape(user_data.get("location", "Не вказано") or "Не вказано")
     squad = html.escape(user_data.get("squad_name", "Не вказано") or "Не вказано")
@@ -55,13 +45,12 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
         "🎮 <b>ПРОФІЛЬ ГРАВЦЯ</b>",
         f"👤 <b>Нікнейм:</b> {nickname}",
         f"🆔 <b>ID:</b> {pid} ({sid})",
-        f"🏆 <b>Ранг:</b> {rank_short}",
+        f"🏆 <b>Ранг:</b> {rank}",
         f"🌍 <b>Локація:</b> {loc}",
         f"🛡️ <b>Сквад:</b> {squad}",
     ]
     content = "\n".join(lines)
     return f"<blockquote>\n{content}\n</blockquote>"
-
 
 async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]:
     """
