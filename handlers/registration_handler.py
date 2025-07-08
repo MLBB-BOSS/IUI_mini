@@ -19,7 +19,11 @@ from keyboards.inline_keyboards import (
     create_delete_confirm_keyboard,
 )
 from services.openai_service import MLBBChatGPT
-from database.crud import add_or_update_user, get_user_by_telegram_id, delete_user_by_telegram_id
+from database.crud import (
+    add_or_update_user,
+    get_user_by_telegram_id,
+    delete_user_by_telegram_id,
+)
 from utils.file_manager import file_resilience_manager
 from config import OPENAI_API_KEY, logger
 
@@ -34,12 +38,16 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
     nickname = html.escape(user_data.get("nickname", "Не вказано"))
     pid = user_data.get("player_id", "N/A")
     sid = user_data.get("server_id", "N/A")
-    rank = html.escape(user_data.get("current_rank", "Не вказано") or "Не вказано")
-    # Скорочуємо "Міфічна Слава" до "Міф"
-    if "Міфічна" in rank:
-        rank_short = "Міф"
+    rank_full = html.escape(user_data.get("current_rank", "Не вказано") or "Не вказано")
+    # Скорочуємо "Міфічна Слава" до "Міф" і додаємо зірки з повного рядка
+    if "Міфічна" in rank_full:
+        stars = ""
+        if "★" in rank_full:
+            stars = rank_full[rank_full.index("★"):].strip()
+        rank_short = f"Міф {stars}"
     else:
-        rank_short = rank
+        rank_short = rank_full
+
     loc = html.escape(user_data.get("location", "Не вказано") or "Не вказано")
     squad = html.escape(user_data.get("squad_name", "Не вказано") or "Не вказано")
 
@@ -62,18 +70,18 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
     """
     pages: List[Dict[str, str]] = []
 
-    # Basic profile
+    # 1) Basic profile
     pages.append({
         "photo": user_data.get("basic_profile_permanent_url", ""),
         "caption": format_profile_display(user_data),
     })
 
-    # Summary + detailed stats
+    # 2) Summary + detailed stats
     stats_url = user_data.get("stats_photo_permanent_url")
     if stats_url:
         matches = user_data.get("total_matches", "N/A")
-        win_rate = user_data.get("win_rate")
-        wr = f"{win_rate:.1f}%" if isinstance(win_rate, (int, float)) else "N/A"
+        wr_val = user_data.get("win_rate")
+        wr = f"{wr_val:.1f}%" if isinstance(wr_val, (int, float)) else "N/A"
         likes = user_data.get("likes_received", "N/A")
 
         mvp = user_data.get("mvp_count", 0)
@@ -103,7 +111,7 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
             "caption": f"<blockquote>\n{content}\n</blockquote>",
         })
 
-    # Top-3 heroes
+    # 3) Top-3 heroes
     heroes_url = user_data.get("heroes_photo_permanent_url")
     if heroes_url:
         medals = ["🏅", "🥈", "🥉"]
@@ -117,14 +125,16 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
                 lines.append(f"📊 WR: <b>{wr_i:.1f}%</b>")
                 lines.append(f"🎯 Матчів: <b>{matches_i}</b>")
                 if i < 3:
-                    lines.append("")  # пустий рядок між героями
+                    lines.append("")  # порожній рядок між героями
         content = "\n".join(lines)
+        # додаємо невидимі символи для розширення цитатного фону
+        pad = "ㅤ" * 12
         pages.append({
             "photo": heroes_url,
-            "caption": f"<blockquote>\n{content}\n</blockquote>",
+            "caption": f"<blockquote>\n{content}\n{pad}\n</blockquote>",
         })
 
-    # Avatar
+    # 4) Avatar
     avatar_url = user_data.get("avatar_permanent_url")
     if avatar_url:
         lines = [
@@ -175,8 +185,7 @@ async def show_profile_carousel(
         caption=page["caption"],
         parse_mode="HTML",
         reply_markup=create_profile_menu_overview_keyboard(
-            current_page=idx + 1,
-            total_pages=total
+            current_page=idx + 1, total_pages=total
         ),
     )
 
@@ -243,7 +252,9 @@ async def cmd_profile(message: Message, state: FSMContext, bot: Bot) -> None:
 
 
 @registration_router.callback_query(F.data == "profile_update_basic")
-async def profile_update_basic_handler(callback: CallbackQuery, state: FSMContext) -> None:
+async def profile_update_basic_handler(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
     """Перезапит базового скріншота."""
     await state.set_state(RegistrationFSM.waiting_for_basic_photo)
     try:
@@ -259,7 +270,9 @@ async def profile_update_basic_handler(callback: CallbackQuery, state: FSMContex
 
 
 @registration_router.callback_query(F.data == "profile_update_stats")
-async def profile_update_stats_handler(callback: CallbackQuery, state: FSMContext) -> None:
+async def profile_update_stats_handler(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
     """Запит скріншота статистики."""
     await state.set_state(RegistrationFSM.waiting_for_stats_photo)
     try:
@@ -275,7 +288,9 @@ async def profile_update_stats_handler(callback: CallbackQuery, state: FSMContex
 
 
 @registration_router.callback_query(F.data == "profile_update_heroes")
-async def profile_update_heroes_handler(callback: CallbackQuery, state: FSMContext) -> None:
+async def profile_update_heroes_handler(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
     """Запит скріншота улюблених героїв."""
     await state.set_state(RegistrationFSM.waiting_for_heroes_photo)
     try:
@@ -356,9 +371,9 @@ async def handle_profile_update_photo(
             })
         elif mode == "stats":
             mi = result.get("main_indicators", {})
-            det = result.get("details_panel", {})
             achL = result.get("achievements_left_column", {})
             achR = result.get("achievements_right_column", {})
+            det = result.get("details_panel", {})
             payload.update({
                 "total_matches": mi.get("matches_played"),
                 "win_rate": mi.get("win_rate"),
@@ -389,7 +404,9 @@ async def handle_profile_update_photo(
         if status == "success":
             await show_profile_menu(bot, cid, uid, message_to_delete_id=thinking.message_id)
         elif status == "conflict":
-            await thinking.edit_text("🛡️ Конфлікт: цей профіль вже зареєстровано іншим акаунтом.")
+            await thinking.edit_text(
+                "🛡️ Конфлікт: цей профіль вже зареєстровано іншим акаунтом."
+            )
         else:
             await thinking.edit_text("❌ Помилка збереження. Спробуйте пізніше.")
     except Exception as e:
@@ -448,7 +465,9 @@ async def profile_hide_menu_handler(callback: CallbackQuery) -> None:
 
 
 @registration_router.callback_query(F.data == "profile_delete")
-async def profile_delete_handler(callback: CallbackQuery, state: FSMContext) -> None:
+async def profile_delete_handler(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
     """Запит на підтвердження видалення профілю."""
     await state.set_state(RegistrationFSM.confirming_deletion)
     text = "Ви впевнені, що хочете видалити профіль? Це назавжди."
@@ -462,7 +481,9 @@ async def profile_delete_handler(callback: CallbackQuery, state: FSMContext) -> 
 @registration_router.callback_query(
     RegistrationFSM.confirming_deletion, F.data == "delete_confirm_yes"
 )
-async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+async def confirm_delete_profile(
+    callback: CallbackQuery, state: FSMContext, bot: Bot
+) -> None:
     """Підтвердження видалення профілю."""
     uid = callback.from_user.id
     deleted = await delete_user_by_telegram_id(uid)
@@ -475,7 +496,9 @@ async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext, bot
 @registration_router.callback_query(
     RegistrationFSM.confirming_deletion, F.data == "delete_confirm_no"
 )
-async def cancel_delete_profile(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+async def cancel_delete_profile(
+    callback: CallbackQuery, state: FSMContext, bot: Bot
+) -> None:
     """Скасування видалення профілю."""
     uid = callback.from_user.id
     chat = callback.message.chat.id
