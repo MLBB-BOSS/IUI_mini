@@ -1,5 +1,5 @@
 """
-Обробники для процесу реєстрації та управління профілем користувача
+Обробники для процесу реєстрації та оновлення профілю користувача
 з реалізацією логіки "чистого чату" та каруселі профілю.
 """
 import html
@@ -39,8 +39,13 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
     matches = user_data.get("total_matches", "Не вказано")
     wr = user_data.get("win_rate")
     wr_str = f"{wr}%" if wr is not None else "Не вказано"
-    heroes = user_data.get("favorite_heroes")
-    heroes_str = html.escape(heroes) if heroes else "Не вказано"
+    # Збираємо топ-3 героїв
+    heroes = []
+    for i in range(1, 4):
+        name = user_data.get(f"hero{i}_name")
+        if name:
+            heroes.append(str(name))
+    heroes_str = ", ".join(heroes) if heroes else "Не вказано"
 
     return (
         f"<b>Ваш профіль:</b>\n\n"
@@ -80,13 +85,21 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
     # Heroes
     heroes_url = user_data.get("heroes_photo_permanent_url")
     if heroes_url:
-        pages.append({
-            "photo": heroes_url,
-            "caption": (
-                f"<b>Улюблені герої:</b> "
-                f"{html.escape(user_data.get('favorite_heroes', 'Не вказано'))}"
-            ),
-        })
+        # Детальніше: топ-3 з метриками
+        hero_lines = []
+        for i in range(1, 4):
+            name = user_data.get(f"hero{i}_name")
+            m = user_data.get(f"hero{i}_matches")
+            w = user_data.get(f"hero{i}_win_rate")
+            if name:
+                line = f"{name}"
+                if m is not None:
+                    line += f": {m} матчів"
+                    if w is not None:
+                        line += f", {w}%"
+                hero_lines.append(line)
+        caption = "<b>Улюблені герої:</b>\n" + "\n".join(hero_lines) if hero_lines else "<b>Улюблені герої:</b> Не вказано"
+        pages.append({"photo": heroes_url, "caption": caption})
     # Avatar
     avatar_url = user_data.get("avatar_permanent_url")
     if avatar_url:
@@ -109,22 +122,23 @@ async def show_profile_carousel(
     user_data = await get_user_by_telegram_id(user_id) or {}
     pages = await build_profile_pages(user_data)
     total = len(pages)
+    if total == 0:
+        return
 
-    # Захист від виходу за межі
-    if page_index < 0 or page_index >= total:
-        logger.warning(
-            f"Requested carousel page_index={page_index} out of range [0..{total-1}]. Clamping."
-        )
-        page_index = max(0, min(page_index, total - 1))
-
+    # Кліпимо індекс
+    page_index = max(0, min(page_index, total - 1))
     page = pages[page_index]
 
-    # Оновлюємо медіа (якщо фото)
+    # Оновлюємо медіа
     if page["photo"]:
         media = InputMediaPhoto(media=page["photo"])
-        await bot.edit_message_media(
-            chat_id=chat_id, message_id=message_id, media=media
-        )
+        try:
+            await bot.edit_message_media(
+                chat_id=chat_id, message_id=message_id, media=media
+            )
+        except TelegramAPIError as e:
+            logger.warning(f"Не вдалося оновити media: {e}")
+
     # Оновлюємо підпис і клавіатуру
     await bot.edit_message_caption(
         chat_id=chat_id,
@@ -143,12 +157,15 @@ async def show_profile_menu(
     user_id: int,
     message_to_delete_id: Optional[int] = None,
 ) -> None:
-    """Відображає першу сторінку профілю з однією кнопкою."""
+    """
+    Відображає першу сторінку профілю з однією кнопкою.
+    Якщо message_to_delete_id — видаляє старе повідомлення.
+    """
     if message_to_delete_id:
         try:
             await bot.delete_message(chat_id, message_to_delete_id)
         except TelegramAPIError as e:
-            logger.warning(f"Не вдалося видалити повідомлення {message_to_delete_id}: {e}")
+            logger.warning(f"Не вдалося видалити {message_to_delete_id}: {e}")
 
     user_data = await get_user_by_telegram_id(user_id)
     if not user_data:
@@ -216,7 +233,7 @@ async def profile_update_basic_handler(
 
 
 @registration_router.callback_query(F.data == "profile_update_stats")
-async def profile_add_stats_handler(
+async def profile_update_stats_handler(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
     """Запит скріншота статистики."""
@@ -234,7 +251,7 @@ async def profile_add_stats_handler(
 
 
 @registration_router.callback_query(F.data == "profile_update_heroes")
-async def profile_add_heroes_handler(
+async def profile_update_heroes_handler(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
     """Запит скріншота улюблених героїв."""
@@ -312,31 +329,66 @@ async def handle_profile_update_photo(
                 "server_id": int(ml[1].strip("()")),
                 "current_rank": result.get("highest_rank_season"),
                 "total_matches": result.get("matches_played"),
+                "likes_received": result.get("likes_received"),
+                "location": result.get("location"),
+                "squad_name": result.get("squad_name"),
                 "basic_profile_file_id": largest.file_id,
                 "basic_profile_permanent_url": url,
             })
         elif mode == "stats":
             mi = result.get("main_indicators", {})
+            achL = result.get("achievements_left_column", {})
+            achR = result.get("achievements_right_column", {})
+            det = result.get("details_panel", {})
             payload.update({
                 "total_matches": mi.get("matches_played"),
                 "win_rate": mi.get("win_rate"),
+                "stats_filter_type": result.get("stats_filter_type"),
+                "mvp_count": mi.get("mvp_count"),
+                "legendary_count": achL.get("legendary_count"),
+                "maniac_count": achL.get("maniac_count"),
+                "double_kill_count": achL.get("double_kill_count"),
+                "most_kills_in_one_game": achL.get("most_kills_in_one_game"),
+                "longest_win_streak": achL.get("longest_win_streak"),
+                "highest_dmg_per_min": achL.get("highest_dmg_per_min"),
+                "highest_gold_per_min": achL.get("highest_gold_per_min"),
+                "savage_count": achR.get("savage_count"),
+                "triple_kill_count": achR.get("triple_kill_count"),
+                "mvp_loss_count": achR.get("mvp_loss_count"),
+                "most_assists_in_one_game": achR.get("most_assists_in_one_game"),
+                "first_blood_count": achR.get("first_blood_count"),
+                "highest_dmg_taken_per_min": achR.get("highest_dmg_taken_per_min"),
+                "kda_ratio": det.get("kda_ratio"),
+                "teamfight_participation_rate": det.get("teamfight_participation_rate"),
+                "avg_gold_per_min": det.get("avg_gold_per_min"),
+                "avg_hero_dmg_per_min": det.get("avg_hero_dmg_per_min"),
+                "avg_deaths_per_match": det.get("avg_deaths_per_match"),
+                "avg_turret_dmg_per_match": det.get("avg_turret_dmg_per_match"),
                 "stats_photo_file_id": largest.file_id,
                 "stats_photo_permanent_url": url,
             })
         else:  # heroes
             fav = result.get("favorite_heroes", [])
-            heroes_str = ", ".join(h.get("hero_name", "") for h in fav if h.get("hero_name"))
+            for idx, hero in enumerate(fav[:3], start=1):
+                payload.update({
+                    f"hero{idx}_name": hero.get("hero_name"),
+                    f"hero{idx}_matches": hero.get("matches"),
+                    f"hero{idx}_win_rate": hero.get("win_rate"),
+                })
             payload.update({
-                "favorite_heroes": heroes_str,
                 "heroes_photo_file_id": largest.file_id,
                 "heroes_photo_permanent_url": url,
             })
 
         status = await add_or_update_user(payload)
         if status == "success":
-            await show_profile_menu(bot, chat_id, user_id, message_to_delete_id=thinking.message_id)
+            await show_profile_menu(
+                bot, chat_id, user_id, message_to_delete_id=thinking.message_id
+            )
         elif status == "conflict":
-            await thinking.edit_text("🛡️ Конфлікт: цей профіль вже зареєстровано іншим акаунтом.")
+            await thinking.edit_text(
+                "🛡️ Конфлікт: цей профіль вже зареєстровано іншим акаунтом."
+            )
         else:
             await thinking.edit_text("❌ Помилка збереження. Спробуйте пізніше.")
     except Exception as e:
@@ -362,7 +414,6 @@ async def profile_show_menu_handler(callback: CallbackQuery) -> None:
 @registration_router.callback_query(F.data.startswith("profile_prev_page"))
 async def profile_prev_page_handler(callback: CallbackQuery) -> None:
     """Перемикає на попередню сторінку каруселі."""
-    # callback.data містить 1-based номер сторінки
     idx1 = int(callback.data.split(":", 1)[1])
     page_index = idx1 - 1  # конвертація в 0-based
     await show_profile_carousel(
@@ -406,7 +457,6 @@ async def profile_delete_handler(
     """Запит на підтвердження видалення профілю."""
     await state.set_state(RegistrationFSM.confirming_deletion)
     text = "Ви впевнені, що хочете видалити профіль? Це назавжди."
-    # Якщо повідомлення — фото, редагуємо caption, інакше — текст
     if callback.message.photo:
         await callback.message.edit_caption(text, reply_markup=create_delete_confirm_keyboard())
     else:
