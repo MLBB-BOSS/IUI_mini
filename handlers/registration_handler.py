@@ -1,6 +1,6 @@
 """
 Обробники для реєстрації та оновлення профілю користувача
-з реалізацією каруселі слайдів з цитатними блоками для кожної сторінки.
+з реалізацією каруселі слайдів з цитатними блоками.
 """
 import html
 import base64
@@ -28,43 +28,23 @@ registration_router = Router()
 
 def format_profile_display(user_data: Dict[str, Any]) -> str:
     """
-    Форматує базову сторінку профілю з блоками та емодзі,
-    обгорнувши весь текст у HTML-цитату.
+    Форматує базову сторінку профілю з емодзі та ключовими даними.
+    Текст обгорнутий у HTML-цитату.
     """
     nickname = html.escape(user_data.get("nickname", "Не вказано"))
     pid = user_data.get("player_id", "N/A")
     sid = user_data.get("server_id", "N/A")
-    rank = html.escape(user_data.get("current_rank", "Не вказано") or "Не вказано")
-    matches = user_data.get("total_matches", "Н/Д")
-    win = user_data.get("win_rate")
-    wr = f"{win:.1f}%" if isinstance(win, (int, float)) else "Н/Д"
-    likes = user_data.get("likes_received", "Н/Д")
-    loc = html.escape(user_data.get("location", "Не вказано") or "Не вказано")
-    squad = html.escape(user_data.get("squad_name", "Не вказано") or "Не вказано")
-
-    rank_emoji = "🏆" if "Міфічна" in rank else "🎖️"
-    wr_emoji = "🔥" if isinstance(win, (int, float)) and win >= 60 else "📊"
+    rank = html.escape(user_data.get("current_rank", "Не вказано"))
+    loc = html.escape(user_data.get("location", "Не вказано"))
+    squad = html.escape(user_data.get("squad_name", "Не вказано"))
 
     lines = [
         "🎮 <b>ПРОФІЛЬ ГРАВЦЯ</b>",
-        "┏━━━━━━━━━━━━━━━┓",
-        f"┃ 👤 <b>Нікнейм:</b> {nickname}",
-        f"┃ 🆔 <b>ID:</b> {pid} ({sid})",
-        f"┃ {rank_emoji} <b>Ранг:</b> {rank}",
-        "┗━━━━━━━━━━━━━━━┛",
-        "",
-        "⚔️ <b>ІГРОВА СТАТИСТИКА</b>",
-        "┏━━━━━━━━━━━━━━━┓",
-        f"┃ 🎯 <b>Матчів:</b> {matches}",
-        f"┃ {wr_emoji} <b>Win Rate:</b> {wr}",
-        f"┃ 👍 <b>Лайків:</b> {likes}",
-        "┗━━━━━━━━━━━━━━━┛",
-        "",
-        "🌍 <b>ЛОКАЦІЯ / СКВАД</b>",
-        "┏━━━━━━━━━━━━━━━┓",
-        f"┃ 📍 <b>Локація:</b> {loc}",
-        f"┃ 🛡️ <b>Сквад:</b> {squad}",
-        "┗━━━━━━━━━━━━━━━┛",
+        f"👤 <b>Нікнейм:</b> {nickname}",
+        f"🆔 <b>ID:</b> {pid} ({sid})",
+        f"🏆 <b>Ранг:</b> {rank}",
+        f"🌍 <b>Локація:</b> {loc}",
+        f"🛡️ <b>Сквад:</b> {squad}",
     ]
     content = "\n".join(lines)
     return f"<blockquote>\n{content}\n</blockquote>"
@@ -73,7 +53,7 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
 async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]:
     """
     Формує карусель профілю: basic → stats → heroes → avatar.
-    Кожний caption обгорнутий у HTML-цитату.
+    Кожний caption обгорнутий у цитату.
     """
     pages: List[Dict[str, str]] = []
 
@@ -83,9 +63,14 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
         "caption": format_profile_display(user_data),
     })
 
-    # Detailed stats
+    # Summary + detailed stats
     stats_url = user_data.get("stats_photo_permanent_url")
     if stats_url:
+        matches = user_data.get("total_matches", "N/A")
+        win_rate = user_data.get("win_rate")
+        wr = f"{win_rate:.1f}%" if isinstance(win_rate, (int, float)) else "N/A"
+        likes = user_data.get("likes_received", "N/A")
+
         mvp = user_data.get("mvp_count", 0)
         legendary = user_data.get("legendary_count", 0)
         maniac = user_data.get("maniac_count", 0)
@@ -94,16 +79,18 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
         dmg = user_data.get("avg_hero_dmg_per_min", 0)
 
         lines = [
+            "⚔️ <b>ІГРОВА СТАТИСТИКА</b>",
+            f"🎯 Матчів: <b>{matches}</b>",
+            f"📊 Win Rate: <b>{wr}</b>",
+            f"👍 Лайків: <b>{likes}</b>",
+            "",
             "📊 <b>ДЕТАЛЬНА СТАТИСТИКА</b>",
-            "┏━━━━━━━━━━━━━━━━━━━━━┓",
-            f"┃ 🌟 MVP: <b>{mvp}</b>",
-            f"┃ 🔥 Legendary: <b>{legendary}</b>",
-            f"┃ 🎭 Maniac: <b>{maniac}</b>",
-            "┃",
-            f"┃ 📈 KDA: <b>{kda:.2f}</b>",
-            f"┃ 💰 Gold/Min: <b>{gold}</b>",
-            f"┃ ⚔️ Dmg/Min: <b>{dmg}</b>",
-            "┗━━━━━━━━━━━━━━━━━━━━━┛",
+            f"• MVP: <b>{mvp}</b>",
+            f"• Legendary: <b>{legendary}</b>",
+            f"• Maniac: <b>{maniac}</b>",
+            f"• KDA: <b>{kda:.2f}</b>",
+            f"• Gold/Min: <b>{gold}</b>",
+            f"• Dmg/Min: <b>{dmg}</b>",
         ]
         content = "\n".join(lines)
         pages.append({
@@ -115,22 +102,16 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
     heroes_url = user_data.get("heroes_photo_permanent_url")
     if heroes_url:
         medals = ["🥇", "🥈", "🥉"]
-        lines = [
-            "🦸 <b>ТОП-3 ГЕРОЇ</b>",
-            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
-        ]
+        lines = ["🦸 <b>ТОП-3 ГЕРОЇ</b>"]
         for i in range(1, 4):
             name = user_data.get(f"hero{i}_name")
-            matches = user_data.get(f"hero{i}_matches", 0)
-            win_rate = user_data.get(f"hero{i}_win_rate", 0.0)
+            matches_h = user_data.get(f"hero{i}_matches", 0)
+            win_rate_h = user_data.get(f"hero{i}_win_rate", 0.0)
             if name:
-                lines.append(f"┃ {medals[i-1]} <b>{html.escape(name)}</b>")
+                lines.append(f"{medals[i-1]} <b>{html.escape(name)}</b>")
                 lines.append(
-                    f"┃    🎯 Матчів: <b>{matches}</b> | 📊 WR: <b>{win_rate:.1f}%</b>"
+                    f"  🎯 Матчів: <b>{matches_h}</b> | 📊 WR: <b>{win_rate_h:.1f}%</b>"
                 )
-                if i < 3:
-                    lines.append("┃")
-        lines.append("┗━━━━━━━━━━━━━━━━━━━┛")
         content = "\n".join(lines)
         pages.append({
             "photo": heroes_url,
@@ -140,7 +121,11 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
     # Avatar
     avatar_url = user_data.get("avatar_permanent_url")
     if avatar_url:
-        content = "🖼️ <b>ВАШ АВАТАР</b>\n\nПерсональне зображення профілю."
+        lines = [
+            "🖼️ <b>ВАШ АВАТАР</b>",
+            "Персональне зображення профілю."
+        ]
+        content = "\n".join(lines)
         pages.append({
             "photo": avatar_url,
             "caption": f"<blockquote>\n{content}\n</blockquote>",
@@ -168,21 +153,25 @@ async def show_profile_carousel(
     idx = max(0, min(page_index, total - 1))
     page = pages[idx]
 
-    # Оновлюємо медіа
     if page["photo"]:
-        media = InputMediaPhoto(media=page["photo"])
         try:
-            await bot.edit_message_media(chat_id=chat_id, message_id=message_id, media=media)
+            await bot.edit_message_media(
+                chat_id=chat_id,
+                message_id=message_id,
+                media=InputMediaPhoto(media=page["photo"])
+            )
         except TelegramAPIError as e:
             logger.warning(f"Не вдалося оновити media: {e}")
 
-    # Оновлюємо підпис + меню
     await bot.edit_message_caption(
         chat_id=chat_id,
         message_id=message_id,
         caption=page["caption"],
         parse_mode="HTML",
-        reply_markup=create_profile_menu_overview_keyboard(current_page=idx+1, total_pages=total),
+        reply_markup=create_profile_menu_overview_keyboard(
+            current_page=idx + 1,
+            total_pages=total
+        ),
     )
 
 
@@ -357,10 +346,6 @@ async def handle_profile_update_photo(
                 "player_id": int(ml[0]),
                 "server_id": int(ml[1].strip("()")),
                 "current_rank": result.get("highest_rank_season"),
-                "total_matches": result.get("matches_played"),
-                "likes_received": result.get("likes_received"),
-                "location": result.get("location"),
-                "squad_name": result.get("squad_name"),
                 "basic_profile_file_id": largest.file_id,
                 "basic_profile_permanent_url": url,
             })
@@ -372,27 +357,13 @@ async def handle_profile_update_photo(
             payload.update({
                 "total_matches": mi.get("matches_played"),
                 "win_rate": mi.get("win_rate"),
-                "stats_filter_type": result.get("stats_filter_type"),
+                "likes_received": result.get("likes_received"),
                 "mvp_count": mi.get("mvp_count"),
                 "legendary_count": achL.get("legendary_count"),
                 "maniac_count": achL.get("maniac_count"),
-                "double_kill_count": achL.get("double_kill_count"),
-                "most_kills_in_one_game": achL.get("most_kills_in_one_game"),
-                "longest_win_streak": achL.get("longest_win_streak"),
-                "highest_dmg_per_min": achL.get("highest_dmg_per_min"),
-                "highest_gold_per_min": achL.get("highest_gold_per_min"),
-                "savage_count": achR.get("savage_count"),
-                "triple_kill_count": achR.get("triple_kill_count"),
-                "mvp_loss_count": achR.get("mvp_loss_count"),
-                "most_assists_in_one_game": achR.get("most_assists_in_one_game"),
-                "first_blood_count": achR.get("first_blood_count"),
-                "highest_dmg_taken_per_min": achR.get("highest_dmg_taken_per_min"),
                 "kda_ratio": det.get("kda_ratio"),
-                "teamfight_participation_rate": det.get("teamfight_participation_rate"),
                 "avg_gold_per_min": det.get("avg_gold_per_min"),
                 "avg_hero_dmg_per_min": det.get("avg_hero_dmg_per_min"),
-                "avg_deaths_per_match": det.get("avg_deaths_per_match"),
-                "avg_turret_dmg_per_match": det.get("avg_turret_dmg_per_match"),
                 "stats_photo_file_id": largest.file_id,
                 "stats_photo_permanent_url": url,
             })
@@ -413,9 +384,7 @@ async def handle_profile_update_photo(
         if status == "success":
             await show_profile_menu(bot, cid, uid, message_to_delete_id=thinking.message_id)
         elif status == "conflict":
-            await thinking.edit_text(
-                "🛡️ Конфлікт: цей профіль вже зареєстровано іншим акаунтом."
-            )
+            await thinking.edit_text("🛡️ Конфлікт: цей профіль вже зареєстровано іншим акаунтом.")
         else:
             await thinking.edit_text("❌ Помилка збереження. Спробуйте пізніше.")
     except Exception as e:
