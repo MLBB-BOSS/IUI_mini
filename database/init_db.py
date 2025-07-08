@@ -11,7 +11,8 @@ from database.models import Base
 
 async def init_db():
     """
-    Ініціалізує базу даних: створює таблиці та додає/видаляє колонки й індекси.
+    Ініціалізує базу даних: створює таблиці та додає нові колонки й індекси,
+    якщо вони ще не існують.
     """
     engine = create_async_engine(ASYNC_DATABASE_URL)
     async with engine.begin() as conn:
@@ -22,31 +23,14 @@ async def init_db():
 
         # --- 🧠 Блок "м'якої" міграції ---
         try:
-            # Видалення застарілих колонок
-            logger.info("Dropping obsolete columns from 'users' table...")
-            await conn.execute(text(
-                """
-                ALTER TABLE users
-                  DROP COLUMN IF EXISTS favorite_heroes,
-                  DROP COLUMN IF EXISTS custom_avatar_file_id,
-                  DROP COLUMN IF EXISTS profile_screenshot_file_id,
-                  DROP COLUMN IF EXISTS stats_screenshot_file_id,
-                  DROP COLUMN IF EXISTS heroes_screenshot_file_id,
-                  DROP COLUMN IF EXISTS custom_avatar_permanent_url,
-                  DROP COLUMN IF EXISTS profile_screenshot_permanent_url,
-                  DROP COLUMN IF EXISTS stats_screenshot_permanent_url,
-                  DROP COLUMN IF EXISTS heroes_screenshot_permanent_url;
-                """
-            ))
+            logger.info("Applying soft migrations for 'users' table...")
 
             # Chat history
-            logger.info("Ensuring 'chat_history' column exists...")
             await conn.execute(text(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_history JSON"
             ))
 
             # Основні дані профілю
-            logger.info("Ensuring basic profile columns exist...")
             await conn.execute(text(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS likes_received INTEGER"
             ))
@@ -58,136 +42,69 @@ async def init_db():
             ))
 
             # Розширена статистика
-            logger.info("Ensuring detailed stats columns exist...")
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS stats_filter_type TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS mvp_count INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS legendary_count INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS maniac_count INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS double_kill_count INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS most_kills_in_one_game INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS longest_win_streak INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS highest_dmg_per_min INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS highest_gold_per_min INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS savage_count INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS triple_kill_count INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS mvp_loss_count INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS most_assists_in_one_game INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS first_blood_count INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS highest_dmg_taken_per_min INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS kda_ratio FLOAT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS teamfight_participation_rate FLOAT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS avg_gold_per_min INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS avg_hero_dmg_per_min INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS avg_deaths_per_match FLOAT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS avg_turret_dmg_per_match INTEGER"
-            ))
+            stats_cols = [
+                "stats_filter_type TEXT",
+                "mvp_count INTEGER",
+                "legendary_count INTEGER",
+                "maniac_count INTEGER",
+                "double_kill_count INTEGER",
+                "most_kills_in_one_game INTEGER",
+                "longest_win_streak INTEGER",
+                "highest_dmg_per_min INTEGER",
+                "highest_gold_per_min INTEGER",
+                "savage_count INTEGER",
+                "triple_kill_count INTEGER",
+                "mvp_loss_count INTEGER",
+                "most_assists_in_one_game INTEGER",
+                "first_blood_count INTEGER",
+                "highest_dmg_taken_per_min INTEGER",
+                "kda_ratio FLOAT",
+                "teamfight_participation_rate FLOAT",
+                "avg_gold_per_min INTEGER",
+                "avg_hero_dmg_per_min INTEGER",
+                "avg_deaths_per_match FLOAT",
+                "avg_turret_dmg_per_match INTEGER",
+            ]
+            for col in stats_cols:
+                await conn.execute(text(
+                    f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col}"
+                ))
 
             # Топ-3 улюблених героїв
-            logger.info("Ensuring favorite heroes columns exist...")
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero1_name TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero1_matches INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero1_win_rate FLOAT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero2_name TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero2_matches INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero2_win_rate FLOAT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero3_name TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero3_matches INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero3_win_rate FLOAT"
-            ))
+            hero_cols = [
+                ("hero1_name", "TEXT"), ("hero1_matches", "INTEGER"), ("hero1_win_rate", "FLOAT"),
+                ("hero2_name", "TEXT"), ("hero2_matches", "INTEGER"), ("hero2_win_rate", "FLOAT"),
+                ("hero3_name", "TEXT"), ("hero3_matches", "INTEGER"), ("hero3_win_rate", "FLOAT"),
+            ]
+            for name, typ in hero_cols:
+                await conn.execute(text(
+                    f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {name} {typ}"
+                ))
 
             # Колонки для зображень
-            logger.info("Ensuring image file_id and URL columns exist...")
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS basic_profile_file_id TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS basic_profile_permanent_url TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS stats_photo_file_id TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS stats_photo_permanent_url TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS heroes_photo_file_id TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS heroes_photo_permanent_url TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_file_id TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_permanent_url TEXT"
-            ))
+            image_cols = [
+                ("basic_profile_file_id", "TEXT"),
+                ("basic_profile_permanent_url", "TEXT"),
+                ("stats_photo_file_id", "TEXT"),
+                ("stats_photo_permanent_url", "TEXT"),
+                ("heroes_photo_file_id", "TEXT"),
+                ("heroes_photo_permanent_url", "TEXT"),
+                ("avatar_file_id", "TEXT"),
+                ("avatar_permanent_url", "TEXT"),
+            ]
+            for name, typ in image_cols:
+                await conn.execute(text(
+                    f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {name} {typ}"
+                ))
 
             # Унікальний індекс на player_id
-            logger.info("Ensuring unique index on 'player_id' exists...")
             await conn.execute(text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id ON users (player_id)"
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id "
+                "ON users (player_id)"
             ))
 
-            logger.info("Soft migration completed successfully.")
+            logger.info("Soft migrations completed successfully.")
         except Exception as e:
-            logger.error(f"Soft migration step failed: {e}", exc_info=True)
+            logger.error(f"Soft migration failed: {e}", exc_info=True)
 
     await engine.dispose()
