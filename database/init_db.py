@@ -11,8 +11,7 @@ from database.models import Base
 
 async def init_db():
     """
-    Ініціалізує базу даних: створює таблиці та додає нові колонки й індекси,
-    якщо вони ще не існують.
+    Ініціалізує базу даних: створює таблиці та додає/видаляє колонки й індекси.
     """
     engine = create_async_engine(ASYNC_DATABASE_URL)
     async with engine.begin() as conn:
@@ -23,6 +22,23 @@ async def init_db():
 
         # --- 🧠 Блок "м'якої" міграції ---
         try:
+            # Видалення застарілих колонок
+            logger.info("Dropping obsolete columns from 'users' table...")
+            await conn.execute(text(
+                """
+                ALTER TABLE users
+                  DROP COLUMN IF EXISTS favorite_heroes,
+                  DROP COLUMN IF EXISTS custom_avatar_file_id,
+                  DROP COLUMN IF EXISTS profile_screenshot_file_id,
+                  DROP COLUMN IF EXISTS stats_screenshot_file_id,
+                  DROP COLUMN IF EXISTS heroes_screenshot_file_id,
+                  DROP COLUMN IF EXISTS custom_avatar_permanent_url,
+                  DROP COLUMN IF EXISTS profile_screenshot_permanent_url,
+                  DROP COLUMN IF EXISTS stats_screenshot_permanent_url,
+                  DROP COLUMN IF EXISTS heroes_screenshot_permanent_url;
+                """
+            ))
+
             # Chat history
             logger.info("Ensuring 'chat_history' column exists...")
             await conn.execute(text(
