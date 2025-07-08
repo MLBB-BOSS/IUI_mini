@@ -201,13 +201,18 @@ async def cmd_profile(message: Message, state: FSMContext, bot: Bot):
         await state.update_data(last_bot_message_id=sent.message_id)
 
 
+# ---- Додані обробники для заміни edit_text на edit_caption у фото ----
+
 @registration_router.callback_query(F.data == "profile_update_basic")
 async def profile_update_basic_handler(callback: CallbackQuery, state: FSMContext):
     """Обробник оновлення базової картки профілю."""
     await state.set_state(RegistrationFSM.waiting_for_basic_photo)
-    await callback.message.edit_text(
-        "Будь ласка, надішліть новий скріншот основної сторінки профілю."
-    )
+    text = "Будь ласка, надішліть новий скріншот основної сторінки профілю."
+    # Якщо це фото-повідомлення, міняємо caption, інакше – текст
+    if callback.message.photo:
+        await callback.message.edit_caption(text, parse_mode="HTML")
+    else:
+        await callback.message.edit_text(text)
     await state.update_data(last_bot_message_id=callback.message.message_id)
     await callback.answer()
 
@@ -216,9 +221,11 @@ async def profile_update_basic_handler(callback: CallbackQuery, state: FSMContex
 async def profile_add_stats_handler(callback: CallbackQuery, state: FSMContext):
     """Обробник оновлення статистики профілю."""
     await state.set_state(RegistrationFSM.waiting_for_stats_photo)
-    await callback.message.edit_text(
-        "Надішліть скріншот розділу 'Statistics' → 'All Seasons'."
-    )
+    text = "Надішліть скріншот розділу 'Statistics' → 'All Seasons'."
+    if callback.message.photo:
+        await callback.message.edit_caption(text, parse_mode="HTML")
+    else:
+        await callback.message.edit_text(text)
     await state.update_data(last_bot_message_id=callback.message.message_id)
     await callback.answer()
 
@@ -227,9 +234,11 @@ async def profile_add_stats_handler(callback: CallbackQuery, state: FSMContext):
 async def profile_add_heroes_handler(callback: CallbackQuery, state: FSMContext):
     """Обробник оновлення улюблених героїв профілю."""
     await state.set_state(RegistrationFSM.waiting_for_heroes_photo)
-    await callback.message.edit_text(
-        "Надішліть скріншот розділу 'Favorite' → 'All Seasons' (топ-3)."
-    )
+    text = "Надішліть скріншот розділу 'Favorite' → 'All Seasons' (топ-3)."
+    if callback.message.photo:
+        await callback.message.edit_caption(text, parse_mode="HTML")
+    else:
+        await callback.message.edit_text(text)
     await state.update_data(last_bot_message_id=callback.message.message_id)
     await callback.answer()
 
@@ -363,7 +372,7 @@ async def profile_show_menu_handler(callback: CallbackQuery):
     await callback.answer()
 
 
-@registration_router.callback_query(F.data == "profile_prev_page")
+@registration_router.callback_query(F.data.startswith("profile_prev_page"))
 async def profile_prev_page_handler(callback: CallbackQuery):
     """Перша кнопка пагінації: попередня сторінка."""
     new_idx = int(callback.data.split(":")[-1])
@@ -377,7 +386,7 @@ async def profile_prev_page_handler(callback: CallbackQuery):
     await callback.answer()
 
 
-@registration_router.callback_query(F.data == "profile_next_page")
+@registration_router.callback_query(F.data.startswith("profile_next_page"))
 async def profile_next_page_handler(callback: CallbackQuery):
     """Друга кнопка пагінації: наступна сторінка."""
     new_idx = int(callback.data.split(":")[-1])
