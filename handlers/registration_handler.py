@@ -1,6 +1,6 @@
 """
 Обробники для процесу реєстрації та оновлення профілю користувача
-з реалізацією логіки "чистого чату" та каруселі профілю.
+з реалізацією каруселі профілю з детальною інформацією.
 """
 import html
 import base64
@@ -31,79 +31,85 @@ registration_router = Router()
 
 
 def format_profile_display(user_data: Dict[str, Any]) -> str:
-    """Форматує дані профілю для відображення користувачу."""
+    """
+    Форматує базову сторінку профілю: основні дані та contact info.
+    """
     nickname = html.escape(user_data.get("nickname", "Не вказано"))
     pid = user_data.get("player_id", "N/A")
     sid = user_data.get("server_id", "N/A")
-    rank = html.escape(user_data.get("current_rank", "Не вказано"))
-    matches = user_data.get("total_matches", "Не вказано")
-    wr = user_data.get("win_rate")
-    wr_str = f"{wr}%" if wr is not None else "Не вказано"
-    # Збираємо топ-3 героїв
-    heroes = []
-    for i in range(1, 4):
-        name = user_data.get(f"hero{i}_name")
-        if name:
-            heroes.append(str(name))
-    heroes_str = ", ".join(heroes) if heroes else "Не вказано"
+    rank = html.escape(user_data.get("current_rank", "Не вказано") or "Не вказано")
+    matches = user_data.get("total_matches", "Н/Д")
+    win = user_data.get("win_rate")
+    wr = f"{win}%" if win is not None else "Н/Д"
+    likes = user_data.get("likes_received", "Н/Д")
+    loc = html.escape(user_data.get("location", "Не вказано") or "Не вказано")
+    squad = html.escape(user_data.get("squad_name", "Не вказано") or "Не вказано")
 
-    return (
-        f"<b>Ваш профіль:</b>\n\n"
-        f"👤 <b>Нікнейм:</b> {nickname}\n"
-        f"🆔 <b>ID:</b> {pid} ({sid})\n"
-        f"🏆 <b>Ранг:</b> {rank}\n"
-        f"⚔️ <b>Матчів:</b> {matches}\n"
-        f"📊 <b>WR:</b> {wr_str}\n"
-        f"🦸 <b>Улюблені герої:</b> {heroes_str}"
-    )
+    lines = [
+        f"<b>Профіль гравця:</b>",
+        f"👤 <b>Нікнейм:</b> {nickname}",
+        f"🆔 <b>ID:</b> {pid} ({sid})",
+        f"🏆 <b>Ранг:</b> {rank}",
+        f"⚔️ <b>Матчів:</b> {matches}",
+        f"📊 <b>WR:</b> {wr}",
+        f"👍 <b>Лайків:</b> {likes}",
+        f"🌍 <b>Локація:</b> {loc}",
+        f"🛡️ <b>Сквад:</b> {squad}",
+    ]
+    return "\n".join(lines)
 
 
 async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]:
     """
-    Формує перелік сторінок профілю:
-      [{'photo': url, 'caption': text}, ...]
-    Порядок: basic → stats → heroes → avatar.
+    Формує карусель профілю: basic → stats → heroes → avatar.
     """
     pages: List[Dict[str, str]] = []
 
-    # Basic
+    # Basic profile
     pages.append({
         "photo": user_data.get("basic_profile_permanent_url", ""),
         "caption": format_profile_display(user_data),
     })
-    # Stats
+
+    # Detailed stats page
     stats_url = user_data.get("stats_photo_permanent_url")
     if stats_url:
+        stats_lines = [
+            "<b>📊 Детальна статистика:</b>",
+            f"• MVP: {user_data.get('mvp_count','N/A')}",
+            f"• Legendary: {user_data.get('legendary_count','N/A')}",
+            f"• Maniac: {user_data.get('maniac_count','N/A')}",
+            f"• KDA: {user_data.get('kda_ratio','N/A')}",
+            f"• Avg Gold/Min: {user_data.get('avg_gold_per_min','N/A')}",
+            f"• Avg Dmg/Min: {user_data.get('avg_hero_dmg_per_min','N/A')}",
+        ]
         pages.append({
             "photo": stats_url,
-            "caption": (
-                f"<b>Статистика:</b>\n"
-                f"⚔️ Матчів: {user_data.get('total_matches', 'N/A')}\n"
-                f"📊 WR: {user_data.get('win_rate', 'N/A')}%"
-            ),
+            "caption": "\n".join(stats_lines),
         })
-    # Heroes
+
+    # Heroes page
     heroes_url = user_data.get("heroes_photo_permanent_url")
     if heroes_url:
-        # Детальніше: топ-3 з метриками
-        hero_lines = []
+        hero_lines = ["<b>🦸 Топ-3 герої:</b>"]
         for i in range(1, 4):
             name = user_data.get(f"hero{i}_name")
-            m = user_data.get(f"hero{i}_matches")
-            w = user_data.get(f"hero{i}_win_rate")
+            m = user_data.get(f"hero{i}_matches") or 0
+            w = user_data.get(f"hero{i}_win_rate") or 0.0
             if name:
-                line = f"{name}"
-                if m is not None:
-                    line += f": {m} матчів"
-                    if w is not None:
-                        line += f", {w}%"
-                hero_lines.append(line)
-        caption = "<b>Улюблені герої:</b>\n" + "\n".join(hero_lines) if hero_lines else "<b>Улюблені герої:</b> Не вказано"
-        pages.append({"photo": heroes_url, "caption": caption})
-    # Avatar
+                hero_lines.append(f"{i}. {html.escape(name)} — {m} матчів, {w}%")
+        pages.append({
+            "photo": heroes_url,
+            "caption": "\n".join(hero_lines),
+        })
+
+    # Avatar page
     avatar_url = user_data.get("avatar_permanent_url")
     if avatar_url:
-        pages.append({"photo": avatar_url, "caption": "<b>Ваш аватар</b>"})
+        pages.append({
+            "photo": avatar_url,
+            "caption": "<b>Ваш аватар</b>",
+        })
 
     return pages
 
@@ -116,8 +122,7 @@ async def show_profile_carousel(
     page_index: int,
 ) -> None:
     """
-    Рендерить carousel: міняє фото+підпис і оновлює клавіатуру.
-    Кліпує page_index у межі [0, total_pages-1].
+    Оновлює фото та підпис у каруселі профілю.
     """
     user_data = await get_user_by_telegram_id(user_id) or {}
     pages = await build_profile_pages(user_data)
@@ -125,21 +130,22 @@ async def show_profile_carousel(
     if total == 0:
         return
 
-    # Кліпимо індекс
+    # Clip index
     page_index = max(0, min(page_index, total - 1))
     page = pages[page_index]
 
-    # Оновлюємо медіа
+    # Change media
     if page["photo"]:
-        media = InputMediaPhoto(media=page["photo"])
         try:
             await bot.edit_message_media(
-                chat_id=chat_id, message_id=message_id, media=media
+                chat_id=chat_id,
+                message_id=message_id,
+                media=InputMediaPhoto(media=page["photo"])
             )
         except TelegramAPIError as e:
             logger.warning(f"Не вдалося оновити media: {e}")
 
-    # Оновлюємо підпис і клавіатуру
+    # Change caption & keyboard
     await bot.edit_message_caption(
         chat_id=chat_id,
         message_id=message_id,
@@ -158,14 +164,13 @@ async def show_profile_menu(
     message_to_delete_id: Optional[int] = None,
 ) -> None:
     """
-    Відображає першу сторінку профілю з однією кнопкою.
-    Якщо message_to_delete_id — видаляє старе повідомлення.
+    Відображає початкову сторінку профілю з кнопкою меню.
     """
     if message_to_delete_id:
         try:
             await bot.delete_message(chat_id, message_to_delete_id)
-        except TelegramAPIError as e:
-            logger.warning(f"Не вдалося видалити {message_to_delete_id}: {e}")
+        except TelegramAPIError:
+            pass
 
     user_data = await get_user_by_telegram_id(user_id)
     if not user_data:
@@ -312,8 +317,10 @@ async def handle_profile_update_photo(
         img_bytes = (await bot.download_file(file_info.file_path)).read()
         url = await file_resilience_manager.optimize_and_store_image(img_bytes, user_id, mode)
         b64 = base64.b64encode(img_bytes).decode("utf-8")
+
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
             result = await gpt.analyze_user_profile(b64, mode=mode)
+
         if not result or "error" in result:
             err = result.get("error", "Не вдалося розпізнати дані.")
             await thinking.edit_text(f"❌ Помилка аналізу: {err}")
@@ -414,14 +421,13 @@ async def profile_show_menu_handler(callback: CallbackQuery) -> None:
 @registration_router.callback_query(F.data.startswith("profile_prev_page"))
 async def profile_prev_page_handler(callback: CallbackQuery) -> None:
     """Перемикає на попередню сторінку каруселі."""
-    idx1 = int(callback.data.split(":", 1)[1])
-    page_index = idx1 - 1  # конвертація в 0-based
+    idx = int(callback.data.split(":", 1)[1]) - 1
     await show_profile_carousel(
         bot=callback.bot,
         chat_id=callback.message.chat.id,
         message_id=callback.message.message_id,
         user_id=callback.from_user.id,
-        page_index=page_index,
+        page_index=idx,
     )
     await callback.answer()
 
@@ -429,14 +435,13 @@ async def profile_prev_page_handler(callback: CallbackQuery) -> None:
 @registration_router.callback_query(F.data.startswith("profile_next_page"))
 async def profile_next_page_handler(callback: CallbackQuery) -> None:
     """Перемикає на наступну сторінку каруселі."""
-    idx1 = int(callback.data.split(":", 1)[1])
-    page_index = idx1 - 1
+    idx = int(callback.data.split(":", 1)[1]) - 1
     await show_profile_carousel(
         bot=callback.bot,
         chat_id=callback.message.chat.id,
         message_id=callback.message.message_id,
         user_id=callback.from_user.id,
-        page_index=page_index,
+        page_index=idx,
     )
     await callback.answer()
 
