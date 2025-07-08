@@ -362,13 +362,15 @@ async def profile_show_menu_handler(callback: CallbackQuery) -> None:
 @registration_router.callback_query(F.data.startswith("profile_prev_page"))
 async def profile_prev_page_handler(callback: CallbackQuery) -> None:
     """Перемикає на попередню сторінку каруселі."""
-    idx = int(callback.data.split(":", 1)[1])
+    # callback.data містить 1-based номер сторінки
+    idx1 = int(callback.data.split(":", 1)[1])
+    page_index = idx1 - 1  # конвертація в 0-based
     await show_profile_carousel(
         bot=callback.bot,
         chat_id=callback.message.chat.id,
         message_id=callback.message.message_id,
         user_id=callback.from_user.id,
-        page_index=idx,
+        page_index=page_index,
     )
     await callback.answer()
 
@@ -376,13 +378,14 @@ async def profile_prev_page_handler(callback: CallbackQuery) -> None:
 @registration_router.callback_query(F.data.startswith("profile_next_page"))
 async def profile_next_page_handler(callback: CallbackQuery) -> None:
     """Перемикає на наступну сторінку каруселі."""
-    idx = int(callback.data.split(":", 1)[1])
+    idx1 = int(callback.data.split(":", 1)[1])
+    page_index = idx1 - 1
     await show_profile_carousel(
         bot=callback.bot,
         chat_id=callback.message.chat.id,
         message_id=callback.message.message_id,
         user_id=callback.from_user.id,
-        page_index=idx,
+        page_index=page_index,
     )
     await callback.answer()
 
@@ -402,10 +405,12 @@ async def profile_delete_handler(
 ) -> None:
     """Запит на підтвердження видалення профілю."""
     await state.set_state(RegistrationFSM.confirming_deletion)
-    await callback.message.edit_text(
-        "Ви впевнені, що хочете видалити профіль? Це назавжди.",
-        reply_markup=create_delete_confirm_keyboard(),
-    )
+    text = "Ви впевнені, що хочете видалити профіль? Це назавжди."
+    # Якщо повідомлення — фото, редагуємо caption, інакше — текст
+    if callback.message.photo:
+        await callback.message.edit_caption(text, reply_markup=create_delete_confirm_keyboard())
+    else:
+        await callback.message.edit_text(text, reply_markup=create_delete_confirm_keyboard())
     await callback.answer()
 
 
