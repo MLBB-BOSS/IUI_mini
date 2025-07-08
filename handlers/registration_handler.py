@@ -1,6 +1,6 @@
 """
 Обробники для реєстрації та оновлення профілю користувача
-з реалізацією каруселі слайдів з покращеним візуальним оформленням.
+з реалізацією каруселі слайдів з цитатними блоками для кожної сторінки.
 """
 import html
 import base64
@@ -28,7 +28,8 @@ registration_router = Router()
 
 def format_profile_display(user_data: Dict[str, Any]) -> str:
     """
-    Форматує базову сторінку профілю з блоками та емодзі для кращого сприйняття.
+    Форматує базову сторінку профілю з блоками та емодзі,
+    обгорнувши весь текст у HTML-цитату.
     """
     nickname = html.escape(user_data.get("nickname", "Не вказано"))
     pid = user_data.get("player_id", "N/A")
@@ -65,12 +66,14 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
         f"┃ 🛡️ <b>Сквад:</b> {squad}",
         "┗━━━━━━━━━━━━━━━┛",
     ]
-    return "\n".join(lines)
+    content = "\n".join(lines)
+    return f"<blockquote>\n{content}\n</blockquote>"
 
 
 async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]:
     """
     Формує карусель профілю: basic → stats → heroes → avatar.
+    Кожний caption обгорнутий у HTML-цитату.
     """
     pages: List[Dict[str, str]] = []
 
@@ -90,7 +93,7 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
         gold = user_data.get("avg_gold_per_min", 0)
         dmg = user_data.get("avg_hero_dmg_per_min", 0)
 
-        stats_lines = [
+        lines = [
             "📊 <b>ДЕТАЛЬНА СТАТИСТИКА</b>",
             "┏━━━━━━━━━━━━━━━━━━━━━┓",
             f"┃ 🌟 MVP: <b>{mvp}</b>",
@@ -102,33 +105,45 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
             f"┃ ⚔️ Dmg/Min: <b>{dmg}</b>",
             "┗━━━━━━━━━━━━━━━━━━━━━┛",
         ]
-        pages.append({"photo": stats_url, "caption": "\n".join(stats_lines)})
+        content = "\n".join(lines)
+        pages.append({
+            "photo": stats_url,
+            "caption": f"<blockquote>\n{content}\n</blockquote>",
+        })
 
     # Top-3 heroes
     heroes_url = user_data.get("heroes_photo_permanent_url")
     if heroes_url:
-        hero_lines = ["🦸 <b>ТОП-3 ГЕРОЇ</b>", "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"]
         medals = ["🥇", "🥈", "🥉"]
+        lines = [
+            "🦸 <b>ТОП-3 ГЕРОЇ</b>",
+            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
+        ]
         for i in range(1, 4):
             name = user_data.get(f"hero{i}_name")
             matches = user_data.get(f"hero{i}_matches", 0)
             win_rate = user_data.get(f"hero{i}_win_rate", 0.0)
             if name:
-                hero_lines.append(f"┃ {medals[i-1]} <b>{html.escape(name)}</b>")
-                hero_lines.append(
+                lines.append(f"┃ {medals[i-1]} <b>{html.escape(name)}</b>")
+                lines.append(
                     f"┃    🎯 Матчів: <b>{matches}</b> | 📊 WR: <b>{win_rate:.1f}%</b>"
                 )
                 if i < 3:
-                    hero_lines.append("┃")
-        hero_lines.append("┗━━━━━━━━━━━━━━━━━━━┛")
-        pages.append({"photo": heroes_url, "caption": "\n".join(hero_lines)})
+                    lines.append("┃")
+        lines.append("┗━━━━━━━━━━━━━━━━━━━┛")
+        content = "\n".join(lines)
+        pages.append({
+            "photo": heroes_url,
+            "caption": f"<blockquote>\n{content}\n</blockquote>",
+        })
 
     # Avatar
     avatar_url = user_data.get("avatar_permanent_url")
     if avatar_url:
+        content = "🖼️ <b>ВАШ АВАТАР</b>\n\nПерсональне зображення профілю."
         pages.append({
             "photo": avatar_url,
-            "caption": "🖼️ <b>ВАШ АВАТАР</b>\n\nПерсональне зображення профілю.",
+            "caption": f"<blockquote>\n{content}\n</blockquote>",
         })
 
     return pages
@@ -153,23 +168,21 @@ async def show_profile_carousel(
     idx = max(0, min(page_index, total - 1))
     page = pages[idx]
 
+    # Оновлюємо медіа
     if page["photo"]:
         media = InputMediaPhoto(media=page["photo"])
         try:
-            await bot.edit_message_media(
-                chat_id=chat_id, message_id=message_id, media=media
-            )
+            await bot.edit_message_media(chat_id=chat_id, message_id=message_id, media=media)
         except TelegramAPIError as e:
             logger.warning(f"Не вдалося оновити media: {e}")
 
+    # Оновлюємо підпис + меню
     await bot.edit_message_caption(
         chat_id=chat_id,
         message_id=message_id,
         caption=page["caption"],
         parse_mode="HTML",
-        reply_markup=create_profile_menu_overview_keyboard(
-            current_page=idx + 1, total_pages=total
-        ),
+        reply_markup=create_profile_menu_overview_keyboard(current_page=idx+1, total_pages=total),
     )
 
 
@@ -217,8 +230,7 @@ async def cmd_profile(message: Message, state: FSMContext, bot: Bot) -> None:
     """Обробник команди /profile."""
     if not message.from_user:
         return
-    uid = message.from_user.id
-    cid = message.chat.id
+    uid, cid = message.from_user.id, message.chat.id
     try:
         await message.delete()
     except TelegramAPIError:
@@ -297,8 +309,7 @@ async def handle_profile_update_photo(
     """Універсальний обробник отримання фото в станах реєстрації."""
     if not message.from_user or not message.photo:
         return
-    uid = message.from_user.id
-    cid = message.chat.id
+    uid, cid = message.from_user.id, message.chat.id
     data = await state.get_data()
     last_id = data.get("last_bot_message_id")
     try:
