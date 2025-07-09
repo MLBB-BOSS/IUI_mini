@@ -203,8 +203,8 @@ def create_profile_menu_overview_keyboard(
 ) -> InlineKeyboardMarkup:
     """
     Розгорнуте інтерактивне меню профілю.
-    1. Навігація каруселлю, якщо total_pages > 1:
-       | ◀️ | {current_page}/{total_pages} | ▶️ |
+    1. Навігація каруселлю, тільки стрілки, якщо більше однієї сторінки:
+       | ◀️ | ▶️ |
     2. Дії:
        | 🔄 Профіль | 📈 Статистика |
        | 🦸 Герої   | 🖼️ Аватар      |
@@ -212,34 +212,32 @@ def create_profile_menu_overview_keyboard(
     """
     builder = InlineKeyboardBuilder()
 
-    # Додавання стрілок навігації, якщо більше однієї сторінки
+    # Додаємо стрілки навігації лише коли сторінок більше однієї
     if total_pages > 1:
         prev_disabled = current_page <= 1
         next_disabled = current_page >= total_pages
+        # Кнопка "назад"
         builder.button(
             text="◀️",
             callback_data=f"profile_prev_page:{current_page-1}",
             disabled=prev_disabled
         )
-        builder.button(
-            text=f"{current_page}/{total_pages}",
-            callback_data="profile_page_status",
-            disabled=True
-        )
+        # Кнопка "вперед"
         builder.button(
             text="▶️",
             callback_data=f"profile_next_page:{current_page+1}",
             disabled=next_disabled
         )
-        builder.adjust(3)
+        # Розташувати обидві в один ряд
+        builder.adjust(2)
 
     # Основні дії користувача
-    builder.button(text="🔄 Профіль", callback_data="profile_update_basic")
-    builder.button(text="📈 Статис", callback_data="profile_update_stats")
-    builder.button(text="🦸 Герої", callback_data="profile_update_heroes")
-    builder.button(text="🖼️ Аватар", callback_data="profile_update_avatar")
-    builder.button(text="🗑️ Видалити", callback_data="profile_delete")
-    builder.button(text="◀️ Закрити", callback_data="profile_hide_menu")
+    builder.button(text="🔄 Профіль",     callback_data="profile_update_basic")
+    builder.button(text="📈 Статистика", callback_data="profile_update_stats")
+    builder.button(text="🦸 Герої",       callback_data="profile_update_heroes")
+    builder.button(text="🖼️ Аватар",     callback_data="profile_update_avatar")
+    builder.button(text="🗑️ Видалити",   callback_data="profile_delete")
+    builder.button(text="◀️ Закрити",    callback_data="profile_hide_menu")
     # Викладка у два стовпці
     builder.adjust(2, 2, 2)
 
