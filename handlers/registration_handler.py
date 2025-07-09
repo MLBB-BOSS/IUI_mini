@@ -31,13 +31,15 @@ registration_router = Router()
 
 
 def format_profile_display(user_data: Dict[str, Any]) -> str:
-    """Форматує базову сторінку профілю, показуючи ранг точно так, як він є в БД."""
+    """
+    Форматує базову сторінку профілю, показуючи ранг саме як збережено в БД.
+    Обгортає текст у HTML-цитату.
+    """
     nickname = html.escape(user_data.get("nickname", "Не вказано"))
     pid = user_data.get("player_id", "N/A")
     sid = user_data.get("server_id", "N/A")
-    # Беремо саме те значення, що зберіглось у current_rank, без змін
+    # Відображаємо current_rank «як є»
     rank = html.escape(user_data.get("current_rank", "Не вказано") or "Не вказано")
-
     loc = html.escape(user_data.get("location", "Не вказано") or "Не вказано")
     squad = html.escape(user_data.get("squad_name", "Не вказано") or "Не вказано")
 
@@ -49,8 +51,8 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
         f"🌍 <b>Локація:</b> {loc}",
         f"🛡️ <b>Сквад:</b> {squad}",
     ]
-    content = "\n".join(lines)
-    return f"<blockquote>\n{content}\n</blockquote>"
+    return "<blockquote>\n" + "\n".join(lines) + "\n</blockquote>"
+
 
 async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]:
     """
@@ -65,7 +67,7 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
         "caption": format_profile_display(user_data),
     })
 
-    # 2) Summary + detailed stats
+    # 2) Ігрова статистика та деталі
     stats_url = user_data.get("stats_photo_permanent_url")
     if stats_url:
         matches = user_data.get("total_matches", "N/A")
@@ -114,10 +116,9 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
                 lines.append(f"📊 WR: <b>{wr_i:.1f}%</b>")
                 lines.append(f"🎯 Матчів: <b>{matches_i}</b>")
                 if i < 3:
-                    lines.append("")  # порожній рядок між героями
+                    lines.append("")
         content = "\n".join(lines)
-        # додаємо невидимі символи для розширення цитатного фону
-        pad = "ㅤ" * 12
+        pad = "ㅤ" * 12  # розширення цитатного фону
         pages.append({
             "photo": heroes_url,
             "caption": f"<blockquote>\n{content}\n{pad}\n</blockquote>",
@@ -151,13 +152,11 @@ async def show_profile_carousel(
     """
     user_data = await get_user_by_telegram_id(user_id) or {}
     pages = await build_profile_pages(user_data)
-    total = len(pages)
-    if total == 0:
+    if not pages:
         return
 
-    idx = max(0, min(page_index, total - 1))
+    idx = max(0, min(page_index, len(pages) - 1))
     page = pages[idx]
-
     if page["photo"]:
         try:
             await bot.edit_message_media(
@@ -174,7 +173,7 @@ async def show_profile_carousel(
         caption=page["caption"],
         parse_mode="HTML",
         reply_markup=create_profile_menu_overview_keyboard(
-            current_page=idx + 1, total_pages=total
+            current_page=idx + 1, total_pages=len(pages)
         ),
     )
 
@@ -220,7 +219,11 @@ async def show_profile_menu(
 
 @registration_router.message(Command("profile"))
 async def cmd_profile(message: Message, state: FSMContext, bot: Bot) -> None:
-    """Обробник команди /profile."""
+    """
+    Обробник команди /profile.
+    Якщо профіль зареєстрований (є URL), показує його,
+    інакше запитує скріншот для реєстрації/оновлення.
+    """
     if not message.from_user:
         return
     uid, cid = message.from_user.id, message.chat.id
@@ -228,23 +231,25 @@ async def cmd_profile(message: Message, state: FSMContext, bot: Bot) -> None:
         await message.delete()
     except TelegramAPIError:
         pass
+
     await state.clear()
-    if await get_user_by_telegram_id(uid):
+    user_data = await get_user_by_telegram_id(uid)
+    if user_data and user_data.get("basic_profile_permanent_url"):
         await show_profile_menu(bot, cid, uid)
     else:
         await state.set_state(RegistrationFSM.waiting_for_basic_photo)
         sent = await bot.send_message(
             cid,
-            "👋 Вітаю! Надішліть, будь ласка, скріншот вашого профілю для реєстрації. 📸"
+            "👋 Вітаю! Будь ласка, надішліть скріншот вашого профілю для реєстрації або оновлення. 📸"
         )
         await state.update_data(last_bot_message_id=sent.message_id)
 
 
 @registration_router.callback_query(F.data == "profile_update_basic")
-async def profile_update_basic_handler(
-    callback: CallbackQuery, state: FSMContext
-) -> None:
-    """Перезапит базового скріншота."""
+async def profile_update_basic_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Перезапит базового скріншота.
+    """
     await state.set_state(RegistrationFSM.waiting_for_basic_photo)
     try:
         await callback.message.delete()
@@ -259,10 +264,10 @@ async def profile_update_basic_handler(
 
 
 @registration_router.callback_query(F.data == "profile_update_stats")
-async def profile_update_stats_handler(
-    callback: CallbackQuery, state: FSMContext
-) -> None:
-    """Запит скріншота статистики."""
+async def profile_update_stats_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Запит скріншота статистики.
+    """
     await state.set_state(RegistrationFSM.waiting_for_stats_photo)
     try:
         await callback.message.delete()
@@ -277,10 +282,10 @@ async def profile_update_stats_handler(
 
 
 @registration_router.callback_query(F.data == "profile_update_heroes")
-async def profile_update_heroes_handler(
-    callback: CallbackQuery, state: FSMContext
-) -> None:
-    """Запит скріншота улюблених героїв."""
+async def profile_update_heroes_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Запит скріншота улюблених героїв.
+    """
     await state.set_state(RegistrationFSM.waiting_for_heroes_photo)
     try:
         await callback.message.delete()
@@ -305,7 +310,10 @@ async def profile_update_heroes_handler(
 async def handle_profile_update_photo(
     message: Message, state: FSMContext, bot: Bot
 ) -> None:
-    """Універсальний обробник отримання фото в станах реєстрації."""
+    """
+    Універсальний обробник фото в станах реєстрації: basic, stats, heroes.
+    Аналізує, зберігає в БД і відображає карусель.
+    """
     if not message.from_user or not message.photo:
         return
     uid, cid = message.from_user.id, message.chat.id
@@ -316,19 +324,20 @@ async def handle_profile_update_photo(
     except TelegramAPIError:
         pass
 
-    mode = {
+    state_name = await state.get_state()
+    mode_map = {
         RegistrationFSM.waiting_for_basic_photo.state: "basic",
         RegistrationFSM.waiting_for_stats_photo.state: "stats",
         RegistrationFSM.waiting_for_heroes_photo.state: "heroes",
-    }.get(await state.get_state())
+    }
+    mode = mode_map.get(state_name)
     if not mode or not last_id:
         await bot.send_message(cid, "Сталася помилка. Спробуйте /profile ще раз.")
         await state.clear()
         return
 
     thinking = await bot.edit_message_text(
-        chat_id=cid,
-        message_id=last_id,
+        chat_id=cid, message_id=last_id,
         text=f"Аналізую ваш скріншот ({mode})... 🤖"
     )
     try:
@@ -459,7 +468,7 @@ async def profile_delete_handler(
 ) -> None:
     """Запит на підтвердження видалення профілю."""
     await state.set_state(RegistrationFSM.confirming_deletion)
-    text = "Ви впевнені, що хочете видалити профіль? Це назавжди."
+    text = "Ви впевнені, що хочете видалити профі��ь? Це назавжди."
     if callback.message.photo:
         await callback.message.edit_caption(text, reply_markup=create_delete_confirm_keyboard())
     else:
