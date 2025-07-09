@@ -1,4 +1,4 @@
-#config.py
+# config.py
 """
 Configuration settings and environment variables for the MLBB IUI Mini bot.
 
@@ -33,6 +33,13 @@ OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 GEMINI_API_KEY: str = os.getenv("API_Gemini", "")
 GOOGLE_CLOUD_PROJECT_ID: str = os.getenv("GOOGLE_CLOUD_PROJECT_ID", "")
 CLOUDINARY_URL: str = os.getenv("CLOUDINARY_URL", "")
+
+# ------------------------------------------------------------------------------
+# Redis configuration
+# ------------------------------------------------------------------------------
+# Heroku RedisCloud provides REDISCLOUD_URL; fallback to REDIS_URL if set.
+REDISCLOUD_URL: str = os.getenv("REDISCLOUD_URL", "")
+REDIS_URL: str = os.getenv("REDIS_URL") or REDISCLOUD_URL
 
 # ------------------------------------------------------------------------------
 # Database URLs (sync and async)
@@ -151,6 +158,7 @@ _critical_vars = {
     "CLOUDINARY_URL": bool(CLOUDINARY_URL),
     "DATABASE_URL (sync)": bool(SYNC_DATABASE_URL),
     "AS_BASE (async)": bool(ASYNC_DATABASE_URL),
+    "REDIS_URL": bool(REDIS_URL),
 }
 _missing = [name for name, ok in _critical_vars.items() if not ok]
 if _missing:
@@ -171,3 +179,4 @@ logger.info("✅ GOOGLE_CLOUD_PROJECT_ID loaded.")
 logger.info("✅ CLOUDINARY_URL loaded.")
 logger.info("✅ SYNC_DATABASE_URL loaded.")
 logger.info("✅ ASYNC_DATABASE_URL loaded.")
+logger.info("✅ REDIS_URL loaded.")
