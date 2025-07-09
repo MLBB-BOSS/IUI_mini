@@ -55,8 +55,10 @@ from keyboards.inline_keyboards import (
     create_required_roles_keyboard,
     create_party_info_keyboard 
 )
-# 🧠 ІМПОРТУЄМО ФУНКЦІЇ ДЛЯ РОБОТИ З БД
-from database.crud import get_user_by_telegram_id, add_or_update_user
+# 🧠 ІМПОРТУЄМО ФУНКЦІЇ ДЛЯ РОБОТИ З БД ТА НОВИМИ ШАРАМИ ПАМ'ЯТІ
+from database.crud import get_user_by_telegram_id
+from utils.session_memory import SessionData, load_session, save_session
+from utils.cache_manager import load_user_cache, save_user_cache
 
 
 # === 🔄 ОНОВЛЕННЯ СТАНІВ FSM ===
@@ -70,7 +72,6 @@ class PartyCreationFSM(StatesGroup):
 
 
 # === СХОВИЩА ДАНИХ У ПАМ'ЯТІ ===
-# 🧠 Видаляємо chat_histories, оскільки тепер пам'ять буде в БД
 chat_cooldowns: Dict[int, float] = {}
 vision_cooldowns: Dict[int, float] = {}
 active_lobbies: Dict[int, Dict] = {} 
@@ -840,9 +841,6 @@ async def handle_image_messages(message: Message, bot: Bot):
             else:
                 await message.reply(final_response, parse_mode=None)
             
-            # Цей блок більше не використовується для збереження історії,
-            # але залишений для можливого майбутнього логування.
-            # chat_histories[chat_id].extend([{"role": "user", "content": "[Надіслав зображення]"}, {"role": "assistant", "content": final_response}])
         elif thinking_msg:
             await thinking_msg.edit_text(f"Хм, {current_user_name}, не можу розібрати, що тут 🤔")
     except Exception as e:
@@ -879,32 +877,35 @@ async def handle_trigger_messages(message: Message, bot: Bot):
         chat_cooldowns[chat_id] = current_time
 
     if should_respond:
-        user_data = await get_user_by_telegram_id(user_id)
-
-        # --- 🧠 НОВИЙ ЛОГІЧНИЙ БЛОК: Обробка запиту від незареєстрованого користувача ---
         is_personalization_request = any(trigger in text_lower for trigger in PERSONALIZATION_TRIGGERS)
-        if not user_data and is_personalization_request:
+        
+        # Перевіряємо статус реєстрації один раз
+        db_user_data = await get_user_by_telegram_id(user_id)
+        is_registered = bool(db_user_data)
+
+        if not is_registered and is_personalization_request:
             logger.info(f"Незареєстрований користувач {current_user_name} спробував отримати персоналізовану відповідь.")
             await message.reply(
                 f"Привіт, {current_user_name}! 👋\n\n"
                 "Бачу, ти хочеш отримати персональну інформацію. Для цього мені потрібно знати твій профіль.\n\n"
                 f"Будь ласка, пройди швидку реєстрацію за допомогою команди /profile. Це дозволить мені зберігати твою історію та надавати більш точні відповіді!"
             )
-            return # Важливо завершити обробку тут
+            return
 
-        # --- Існуюча логіка для зареєстрованих користувачів та загальних розмов ---
-        chat_history = []
-        if user_data and isinstance(user_data.get('chat_history'), list):
-            chat_history = user_data['chat_history']
-        
+        # Завантажуємо дані та історію з відповідного шару пам'яті
+        if is_registered:
+            user_cache = await load_user_cache(user_id)
+            chat_history = user_cache.get('chat_history', [])
+            full_profile_for_prompt = user_cache if is_personalization_request else None
+        else:
+            session = await load_session(user_id)
+            chat_history = session.chat_history
+            full_profile_for_prompt = None  # Незареєстровані не мають профілю
+
+        # Додаємо повідомлення користувача та обрізаємо історію
         chat_history.append({"role": "user", "content": message.text})
         if len(chat_history) > MAX_CHAT_HISTORY_LENGTH:
             chat_history = chat_history[-MAX_CHAT_HISTORY_LENGTH:]
-
-        full_profile_for_prompt = None
-        if user_data and is_personalization_request:
-            logger.info(f"Виявлено тригер персоналізації для {current_user_name}. Завантажую повний профіль.")
-            full_profile_for_prompt = user_data
 
         try:
             async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
@@ -916,12 +917,17 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                 )
             
             if reply_text and "<i>" not in reply_text:
-                # 🧠 Зберігаємо історію тільки якщо користувач існує
-                if user_data:
-                    # Оновлюємо лише історію, не створюючи нового користувача
-                    update_payload = {'telegram_id': user_id, 'chat_history': chat_history}
-                    # Використовуємо той самий add_or_update_user, але тепер він безпечний для цього випадку
-                    await add_or_update_user(update_payload)
+                # Додаємо відповідь асистента до історії
+                chat_history.append({"role": "assistant", "content": reply_text})
+                
+                # Зберігаємо оновлені дані у відповідний шар
+                if is_registered:
+                    user_cache['chat_history'] = chat_history
+                    await save_user_cache(user_id, user_cache)
+                else:
+                    session.chat_history = chat_history
+                    await save_session(user_id, session)
+
                 await message.reply(reply_text)
         except Exception as e:
             logger.exception(f"Помилка генерації адаптивної відповіді: {e}")
