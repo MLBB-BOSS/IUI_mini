@@ -115,7 +115,7 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
                 lines.append(f"📊 WR: <b>{wr_i:.1f}%</b>")
                 lines.append(f"🎯 Матчів: <b>{matches_i}</b>")
                 if i < 3:
-                    lines.append("")  # порожній рядок між героями
+                    lines.append("")
         content = "\n".join(lines)
         pad = "ㅤ" * 12  # розширення цитатного фону
         pages.append({
@@ -170,11 +170,15 @@ async def show_profile_carousel(
         except TelegramAPIError as e:
             logger.warning(f"Не вдалося оновити media: {e}")
 
-    # Формуємо caption з індикатором сторінок
+    # Формуємо caption з індикатором сторінок всередині цитати
     caption = page["caption"]
     if total > 1:
         page_info = f"📄 {idx + 1}/{total}"
-        caption = f"{page_info}\n\n{page['caption']}"
+        # Вставляємо ідекатор перед закриваючим тегом цитати
+        caption = caption.replace(
+            "</blockquote>",
+            f"\n{page_info}\n</blockquote>"
+        )
 
     await bot.edit_message_caption(
         chat_id=chat_id,
@@ -228,7 +232,11 @@ async def show_profile_menu(
 
 @registration_router.message(Command("profile"))
 async def cmd_profile(message: Message, state: FSMContext, bot: Bot) -> None:
-    """Обробник команди /profile."""
+    """
+    Обробник команди /profile.
+    Якщо профіль зареєстрований (є URL), показує його,
+    інакше запитує скріншот для реєстрації/оновлення.
+    """
     if not message.from_user:
         return
     uid, cid = message.from_user.id, message.chat.id
@@ -236,6 +244,7 @@ async def cmd_profile(message: Message, state: FSMContext, bot: Bot) -> None:
         await message.delete()
     except TelegramAPIError:
         pass
+
     await state.clear()
     user_data = await get_user_by_telegram_id(uid)
     if user_data and user_data.get("basic_profile_permanent_url"):
@@ -314,7 +323,10 @@ async def profile_update_heroes_handler(
 async def handle_profile_update_photo(
     message: Message, state: FSMContext, bot: Bot
 ) -> None:
-    """Універсальний обробник отримання фото в станах реєстрації."""
+    """
+    Універсальний обробник отримання фото в станах реєстрації.
+    Аналізує, зберігає в БД і відображає карусель.
+    """
     if not message.from_user or not message.photo:
         return
     uid, cid = message.from_user.id, message.chat.id
@@ -325,11 +337,12 @@ async def handle_profile_update_photo(
     except TelegramAPIError:
         pass
 
-    mode = {
+    mode_map = {
         RegistrationFSM.waiting_for_basic_photo.state: "basic",
         RegistrationFSM.waiting_for_stats_photo.state: "stats",
         RegistrationFSM.waiting_for_heroes_photo.state: "heroes",
-    }.get(await state.get_state())
+    }
+    mode = mode_map.get(await state.get_state())
     if not mode or not last_id:
         await bot.send_message(cid, "Сталася помилка. Спробуйте /profile ще раз.")
         await state.clear()
@@ -370,7 +383,6 @@ async def handle_profile_update_photo(
         elif mode == "stats":
             mi = result.get("main_indicators", {})
             achL = result.get("achievements_left_column", {})
-            achR = result.get("achievements_right_column", {})
             det = result.get("details_panel", {})
             payload.update({
                 "total_matches": mi.get("matches_played"),
