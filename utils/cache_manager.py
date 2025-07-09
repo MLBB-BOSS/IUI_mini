@@ -11,7 +11,7 @@ Cache layer for registered users:
 
 import asyncio
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from config import logger
 from utils.redis_client import get_redis
@@ -36,14 +36,13 @@ async def load_user_cache(user_id: int) -> Dict[str, Any]:
             return json.loads(raw)
         # cache miss → load from DB and populate cache
         user_data = await get_user_by_telegram_id(user_id) or {}
-        # Якщо в БД є дані, кешуємо їх
         if user_data:
             await save_user_cache(user_id, user_data)
         return user_data
     except Exception as e:
         logger.warning(f"Redis unavailable on load_user_cache({user_id}): {e}")
-        user_data = await get_user_by_telegram_id(user_id) or {}
-        return user_data
+        # fallback → БД
+        return await get_user_by_telegram_id(user_id) or {}
 
 async def save_user_cache(user_id: int, user_data: Dict[str, Any]) -> None:
     """
@@ -51,7 +50,12 @@ async def save_user_cache(user_id: int, user_data: Dict[str, Any]) -> None:
     Якщо Redis недоступний, робить лише запис у БД.
     """
     key = KEY_TEMPLATE.format(user_id=user_id)
-    payload = json.dumps(user_data, ensure_ascii=False)
+    # Серіалізуємо з підтримкою datetime → строки
+    try:
+        payload = json.dumps(user_data, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error(f"Error serializing user_data for cache (user {user_id}): {e}", exc_info=True)
+        payload = "{}"
     # Спроба запису в Redis
     try:
         redis = await get_redis()
@@ -62,7 +66,6 @@ async def save_user_cache(user_id: int, user_data: Dict[str, Any]) -> None:
         logger.warning(f"Redis unavailable on save_user_cache({user_id}): {e}")
     # Write-through: синхронний запис у БД
     try:
-        # Використовуємо add_or_update_user для оновлення всіх полів, що необхідні
         user_data_copy = user_data.copy()
         user_data_copy['telegram_id'] = user_id
         await add_or_update_user(user_data_copy)
@@ -72,8 +75,8 @@ async def save_user_cache(user_id: int, user_data: Dict[str, Any]) -> None:
 
 async def clear_user_cache(user_id: int) -> None:
     """
-    Видаляє кеш користувача з Redis. 
-    При нездужанні Redis — мовчазно ігнорує.
+    Видаляє кеш користувача з Redis.
+    Якщо Redis недоступний — мовчазно ігнорує.
     """
     key = KEY_TEMPLATE.format(user_id=user_id)
     try:
