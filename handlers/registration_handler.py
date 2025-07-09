@@ -25,6 +25,7 @@ from database.crud import (
     delete_user_by_telegram_id,
 )
 from utils.file_manager import file_resilience_manager
+from utils.cache_manager import clear_user_cache
 from config import OPENAI_API_KEY, logger
 
 registration_router = Router()
@@ -117,7 +118,7 @@ async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]
                 if i < 3:
                     lines.append("")
         content = "\n".join(lines)
-        pad = "ㅤ" * 12  # розширення цитатного фону
+        pad = "ㅤ" * 12
         pages.append({
             "photo": heroes_url,
             "caption": f"<blockquote>\n{content}\n{pad}\n</blockquote>",
@@ -146,39 +147,29 @@ async def show_profile_carousel(
     user_id: int,
     page_index: int,
 ) -> None:
-    """
-    Оновлює карусель: змінює фото, підпис та клавіатуру.
-    Переносимо індикатор сторінок у текст caption.
-    """
+    """Оновлює карусель профілю."""
     user_data = await get_user_by_telegram_id(user_id) or {}
     pages = await build_profile_pages(user_data)
-    total = len(pages)
-    if total == 0:
+    if not pages:
         return
 
-    idx = max(0, min(page_index, total - 1))
+    idx = max(0, min(page_index, len(pages) - 1))
     page = pages[idx]
 
-    # Оновлюємо медіа, якщо є фото
-    if page["photo"]:
-        try:
+    try:
+        if page["photo"]:
             await bot.edit_message_media(
                 chat_id=chat_id,
                 message_id=message_id,
                 media=InputMediaPhoto(media=page["photo"])
             )
-        except TelegramAPIError as e:
-            logger.warning(f"Не вдалося оновити media: {e}")
+    except TelegramAPIError:
+        pass
 
-    # Формуємо caption з індикатором сторінок всередині цитати
     caption = page["caption"]
-    if total > 1:
-        page_info = f"📄 {idx + 1}/{total}"
-        # Вставляємо ідекатор перед закриваючим тегом цитати
-        caption = caption.replace(
-            "</blockquote>",
-            f"\n{page_info}\n</blockquote>"
-        )
+    if len(pages) > 1:
+        info = f"📄 {idx+1}/{len(pages)}"
+        caption = caption.replace("</blockquote>", f"\n{info}\n</blockquote>")
 
     await bot.edit_message_caption(
         chat_id=chat_id,
@@ -186,7 +177,7 @@ async def show_profile_carousel(
         caption=caption,
         parse_mode="HTML",
         reply_markup=create_profile_menu_overview_keyboard(
-            current_page=idx + 1, total_pages=total
+            current_page=idx+1, total_pages=len(pages)
         ),
     )
 
@@ -197,9 +188,7 @@ async def show_profile_menu(
     user_id: int,
     message_to_delete_id: Optional[int] = None,
 ) -> None:
-    """
-    Відправляє першу сторінку профілю з однією кнопкою "Меню".
-    """
+    """Відправляє першу сторінку профілю з меню."""
     if message_to_delete_id:
         try:
             await bot.delete_message(chat_id, message_to_delete_id)
@@ -232,11 +221,7 @@ async def show_profile_menu(
 
 @registration_router.message(Command("profile"))
 async def cmd_profile(message: Message, state: FSMContext, bot: Bot) -> None:
-    """
-    Обробник команди /profile.
-    Якщо профіль зареєстрований (є URL), показує його,
-    інакше запитує скріншот для реєстрації/оновлення.
-    """
+    """/profile — показ або запит оновлення профілю."""
     if not message.from_user:
         return
     uid, cid = message.from_user.id, message.chat.id
@@ -326,6 +311,7 @@ async def handle_profile_update_photo(
     """
     Універсальний обробник отримання фото в станах реєстрації.
     Аналізує, зберігає в БД і відображає карусель.
+    При успіху – очищає відповідний кеш.
     """
     if not message.from_user or not message.photo:
         return
@@ -337,6 +323,7 @@ async def handle_profile_update_photo(
     except TelegramAPIError:
         pass
 
+    # Визначаємо режим: basic / stats / heroes
     mode_map = {
         RegistrationFSM.waiting_for_basic_photo.state: "basic",
         RegistrationFSM.waiting_for_stats_photo.state: "stats",
@@ -353,6 +340,7 @@ async def handle_profile_update_photo(
         message_id=last_id,
         text=f"Аналізую ваш скріншот ({mode})... 🤖"
     )
+
     try:
         largest: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
         file_info = await bot.get_file(largest.file_id)
@@ -412,6 +400,8 @@ async def handle_profile_update_photo(
 
         status = await add_or_update_user(payload)
         if status == "success":
+            # Очистити кеш користувача, щоб брало свіжі дані
+            await clear_user_cache(uid)
             await show_profile_menu(bot, cid, uid, message_to_delete_id=thinking.message_id)
         elif status == "conflict":
             await thinking.edit_text(
@@ -497,6 +487,9 @@ async def confirm_delete_profile(
     """Підтвердження видалення профілю."""
     uid = callback.from_user.id
     deleted = await delete_user_by_telegram_id(uid)
+    if deleted:
+        # Очистити кеш після видалення профілю
+        await clear_user_cache(uid)
     text = "Профіль успішно видалено." if deleted else "Не вдалося видалити профіль."
     await callback.message.edit_text(text)
     await callback.answer()
