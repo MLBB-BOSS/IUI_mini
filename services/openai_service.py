@@ -186,7 +186,7 @@ OPTIMIZED_SYSTEM_PROMPT_TEMPLATE = """# GGenius: Твій AI-Наставник 
 - **Ігрові Механіки:** Фарм, ротації, контроль карти, Лорд/Черепаха, як правильно пушити та дефати.
 - **Мета-гра:** Що зараз в тренді, хто імбує, а хто на дні.
 - **Стратегії та Тактики:** Драфт (піки/бани), лайнінг, ганки, макро та мікро фішки.
-- **Ранги:** Як апнути ранг і не згоріти. 🔥
+- **Ранки:** Як апнути ранг і не згоріти. 🔥
 - **Аналіз скріншотів (моя топ фіча! 📸):** Розбір профілів, статистики, результатів матчів – все по фактам з тво[...]
 
 **ЗАПИТ ВІД {user_name_escaped}:**
@@ -217,6 +217,7 @@ UNIVERSAL_VISION_PROMPT_TEMPLATE = """
 - Ім'я: {user_name}
 - Це Telegram-чат MLBB спільноти
 - Очікується природна, дружня реакція
+{caption_context}
 
 🔍 ЩО РОБИТИ:
 1. **Визнач тип контенту**: мем, скріншот гри, текст, профіль гравця, статистика, ігровий процес тощо
@@ -658,13 +659,32 @@ class MLBBChatGPT:
                 await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для розмовної відповіді закрито.")
 
-    async def analyze_image_universal(self, image_base64: str, user_name: str) -> Optional[str]:
+    async def analyze_image_universal(
+        self, 
+        image_base64: str, 
+        user_name: str,
+        caption_text: str = ""  # 🔑 Новий опціональний параметр
+    ) -> Optional[str]:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит на універсальний аналіз зображення від '{user_name_escaped}'.")
-        system_prompt = UNIVERSAL_VISION_PROMPT_TEMPLATE.format(user_name=user_name_escaped)
+        
+        # 🔑 Формуємо контекст caption
+        caption_context = ""
+        if caption_text and caption_text.strip():
+            caption_context = f"\n- Підпис до зображення: '{html.escape(caption_text)}'"
+            self.class_logger.debug(f"Додано контекст caption: {caption_context}")
+        
+        system_prompt = UNIVERSAL_VISION_PROMPT_TEMPLATE.format(
+            user_name=user_name_escaped,
+            caption_context=caption_context  # 🔑 Передаємо контекст
+        )
+        
         payload = {
             "model": self.VISION_MODEL,
-            "messages": [{"role": "user", "content": [{"type": "text", "text": system_prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}", "detail": "low"}}]}],
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": system_prompt}, 
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}", "detail": "low"}}
+            ]}],
             "max_tokens": 150, "temperature": 0.8, "top_p": 0.9,
             "presence_penalty": 0.1, "frequency_penalty": 0.1
         }
