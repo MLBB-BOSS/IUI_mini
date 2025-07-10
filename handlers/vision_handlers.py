@@ -610,14 +610,17 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
 
                 # --- Етап 3: Формування тексту на основі типу аналізу ---
                 if analysis_type == "profile":
-                    structured_data_text = format_profile_result(user_name_original, analysis_result_json)
-                    if not await _edit_caption_robust(f"✍️ Генерую опис профілю, {user_name_escaped}..."):
-                         can_edit_cq_msg_flag = False; raise ValueError("Повідомлення недоступне перед генерацією опису профілю.")
-                    description_text = await gpt_analyzer.get_profile_description(user_name_original, analysis_result_json)
-                    full_analysis_text_parts.append(structured_data_text)
-                    if description_text and description_text.strip():
-                        full_analysis_text_parts.append(f"\n\n{html.escape(description_text)}")
-                
+                    if not await _edit_caption_robust(f"✍️ Створюю твою легенду, {user_name_escaped}..."):
+                        can_edit_cq_msg_flag = False; raise ValueError("Повідомлення недоступне перед генерацією легенди.")
+                    
+                    legend_text = await gpt_analyzer.get_profile_legend(user_name_original, analysis_result_json)
+                    
+                    if legend_text and legend_text.strip() and "<i>Помилка" not in legend_text:
+                        full_analysis_text_parts.append(legend_text)
+                    else:
+                        logger.warning(f"Не вдалося згенерувати легенду для {user_name_original}, повертаюся до стандартного формату. Відповідь: {legend_text}")
+                        full_analysis_text_parts.append(format_profile_result(user_name_original, analysis_result_json))
+
                 elif analysis_type == "player_stats":
                     if not await _edit_caption_robust(f"📈 Розраховую унікальну статистику, {user_name_escaped}..."):
                         can_edit_cq_msg_flag = False; raise ValueError("Повідомлення недоступне перед розрахунком статистики.")
