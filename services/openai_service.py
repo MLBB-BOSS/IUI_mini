@@ -79,7 +79,6 @@ KESTER_TEXT_EXTRACTION_PROMPT = """
 3.  **Точність:** Розпізнай та переклади текст максимально точно, зберігаючи контекст.
 """
 
-# +++ НОВИЙ ПРОМПТ ДЛЯ СТАТИСТИКИ ГЕРОЇВ +++
 HERO_STATS_PROMPT = """
 Ти — MLBB аналітик. Витягни статистику по ТОП-3 героях зі скріншота "Favorite Heroes". Поверни ТІЛЬКИ JSON.
 {
@@ -109,26 +108,27 @@ HERO_STATS_PROMPT = """
 Точність є критичною.
 """
 
-PROFILE_DESCRIPTION_PROMPT_TEMPLATE = """
-Ти — GGenius, AI-коментатор MLBB. Створи коротку, дотепну та живу розповідь (2-4 речення) про гравця, вплітаючи в неї дані.
-Дані для аналізу:
-- Нік: {game_nickname}
-- Ранг: {highest_rank_season}
-- Матчі: {matches_played}
-- Лайки: {likes_received}
-- Локація: {location}
-- Сквад: {squad_name}
+LEGEND_PROMPT_TEMPLATE = """
+Ти — GGenius, легендарний оповідач та хронікер земель Mobile Legends.
+Твоє завдання — створити епічну та живу розповідь-легенду про гравця, використовуючи надані дані.
 
-ЗАВДАННЯ:
-1.  **Формат - розповідь:** Не перелічуй дані, а вплети їх у зв'язний, захоплюючий текст. Звертайся до гравця на ім'я.
-2.  **Знайди "фішку":** Зроби акцент на найцікавішому показнику.
-3.  **Стиль GGenius:** Дружній, захоплений, з ігровим сленгом ("тащер", "наводити жах").
-4.  **ТІЛЬКИ ТЕКСТ:** Поверни тільки саму розповідь, без привітань та форматування.
+**КРИТИЧНІ ВИМОГИ:**
+1.  **ФОРМАТ — ТІЛЬКИ РОЗПОВІДЬ:** Жодних списків, маркерів, стовпчиків чи переліків "ключ: значення". Уся інформація має бути органічно вплетена у зв'язний текст.
+2.  **ЕПІЧНИЙ СТИЛЬ:** Пиши як про легендарного воїна. Використовуй метафори, яскраві епітети та створюй атмосферу величі.
+3.  **ПОВНА ІНТЕГРАЦІЯ ДАНИХ:** Обов'язково згадай у розповіді всі надані дані: нік, ID та сервер, ранг, кількість матчів, лайки, локацію та назву скваду.
+4.  **СТРУКТУРА ТЕКСТУ:** Розділи розповідь на 2-3 абзаци для кращої читабельності.
 
-Приклад для гравця "NinjaInSlippers" з рангом "Епік" та 100 матчів:
-"Дивіться всі, це ж NinjaInSlippers! Твої 100 матчів на Епіку, схоже, були не такими вже й тихими. Мабуент, твої капці дійсно приносять удачу в бою!"
+**ДАНІ ДЛЯ ЛЕГЕНДИ:**
+- **Гравець:** {user_name}
+- **Нікнейм:** {game_nickname}
+- **ID (Сервер):** {mlbb_id_server}
+- **Найвищий Ранг:** {highest_rank_season}
+- **Кількість Матчів:** {matches_played}
+- **Кількість Лайків:** {likes_received}
+- **Локація:** {location}
+- **Сквад:** {squad_name}
 
-Зроби так, щоб гравець відчув себе зіркою!
+Почни розповідь, звертаючись до гравця на ім'я. Створи шедевр, гідний його досягнень!
 """
 
 PLAYER_STATS_DESCRIPTION_PROMPT_TEMPLATE = """
@@ -193,7 +193,6 @@ OPTIMIZED_SYSTEM_PROMPT_TEMPLATE = """# GGenius: Твій AI-Наставник 
 Твоя відповідь має бути чіткою, інформативною, але водночас фановою, з геймерським вайбом! Не забувай, ти GGenius!
 """
 
-# 🧠 Оновлюємо розмовний промпт, щоб він міг включати блок профілю
 CONVERSATIONAL_PROMPT_TEMPLATE = """
 Ти - GGenius, AI-наставник і друг, учасник Telegram-чату кіберспортивної спільноти MLBB.
 Твоє завдання — підтримувати живу, природну розмову.
@@ -240,29 +239,6 @@ UNIVERSAL_VISION_PROMPT_TEMPLATE = """
 - Markdown форматування
 
 Дай живу, людську реакцію як справжній член MLBB-спільноти!
-"""
-
-LEGEND_PROMPT_TEMPLATE = """
-Ти — GGenius, легендарний оповідач та хронікер земель Mobile Legends.
-Твоє завдання — створити епічну та живу розповідь-легенду про гравця, використовуючи надані дані.
-
-**КРИТИЧНІ ВИМОГИ:**
-1.  **ФОРМАТ — ТІЛЬКИ РОЗПОВІДЬ:** Жодних списків, маркерів, стовпчиків чи переліків "ключ: значення". Уся інформація має бути органічно вплетена у зв'язний текст.
-2.  **ЕПІЧНИЙ СТИЛЬ:** Пиши як про легендарного воїна. Використовуй метафори, яскраві епітети та створюй атмосферу величі.
-3.  **ПОВНА ІНТЕГРАЦІЯ ДАНИХ:** Обов'язково згадай у розповіді всі надані дані: нік, ID та сервер, ранг, кількість матчів, лайки, локацію та назву скваду.
-4.  **СТРУКТУРА ТЕКСТУ:** Розділи розповідь на 2-3 абзаци для кращої читабельності.
-
-**ДАНІ ДЛЯ ЛЕГЕНДИ:**
-- **Гравець:** {user_name}
-- **Нікнейм:** {game_nickname}
-- **ID (Сервер):** {mlbb_id_server}
-- **Найвищий Ранг:** {highest_rank_season}
-- **Кількість Матчів:** {matches_played}
-- **Кількість Лайків:** {likes_received}
-- **Локація:** {location}
-- **Сквад:** {squad_name}
-
-Почни розповідь, звертаючись до гравця на ім'я. Створи шедевр, гідний його досягнень!
 """
 
 class MLBBChatGPT:
@@ -537,35 +513,44 @@ class MLBBChatGPT:
             self.class_logger.exception(f"Загальна помилка (опис) для '{user_name_for_error_msg}': {e}")
             return f"<i>При генерації опису для {user_name_for_error_msg} щось пішло шкереберть. Буває...</i>" 
 
-    async def get_profile_description(self, user_name: str, profile_data: Dict[str, Any]) -> str:
+    async def get_profile_legend(self, user_name: str, profile_data: Dict[str, Any]) -> str:
         user_name_escaped = html.escape(user_name)
-        self.class_logger.info(f"Запит на генерацію опису профілю для '{user_name_escaped}'.")
+        self.class_logger.info(f"Запит на генерацію 'Легенди' профілю для '{user_name_escaped}'.")
+        
         escaped_profile_data = {k: html.escape(str(v)) if v is not None else "Не вказано" for k, v in profile_data.items()}
+        
         template_payload = {
             "user_name": user_name_escaped,
-            "game_nickname": escaped_profile_data.get("game_nickname", "Не вказано"),
-            "highest_rank_season": escaped_profile_data.get("highest_rank_season", "Не вказано"),
-            "matches_played": escaped_profile_data.get("matches_played", "N/A"),
-            "likes_received": escaped_profile_data.get("likes_received", "N/A"),
-            "location": escaped_profile_data.get("location", "Не вказано"),
-            "squad_name": escaped_profile_data.get("squad_name", "Немає"),
+            "game_nickname": escaped_profile_data.get("game_nickname", "Невідомий воїн"),
+            "mlbb_id_server": escaped_profile_data.get("mlbb_id_server", "ID приховано"),
+            "highest_rank_season": escaped_profile_data.get("highest_rank_season", "Ранг невідомий"),
+            "matches_played": escaped_profile_data.get("matches_played", "незліченну кількість"),
+            "likes_received": escaped_profile_data.get("likes_received", "безліч"),
+            "location": escaped_profile_data.get("location", "невідомих земель"),
+            "squad_name": escaped_profile_data.get("squad_name", "самотній вовк"),
         }
+        
         try:
-            system_prompt_text = PROFILE_DESCRIPTION_PROMPT_TEMPLATE.format(**template_payload) 
+            system_prompt_text = LEGEND_PROMPT_TEMPLATE.format(**template_payload)
         except KeyError as e:
-            self.class_logger.error(f"Помилка форматування PROFILE_DESCRIPTION_PROMPT_TEMPLATE: відсутній ключ {e}. Дані: {template_payload}")
-            return f"<i>Помилка підготовки даних для опису профілю ({user_name_escaped}). Ключ: {e}</i>"
+            self.class_logger.error(f"Помилка форматування LEGEND_PROMPT_TEMPLATE: відсутній ключ {e}. Дані: {template_payload}")
+            return f"<i>Помилка підготовки даних для Легенди про {user_name_escaped}. Ключ: {e}</i>"
 
         payload = {
-            "model": self.TEXT_MODEL, "messages": [{"role": "system", "content": system_prompt_text}],
-            "max_tokens": 200, "temperature": 0.75, "top_p": 0.9,
-            "presence_penalty": 0.1, "frequency_penalty": 0.1
+            "model": self.TEXT_MODEL,
+            "messages": [{"role": "system", "content": system_prompt_text}],
+            "max_tokens": 450, 
+            "temperature": 0.8, 
+            "top_p": 0.9,
+            "presence_penalty": 0.2, 
+            "frequency_penalty": 0.2
         }
-        self.class_logger.debug(f"Параметри для опису профілю: модель={payload['model']}, temp={payload['temperature']}, max_tokens={payload['max_tokens']}")
+        self.class_logger.debug(f"Параметри для Легенди профілю: модель={payload['model']}, temp={payload['temperature']}, max_tokens={payload['max_tokens']}")
+        
         current_session = self.session
         temp_session_created = False
         if not current_session or current_session.closed:
-            self.class_logger.warning("Aiohttp сесія для опису профілю була закрита або відсутня. Створюю тимчасову сесію.")
+            self.class_logger.warning("Aiohttp сесія для Легенди профілю була закрита. Створюю тимчасову.")
             current_session = ClientSession(timeout=ClientTimeout(total=90), headers={"Authorization": f"Bearer {self.api_key}"})
             temp_session_created = True
         try:
@@ -573,7 +558,7 @@ class MLBBChatGPT:
         finally:
             if temp_session_created and current_session and not current_session.closed:
                 await current_session.close()
-                self.class_logger.debug("Тимчасову сесію для опису профілю закрито.")
+                self.class_logger.debug("Тимчасову сесію для Легенди профілю закрито.")
 
     async def get_player_stats_description(self, user_name: str, stats_data: Dict[str, Any]) -> str:
         user_name_escaped = html.escape(user_name)
@@ -632,18 +617,16 @@ class MLBBChatGPT:
                 await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для опису статистики закрито.")
     
-    # 🧠 Оновлюємо метод, щоб він приймав опціональні дані профілю
     async def generate_conversational_reply(
         self,
         user_name: str,
         chat_history: List[Dict[str, str]],
         trigger_mood: str,
-        user_profile_data: Optional[Dict[str, Any]] = None # 🧠 Опціональний параметр
+        user_profile_data: Optional[Dict[str, Any]] = None
     ) -> str:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит на розмовну відповідь для '{user_name_escaped}'...")
 
-        # 🧠 Динамічно формуємо блок профілю
         user_profile_block = ""
         if user_profile_data:
             self.class_logger.info("Формую блок з даними профілю для розмовного промпту.")
@@ -658,7 +641,7 @@ class MLBBChatGPT:
         system_prompt = CONVERSATIONAL_PROMPT_TEMPLATE.format(
             user_name=user_name_escaped,
             trigger_mood=trigger_mood,
-            user_profile_block=user_profile_block # Передаємо згенерований блок
+            user_profile_block=user_profile_block
         )
 
         messages = [{"role": "system", "content": system_prompt}] + chat_history
@@ -684,12 +667,11 @@ class MLBBChatGPT:
         self, 
         image_base64: str, 
         user_name: str,
-        caption_text: str = ""  # 🔑 Новий опціональний параметр
+        caption_text: str = ""
     ) -> Optional[str]:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит на універсальний аналіз зображення від '{user_name_escaped}'.")
         
-        # 🔑 Формуємо контекст caption
         caption_context = ""
         if caption_text and caption_text.strip():
             caption_context = f"\n- Підпис до зображення: '{html.escape(caption_text)}'"
@@ -697,7 +679,7 @@ class MLBBChatGPT:
         
         system_prompt = UNIVERSAL_VISION_PROMPT_TEMPLATE.format(
             user_name=user_name_escaped,
-            caption_context=caption_context  # 🔑 Передаємо контекст
+            caption_context=caption_context
         )
         
         payload = {
@@ -758,7 +740,6 @@ class MLBBChatGPT:
         elif any(word in response_lower for word in ["турнір", "змагання", "чемпіонат"]): return "tournament"
         else: return "general"
 
-    # === 🆕 НОВИЙ МЕТОД ДЛЯ АНАЛІЗУ ПРОФІЛЮ (ДЛЯ РЕЄСТРАЦІЇ) ===
     async def analyze_user_profile(self, image_base64: str, mode: str = 'basic') -> dict:
         """
         Аналізує скріншот профілю, статистики або героїв гравця та повертає структуровані дані.
