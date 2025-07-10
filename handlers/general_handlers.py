@@ -910,7 +910,8 @@ async def handle_trigger_messages(message: Message, bot: Bot):
         full_profile_for_prompt = None
         if is_registered:
             user_cache = await load_user_cache(user_id)
-            chat_history = user_cache.get('chat_history', [])
+            # ✅ FIX: Ensure chat_history is always a list
+            chat_history = user_cache.get('chat_history') if user_cache.get('chat_history') is not None else []
             
             # --- 🚀 НОВА ЛОГІКА ЗБАГАЧЕННЯ КОНТЕКСТУ 🚀 ---
             # Завжди готуємо профіль, якщо він є, а не тільки за тригером
@@ -933,7 +934,7 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                 full_profile_for_prompt['skill_level'] = 'medium'
             else:
                 full_profile_for_prompt['skill_level'] = 'developing'
-            logger.info(f"Збагачено контекст для {current_user_name}: рівень '{full_profile_for_prompt['skill_level']}', герої: {favorite_heroes}")
+            logger.info(f"Збагачено контекст для {current_user_name}: рівень '{full_profile_for_prompt.get('skill_level', 'N/A')}', герої: {full_profile_for_prompt.get('favorite_heroes_list', [])}")
             # --- 🚀 КІНЕЦЬ НОВОЇ ЛОГІКИ 🚀 ---
 
         else: # Незареєстрований користувач
