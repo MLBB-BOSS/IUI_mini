@@ -658,16 +658,22 @@ class MLBBChatGPT:
                 await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для розмовної відповіді закрито.")
 
-    async def analyze_image_universal(self, image_base64: str, user_name: str) -> Optional[str]:
-        user_name_escaped = html.escape(user_name)
-        self.class_logger.info(f"Запит на універсальний аналіз зображення від '{user_name_escaped}'.")
-        system_prompt = UNIVERSAL_VISION_PROMPT_TEMPLATE.format(user_name=user_name_escaped)
-        payload = {
-            "model": self.VISION_MODEL,
-            "messages": [{"role": "user", "content": [{"type": "text", "text": system_prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}", "detail": "low"}}]}],
-            "max_tokens": 150, "temperature": 0.8, "top_p": 0.9,
-            "presence_penalty": 0.1, "frequency_penalty": 0.1
-        }
+    # Додати параметр caption
+async def analyze_image_universal(self, image_base64: str, user_name: str, caption: Optional[str] = None) -> Optional[str]:
+    user_name_escaped = html.escape(user_name)
+    self.class_logger.info(f"Запит на універсальний аналіз зображення від '{user_name_escaped}'.")
+    # Додаємо caption у промпт, якщо він є
+    caption_block = f"\n\nПідпис до фото: \"{caption.strip()}\"" if caption else ""
+    system_prompt = UNIVERSAL_VISION_PROMPT_TEMPLATE.format(user_name=user_name_escaped) + caption_block
+    payload = {
+        "model": self.VISION_MODEL,
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": system_prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}", "detail": "low"}}
+        ]}],
+        "max_tokens": 150, "temperature": 0.8, "top_p": 0.9,
+        "presence_penalty": 0.1, "frequency_penalty": 0.1
+    }
         self.class_logger.debug(f"Параметри для універсального Vision: модель={payload['model']}, max_tokens={payload['max_tokens']}")
         current_session = self.session
         temp_session_created = False
