@@ -863,6 +863,12 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     if not message.text or message.text.startswith('/') or not message.from_user:
         return
 
+    # Перевірка на наявність посилань у повідомленні
+    url_pattern = re.compile(r'https?://\S+')
+    if url_pattern.search(message.text):
+        logger.info(f"Повідомлення від {message.from_user.id} містить посилання і буде проігноровано.")
+        return # Просто ігноруємо повідомлення з посиланнями
+
     text_lower = message.text.lower()
     chat_id = message.chat.id
     user_id = message.from_user.id
