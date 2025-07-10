@@ -777,7 +777,7 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
         except Exception as final_err:
              logger.error(f"Не вдалося надіслати навіть фінальне повідомлення про помилку: {final_err}")
 
-# === ОБРОБНИКИ ПОВІДОМЛЕНЬ (ФОТО ТА ТЕКСТ) (без змін) ===
+# === ОБРОБНИКИ ПОВІДОМЛЕНЬ (ФОТО ТА ТЕКСТ) ===
 @general_router.message(F.photo)
 async def handle_image_messages(message: Message, bot: Bot):
     if not VISION_AUTO_RESPONSE_ENABLED or not message.photo or not message.from_user:
@@ -789,9 +789,14 @@ async def handle_image_messages(message: Message, bot: Bot):
     
     bot_info = await bot.get_me()
     is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
+    
+    # 🔑 Зберігаємо caption для подальшого використання
+    user_caption = message.caption or ""
+    
     is_caption_mention = False
-    if message.caption:
-        is_caption_mention = (f"@{bot_info.username.lower()}" in message.caption.lower() or any(re.search(r'\b' + name + r'\b', message.caption.lower()) for name in BOT_NAMES))
+    if user_caption:
+        is_caption_mention = (f"@{bot_info.username.lower()}" in user_caption.lower() or 
+                            any(re.search(r'\b' + name + r'\b', user_caption.lower()) for name in BOT_NAMES))
 
     should_respond = False
     if is_reply_to_bot or is_caption_mention:
@@ -824,7 +829,12 @@ async def handle_image_messages(message: Message, bot: Bot):
         image_base64 = base64.b64encode(image_bytes_io.read()).decode('utf-8')
         
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
-            vision_response = await gpt.analyze_image_universal(image_base64, current_user_name)
+            # 🔑 Передаємо і зображення, і caption
+            vision_response = await gpt.analyze_image_universal(
+                image_base64, 
+                current_user_name,
+                caption_text=user_caption  # Новий параметр
+            )
 
         if vision_response and vision_response.strip():
             content_type = "general"
