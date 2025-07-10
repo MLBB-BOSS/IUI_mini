@@ -146,7 +146,7 @@ async def main() -> None:
         logger.critical(f"Непередбачена критична помилка під час запуску або роботи: {e}", exc_info=True)
     finally:
         logger.info("🛑 Зупинка бота та закриття сесій...")
-        if bot and hasattr(bot, 'session') and bot.session and not bot.session.closed:
+        if bot and hasattr(bot, 'session') and bot.session:
             try:
                 await bot.session.close()
                 logger.info("Сесію HTTP клієнта Bot закрито.")
