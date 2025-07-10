@@ -889,7 +889,6 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     if should_respond:
         is_personalization_request = any(trigger in text_lower for trigger in PERSONALIZATION_TRIGGERS)
         
-        # Перевіряємо статус реєстрації один раз
         db_user_data = await get_user_by_telegram_id(user_id)
         is_registered = bool(db_user_data)
 
@@ -902,17 +901,40 @@ async def handle_trigger_messages(message: Message, bot: Bot):
             )
             return
 
-        # Завантажуємо дані та історію з відповідного шару пам'яті
+        full_profile_for_prompt = None
         if is_registered:
             user_cache = await load_user_cache(user_id)
             chat_history = user_cache.get('chat_history', [])
-            full_profile_for_prompt = user_cache if is_personalization_request else None
-        else:
+            
+            # --- 🚀 НОВА ЛОГІКА ЗБАГАЧЕННЯ КОНТЕКСТУ 🚀 ---
+            # Завжди готуємо профіль, якщо він є, а не тільки за тригером
+            full_profile_for_prompt = user_cache.copy() # Копіюємо, щоб не змінювати кеш
+            
+            # 1. Витягуємо улюблених героїв у зручний список
+            favorite_heroes = []
+            for i in range(1, 4):
+                hero_name = user_cache.get(f'hero{i}_name')
+                if hero_name:
+                    favorite_heroes.append(hero_name)
+            if favorite_heroes:
+                full_profile_for_prompt['favorite_heroes_list'] = favorite_heroes
+            
+            # 2. Визначаємо рівень гри на основі рангу
+            current_rank = user_cache.get('current_rank', '').lower()
+            if 'міфіч' in current_rank:
+                full_profile_for_prompt['skill_level'] = 'high'
+            elif 'легенд' in current_rank or 'епік' in current_rank:
+                full_profile_for_prompt['skill_level'] = 'medium'
+            else:
+                full_profile_for_prompt['skill_level'] = 'developing'
+            logger.info(f"Збагачено контекст для {current_user_name}: рівень '{full_profile_for_prompt['skill_level']}', герої: {favorite_heroes}")
+            # --- 🚀 КІНЕЦЬ НОВОЇ ЛОГІКИ 🚀 ---
+
+        else: # Незареєстрований користувач
             session = await load_session(user_id)
             chat_history = session.chat_history
-            full_profile_for_prompt = None  # Незареєстровані не мають профілю
+            full_profile_for_prompt = None
 
-        # Додаємо повідомлення користувача та обрізаємо історію
         chat_history.append({"role": "user", "content": message.text})
         if len(chat_history) > MAX_CHAT_HISTORY_LENGTH:
             chat_history = chat_history[-MAX_CHAT_HISTORY_LENGTH:]
@@ -923,15 +945,13 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                     user_name=current_user_name,
                     chat_history=chat_history,
                     trigger_mood=matched_trigger_mood,
-                    user_profile_data=full_profile_for_prompt
+                    user_profile_data=full_profile_for_prompt # Передаємо збагачений профіль
                 )
             
             if reply_text and "<i>" not in reply_text:
-                # Додаємо відповідь асистента до історії
                 chat_history.append({"role": "assistant", "content": reply_text})
                 
-                # Зберігаємо оновлені дані у відповідний шар
-                if is_registered:
+                if is_registered and 'user_cache' in locals():
                     user_cache['chat_history'] = chat_history
                     await save_user_cache(user_id, user_cache)
                 else:
