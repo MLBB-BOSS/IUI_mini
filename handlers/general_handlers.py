@@ -778,8 +778,16 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
              logger.error(f"Не вдалося надіслати навіть фінальне повідомлення про помилку: {final_err}")
 
 # === ОБРОБНИКИ ПОВІДОМЛЕНЬ (ФОТО ТА ТЕКСТ) (без змін) ===
+# В handle_image_messages — передаємо caption
 @general_router.message(F.photo)
 async def handle_image_messages(message: Message, bot: Bot):
+    # ... твоя логіка ...
+    # Витягуємо caption або текст (Telegram caption або message.text)
+    caption = message.caption or message.text or ""
+    # ...
+    async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+        vision_response = await gpt.analyze_image_universal(image_base64, current_user_name, caption=caption)
+    # ... далі як було ...
     if not VISION_AUTO_RESPONSE_ENABLED or not message.photo or not message.from_user:
         return
 
