@@ -10,17 +10,38 @@ from sqlalchemy.exc import IntegrityError
 from database.models import User
 from config import ASYNC_DATABASE_URL, logger
 
+from datetime import datetime
+
 engine = create_async_engine(ASYNC_DATABASE_URL)
+
+def _ensure_datetime(val):
+    """
+    Перетворює рядок у datetime, якщо потрібно.
+    Приймає None або datetime – повертає як є.
+    """
+    if isinstance(val, str):
+        try:
+            # ISO 8601 format з +00:00
+            return datetime.fromisoformat(val.replace('Z', '+00:00'))
+        except Exception:
+            return None
+    return val
 
 async def add_or_update_user(user_data: Dict[str, Any]) -> Literal['success', 'conflict', 'error']:
     """
     Додає або оновлює користувача, перевіряючи унікальність player_id.
-    
+
     Returns:
         - 'success': Користувача успішно створено або оновлено.
         - 'conflict': Такий player_id вже зареєстрований іншим telegram_id.
         - 'error': Сталася інша помилка.
     """
+    # 🧠 Уникаємо передачі рядків у поля datetime!
+    for dt_field in ("created_at", "updated_at"):
+        if dt_field in user_data:
+            # Видаляємо, щоб БД сама проставила значення
+            user_data.pop(dt_field)
+
     async with engine.connect() as conn:
         async with conn.begin():
             telegram_id = user_data.get('telegram_id')
