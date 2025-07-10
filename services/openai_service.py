@@ -1,4 +1,3 @@
-#services/openai_service.py
 import asyncio
 import base64
 import html
@@ -108,7 +107,6 @@ HERO_STATS_PROMPT = """
 4.  **Відсутні дані:** Використовуй `null`.
 Точність є критичною.
 """
-
 
 PROFILE_DESCRIPTION_PROMPT_TEMPLATE = """
 Ти — GGenius, AI-коментатор MLBB. Створи короткий, дотепний коментар (2-4 речення) про гравця.
@@ -244,8 +242,8 @@ UNIVERSAL_VISION_PROMPT_TEMPLATE = """
 """
 
 class MLBBChatGPT:
-    TEXT_MODEL = "gpt-4.1" 
-    VISION_MODEL = "gpt-4.1" 
+    TEXT_MODEL = "gpt-4.1"
+    VISION_MODEL = "gpt-4.1"
 
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
@@ -254,8 +252,8 @@ class MLBBChatGPT:
         self.class_logger.info(f"GGenius Service (MLBBChatGPT) ініціалізовано. Текстова модель: {self.TEXT_MODEL}, Vision модель: {self.VISION_MODEL}")
 
     async def __aenter__(self) -> "MLBBChatGPT":
-        self.session = ClientSession(
-            timeout=ClientTimeout(total=90), 
+        self.session = self.session or ClientSession(
+            timeout=ClientTimeout(total=90),
             headers={"Authorization": f"Bearer {self.api_key}"}
         )
         self.class_logger.debug("Aiohttp сесію створено та відкрито.")
@@ -272,11 +270,11 @@ class MLBBChatGPT:
         user_name_escaped = html.escape(user_name)
         user_query_escaped = html.escape(user_query)
         try:
-            current_time_utc = datetime.now(timezone.utc)
+           ueillcurrent_time_utc = datetime.now(timezone.utc)
             kyiv_tz = timezone(timedelta(hours=3))
             current_time_kyiv = current_time_utc.astimezone(kyiv_tz)
             current_hour_kyiv = current_time_kyiv.hour
-            time_str = current_time_kyiv.strftime('%H:%M (%Z)') 
+            time_str = current_time_kyiv.strftime('%H:%M (%Z)')
 
             if 5 <= current_hour_kyiv < 12:
                 greeting = "Доброго ранку"
@@ -316,13 +314,13 @@ class MLBBChatGPT:
 
         def replace_header(match: re.Match) -> str:
             header_text_raw = match.group(1).strip(": ")
-            header_text = header_text_raw.capitalize() 
-            best_emoji = "💡" 
+            header_text = header_text_raw.capitalize()
+            best_emoji = "💡"
             priority_keys = ["скріншот", "унікальність", "можливості", "фішка", "прикол", "інсайт", "висновок", "запитання", "відповідь", "порада"]
-            
+
             found_specific = False
             for key in priority_keys:
-                if key in header_text_raw.lower(): 
+                if key in header_text_raw.lower():
                     best_emoji = header_emojis.get(key, best_emoji)
                     found_specific = True
                     break
@@ -331,29 +329,21 @@ class MLBBChatGPT:
                     if key_general in header_text_raw.lower():
                         best_emoji = emj
                         break
-            return f"\n\n{best_emoji} <b>{header_text}</b>" 
+            return f"\n\n{best_emoji} <b>{header_text}</b>"
 
         text = re.sub(r"^(?:#|\#{2}|\#{3})\s*(.+)", replace_header, text, flags=re.MULTILINE)
-        text = re.sub(r"^\s*[\-\*]\s+", "• ", text, flags=re.MULTILINE) 
-        text = re.sub(r"^\s*•\s+[\-\*]\s+", "  ◦ ", text, flags=re.MULTILINE) 
-        text = re.sub(r"\n{3,}", "\n\n", text) 
-        
+        text = re.sub(r"^\s*[\-\*]\s+", "• ", text, flags=re.MULTILINE)
+        text = re.sub(r"^\s*•\s+[\-\*]\s+", "  ◦ ", text, flags=re.MULTILINE)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+
         tags_to_balance = ["b", "i", "code"]
         for tag in tags_to_balance:
-            open_tag_pattern = re.compile(re.escape(f"<{tag}>"))
-            close_tag_pattern = re.compile(re.escape(f"</{tag}>"))
-            open_tags = [m.start() for m in open_tag_pattern.finditer(text)]
-            close_tags = [m.start() for m in close_tag_pattern.finditer(text)]
-            open_count = len(open_tags)
-            close_count = len(close_tags)
-
-            if open_count > close_count:
-                missing_tags_count = open_count - close_count
-                text += f"</{tag}>" * missing_tags_count
-                self.class_logger.warning(f"Beautify: Додано {missing_tags_count} незакритих тегів '</{tag}>' в кінці тексту.")
-            elif close_count > open_count:
-                 self.class_logger.warning(f"Beautify: Виявлено {close_count - open_count} зайвих закриваючих тегів '</{tag}>'. Залишено без змін.")
-        self.class_logger.debug(f"Beautify: Текст після обробки (перші 100 символів): '{text[:100]}'")
+            s, c = text.count(f"<{tag}>"), text.count(f"</{tag}>")
+            if s > c:
+                text += f"</{tag}>" * (s - c)
+            elif c > s:
+                self.class_logger.warning(f"Beautify: Зайві закриваючі теги '</{tag}>' - {c - s} шт. Залишено.")
+        self.class_logger.debug(f"Beautify: Оброблений текст (перші 100): '{text[:100]}'")
         return text.strip()
 
     async def _execute_openai_request(self, session: ClientSession, payload: Dict[str, Any], user_name_for_error_msg: str) -> str:
@@ -372,7 +362,7 @@ class MLBBChatGPT:
                 if not content:
                     self.class_logger.error(f"OpenAI API помилка: несподівана структура або порожній контент - {response_data}")
                     return f"Отакої, {user_name_for_error_msg}, GGenius щось не те видав або взагалі мовчить 🤯. Спробуй перефразувати запит."
-                
+
                 self.class_logger.info(f"Сира відповідь від GGenius (перші 100): '{content[:100]}'")
                 return self._beautify_response(content)
 
@@ -398,14 +388,14 @@ class MLBBChatGPT:
                 {"role": "user", "content": user_query_for_payload}
             ],
             "max_tokens": 2000, "temperature": 0.7, "top_p": 0.9,
-            "presence_penalty": 0.3, "frequency_penalty": 0.2  
+            "presence_penalty": 0.3, "frequency_penalty": 0.2
         }
         self.class_logger.debug(f"Параметри для GGenius (/go): модель={payload['model']}, temp={payload['temperature']}")
         current_session = self.session
         temp_session_created = False
         if not current_session or current_session.closed:
             self.class_logger.warning("Aiohttp сесія для GGenius (/go) була закрита або відсутня. Створюю тимчасову сесію.")
-            current_session = ClientSession(timeout=ClientTimeout(total=120), headers={"Authorization": f"Bearer {self.api_key}"}) 
+            current_session = ClientSession(timeout=ClientTimeout(total=120), headers={"Authorization": f"Bearer {self.api_key}"})
             temp_session_created = True
         try:
             return await self._execute_openai_request(current_session, payload, user_name_escaped)
@@ -463,7 +453,7 @@ class MLBBChatGPT:
             "messages": [
                 {"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}]}
             ],
-            "max_tokens": 2500, "temperature": 0.15 
+            "max_tokens": 2500, "temperature": 0.15
         }
         self.class_logger.debug(f"Параметри для Vision API: модель={payload['model']}, max_tokens={payload['max_tokens']}, temperature={payload['temperature']}")
         current_session = self.session
@@ -496,24 +486,24 @@ class MLBBChatGPT:
                 if response.status != 200:
                     error_details = response_data.get("error", {}).get("message", str(response_data))
                     self.class_logger.error(f"OpenAI API HTTP помилка (опис): {response.status} - {error_details}")
-                    return f"<i>Упс, {user_name_for_error_msg}, GGenius не зміг згенерувати опис (код: {response.status}). Трабли...</i>" 
+                    return f"<i>Упс, {user_name_for_error_msg}, GGenius не зміг згенерувати опис (код: {response.status}). Трабли...</i>"
 
                 content = response_data.get("choices", [{}])[0].get("message", {}).get("content")
                 if not content:
                     self.class_logger.error(f"OpenAI API помилка (опис): порожній контент - {response_data}")
-                    return f"<i>Ой, {user_name_for_error_msg}, GGenius щось не захотів генерувати опис. Пусто...</i>" 
-                
+                    return f"<i>Ой, {user_name_for_error_msg}, GGenius щось не захотів генерувати опис. Пусто...</i>"
+
                 self.class_logger.info(f"Згенеровано опис (перші 100): '{content[:100]}'")
                 return content.strip()
         except aiohttp.ClientConnectionError as e:
             self.class_logger.error(f"OpenAI API помилка з'єднання (опис): {e}", exc_info=True)
-            return f"<i>Ех, {user_name_for_error_msg}, не можу підключитися до AI для опису. Інтернет барахлить?</i>" 
+            return f"<i>Ех, {user_name_for_error_msg}, не можу підключитися до AI для опису. Інтернет барахлить?</i>"
         except asyncio.TimeoutError:
             self.class_logger.error(f"OpenAI API Timeout (опис) для: '{user_name_for_error_msg}'")
-            return f"<i>{user_name_for_error_msg}, GGenius так довго думав над описом, що аж час вийшов...</i>" 
+            return f"<i>{user_name_for_error_msg}, GGenius так довго думав над описом, що аж час вийшов...</i>"
         except Exception as e:
             self.class_logger.exception(f"Загальна помилка (опис) для '{user_name_for_error_msg}': {e}")
-            return f"<i>При генерації опису для {user_name_for_error_msg} щось пішло шкереберть. Буває...</i>" 
+            return f"<i>При генерації опису для {user_name_for_error_msg} щось пішло шкереберть. Буває...</i>"
 
     async def get_profile_description(self, user_name: str, profile_data: Dict[str, Any]) -> str:
         user_name_escaped = html.escape(user_name)
@@ -529,7 +519,7 @@ class MLBBChatGPT:
             "squad_name": escaped_profile_data.get("squad_name", "Немає"),
         }
         try:
-            system_prompt_text = PROFILE_DESCRIPTION_PROMPT_TEMPLATE.format(**template_payload) 
+            system_prompt_text = PROFILE_DESCRIPTION_PROMPT_TEMPLATE.format(**template_payload)
         except KeyError as e:
             self.class_logger.error(f"Помилка форматування PROFILE_DESCRIPTION_PROMPT_TEMPLATE: відсутній ключ {e}. Дані: {template_payload}")
             return f"<i>Помилка підготовки даних для опису профілю ({user_name_escaped}). Ключ: {e}</i>"
@@ -586,7 +576,7 @@ class MLBBChatGPT:
             "mvp_win_share_percent": get_value(derived_s, 'mvp_win_share_percent', default_val="N/A", precision=2),
         }
         try:
-            system_prompt_text = PLAYER_STATS_DESCRIPTION_PROMPT_TEMPLATE.format(**template_data) 
+            system_prompt_text = PLAYER_STATS_DESCRIPTION_PROMPT_TEMPLATE.format(**template_data)
         except KeyError as e:
             self.class_logger.error(f"Помилка форматування PLAYER_STATS_DESCRIPTION_PROMPT_TEMPLATE: відсутній ключ {e}. Дані: {template_data}")
             return f"<i>Помилка підготовки даних для опису статистики ({user_name_escaped}). Ключ: {e}</i>"
@@ -604,24 +594,22 @@ class MLBBChatGPT:
             current_session = ClientSession(timeout=ClientTimeout(total=90), headers={"Authorization": f"Bearer {self.api_key}"})
             temp_session_created = True
         try:
-            return await self._execute_description_request(current_session, payload, user_name_escaped) 
+            return await self._execute_description_request(current_session, payload, user_name_escaped)
         finally:
             if temp_session_created and current_session and not current_session.closed:
                 await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для опису статистики закрито.")
-    
-    # 🧠 Оновлюємо метод, щоб він приймав опціональні дані профілю
+
     async def generate_conversational_reply(
         self,
         user_name: str,
         chat_history: List[Dict[str, str]],
         trigger_mood: str,
-        user_profile_data: Optional[Dict[str, Any]] = None # 🧠 Опціональний параметр
+        user_profile_data: Optional[Dict[str, Any]] = None
     ) -> str:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит на розмовну відповідь для '{user_name_escaped}'...")
 
-        # 🧠 Динамічно формуємо блок профілю
         user_profile_block = ""
         if user_profile_data:
             self.class_logger.info("Формую блок з даними профілю для розмовного промпту.")
@@ -636,7 +624,7 @@ class MLBBChatGPT:
         system_prompt = CONVERSATIONAL_PROMPT_TEMPLATE.format(
             user_name=user_name_escaped,
             trigger_mood=trigger_mood,
-            user_profile_block=user_profile_block # Передаємо згенерований блок
+            user_profile_block=user_profile_block
         )
 
         messages = [{"role": "system", "content": system_prompt}] + chat_history
@@ -658,22 +646,29 @@ class MLBBChatGPT:
                 await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для розмовної відповіді закрито.")
 
-    # Додати параметр caption
-async def analyze_image_universal(self, image_base64: str, user_name: str, caption: Optional[str] = None) -> Optional[str]:
-    user_name_escaped = html.escape(user_name)
-    self.class_logger.info(f"Запит на універсальний аналіз зображення від '{user_name_escaped}'.")
-    # Додаємо caption у промпт, якщо він є
-    caption_block = f"\n\nПідпис до фото: \"{caption.strip()}\"" if caption else ""
-    system_prompt = UNIVERSAL_VISION_PROMPT_TEMPLATE.format(user_name=user_name_escaped) + caption_block
-    payload = {
-        "model": self.VISION_MODEL,
-        "messages": [{"role": "user", "content": [
-            {"type": "text", "text": system_prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}", "detail": "low"}}
-        ]}],
-        "max_tokens": 150, "temperature": 0.8, "top_p": 0.9,
-        "presence_penalty": 0.1, "frequency_penalty": 0.1
-    }
+    async def analyze_image_universal(self, image_base64: str, user_name: str, caption: Optional[str] = None) -> Optional[str]:
+        user_name_escaped = html.escape(user_name)
+        self.class_logger.info(f"Запит на універсальний аналіз зображення від '{user_name_escaped}'.")
+        
+        # Обрізаємо caption до 300 символів, якщо він довший
+        if caption and len(caption) > 300:
+            caption = caption[:300].strip() + "..."
+            self.class_logger.debug(f"Caption обрізано до 300 символів для '{user_name_escaped}'.")
+        
+        caption_block = f"\n\nПідпис до фото: \"{caption.strip()}\"" if caption else ""
+        system_prompt = UNIVERSAL_VISION_PROMPT_TEMPLATE.format(user_name=user_name_escaped) + caption_block
+        payload = {
+            "model": self.VISION_MODEL,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": system_prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}", "detail": "low"}}
+                ]
+            }],
+            "max_tokens": 150, "temperature": 0.8, "top_p": 0.9,
+            "presence_penalty": 0.1, "frequency_penalty": 0.1
+        }
         self.class_logger.debug(f"Параметри для універсального Vision: модель={payload['model']}, max_tokens={payload['max_tokens']}")
         current_session = self.session
         temp_session_created = False
@@ -695,6 +690,11 @@ async def analyze_image_universal(self, image_base64: str, user_name: str, capti
                 clean_response = content.strip()
                 clean_response = re.sub(r'\*\*([^*]+)\*\*', r'\1', clean_response)
                 clean_response = re.sub(r'\*([^*]+)\*', r'\1', clean_response)
+                
+                # Логування, якщо caption є, але не згадується у відповіді
+                if caption and caption.strip() not in clean_response:
+                    self.class_logger.warning(f"У відповіді для '{user_name_escaped}' не згадано caption: '{caption[:50]}...'")
+                
                 self.class_logger.info(f"Універсальний Vision аналіз завершено для '{user_name_escaped}'. Довжина: {len(clean_response)}")
                 return clean_response
         except aiohttp.ClientConnectionError as e:
@@ -723,11 +723,10 @@ async def analyze_image_universal(self, image_base64: str, user_name: str, capti
         elif any(word in response_lower for word in ["турнір", "змагання", "чемпіонат"]): return "tournament"
         else: return "general"
 
-    # === 🆕 НОВИЙ МЕТОД ДЛЯ АНАЛІЗУ ПРОФІЛЮ (ДЛЯ РЕЄСТРАЦІЇ) ===
     async def analyze_user_profile(self, image_base64: str, mode: str = 'basic') -> dict:
         """
         Аналізує скріншот профілю, статистики або героїв гравця та повертає структуровані дані.
-        
+
         Args:
             image_base64: Зображення у форматі Base64.
             mode: Тип аналізу ('basic', 'stats', 'heroes').
@@ -740,7 +739,7 @@ async def analyze_image_universal(self, image_base64: str, user_name: str, capti
             'heroes': HERO_STATS_PROMPT
         }
         system_prompt = prompts.get(mode, PROFILE_SCREENSHOT_PROMPT)
-        
+
         payload = {
             "model": self.VISION_MODEL,
             "response_format": {"type": "json_object"},
@@ -771,7 +770,7 @@ async def analyze_image_universal(self, image_base64: str, user_name: str, capti
                     response_text = await response.text()
                     self.class_logger.error(f"Помилка OpenAI API при аналізі профілю (mode={mode}): {response.status} - {response_text}")
                     return {"error": "Помилка відповіді від сервісу аналізу."}
-                
+
                 response_data = await response.json()
                 content = response_data.get("choices", [{}])[0].get("message", {}).get("content")
                 if not content:
