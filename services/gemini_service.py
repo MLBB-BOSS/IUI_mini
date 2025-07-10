@@ -14,8 +14,8 @@ import asyncio
 from datetime import datetime, timezone
 
 import google.generativeai as genai
-# ❗️ Додано імпорт для інструментів
-from google.generativeai.types import Tool
+# ❗️ Оновлено імпорт для інструментів
+from google.generativeai import tools
 from google.api_core.exceptions import GoogleAPIError
 from google.api_core import retry_async
 
@@ -40,7 +40,7 @@ class GeminiSearch:
         # ❗️ Оновлено ініціалізацію моделі для включення інструменту пошуку
         self.model = genai.GenerativeModel(
             'models/gemini-1.5-flash-latest',
-            tools=[Tool.from_google_search_retrieval()] # Явно вмикаємо пошук
+            tools=[tools.google_search_retrieval] # Явно вмикаємо пошук
         )
         logger.info("Модель для пошукових запитів: gemini-1.5-flash-latest (з інструментом Google Search)")
 
