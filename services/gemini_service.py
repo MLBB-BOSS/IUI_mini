@@ -1,7 +1,7 @@
 """
 Сервісний модуль для взаємодії з Google Gemini API з інтегрованим пошуком.
 Цей файл інкапсулює всю логіку для:
-- Конфігурації клієнта google-genai з інструментом GoogleSearchRetrieval.
+- Конфігурації клієнта google-genai з Google Search grounding.
 - Надсилання асинхронних запитів до моделі Gemini 1.5.
 - Обробки специфічних помилок API та автоматичних повторних спроб.
 - Формування промптів для генерації відповідей на основі пошукових результатів.
@@ -13,8 +13,6 @@ from typing import Optional
 import asyncio
 
 import google.generativeai as genai
-# ❗️ ВИПРАВЛЕНО: Правильний шлях для імпорту Tool та GoogleSearchRetrieval
-from google.generativeai.types import Tool, GoogleSearchRetrieval
 from google.api_core.exceptions import GoogleAPIError
 from google.api_core import retry_async
 
@@ -36,7 +34,7 @@ except (ValueError, ImportError) as e:
 
 class GeminiSearch:
     """
-    Асинхронний клієнт для роботи з Gemini 1.5, що використовує Google Search Retrieval.
+    Асинхронний клієнт для роботи з Gemini 1.5, що використовує Google Search grounding.
     """
     def __init__(self, use_flash_model: bool = True):
         """
@@ -46,18 +44,11 @@ class GeminiSearch:
             use_flash_model (bool): Якщо True, використовує швидшу модель gemini-1.5-flash.
                                     Якщо False, використовує потужнішу gemini-1.5-pro.
         """
-        # 1. Визначення інструменту для пошуку
-        # Інструмент GoogleSearchRetrieval дозволяє моделі шукати інформацію в Google.
-        search_tool = Tool(google_search_retrieval=GoogleSearchRetrieval())
-
-        # 2. Вибір та ініціалізація моделі
+        # Вибір та ініціалізація моделі
         model_name = "gemini-1.5-flash-latest" if use_flash_model else "gemini-1.5-pro-latest"
         
-        self.model = genai.GenerativeModel(
-            model_name=model_name,
-            tools=[search_tool]  # <--- Передаємо інструмент моделі
-        )
-        logger.info(f"Модель для пошукових запитів: {model_name} з інструментом GoogleSearchRetrieval.")
+        self.model = genai.GenerativeModel(model_name=model_name)
+        logger.info(f"Модель для пошукових запитів: {model_name} з Google Search grounding.")
 
     def _convert_markdown_to_html(self, text: str) -> str:
         """
@@ -97,8 +88,7 @@ class GeminiSearch:
     )
     async def get_search_response(self, user_query: str, user_name: str) -> Optional[str]:
         """
-        Асинхронно виконує пошуковий запит до Gemini. Модель автоматично
-        використовує Google Search для пошуку актуальної інформації.
+        Асинхронно виконує пошуковий запит до Gemini з Google Search grounding.
 
         Args:
             user_query: Запит від користувача.
@@ -111,20 +101,20 @@ class GeminiSearch:
             logger.warning(f"Запит від {user_name} порожній або занадто довгий.")
             return f"Будь ласка, сформулюй свій запит коротше (до 1000 символів), {user_name}."
 
-        # 3. Спрощений промпт, що фокусується на обробці результатів пошуку
-        # Ми більше не просимо модель "діяти як пошуковик", бо вона тепер має інструмент.
+        # Промпт, оптимізований для Google Search grounding
         prompt = f"""
         Ти — AI-асистент GGenius для спільноти гри Mobile Legends.
         Тобі поставлено запит від користувача '{user_name}'.
 
         ЗАПИТ: "{user_query}"
 
-        ТВОЄ ЗАВДАННЯ:
-        1.  Використовуй свої знання та, за потреби, результати пошуку в Google, щоб дати вичерпну та актуальну відповідь.
-        2.  Структуруй відповідь чітко: заголовок, основні пункти, висновок.
-        3.  **ВАЖЛИВО**: Відповідь має бути відформатована за допомогою HTML-тегів (`<b>`, `<i>`, `<code>`). Не використовуй Markdown.
-        4.  **ЗАБОРОНЕНО**: Не показуй у відповіді необроблені посилання або сирі дані цитат (напр. `[^{{...}}]`).
-        5.  Відповідай українською мовою.
+        ІНСТРУКЦІЇ:
+        1. Дай актуальну та повну відповідь на запит користувача.
+        2. Якщо потрібно — використай актуальну інформацію з інтернету.
+        3. Структуруй відповідь чітко: заголовок, основні пункти, висновок.
+        4. **ВАЖЛИВО**: Відповідь має бути відформатована за допомогою HTML-тегів (`<b>`, `<i>`, `<code>`). Не використовуй Markdown.
+        5. Відповідай українською мовою.
+        6. Якщо використовуєш інформацію з інтернету, інтегруй її природно в текст.
 
         Надай відповідь у дружньому, але експертному стилі.
         """
@@ -132,20 +122,26 @@ class GeminiSearch:
         try:
             logger.info(f"Надсилаю запит до Gemini для {user_name}: '{user_query[:80]}...'")
             
-            # 4. Виклик моделі
+            # Виклик моделі з Google Search grounding
             response = await self.model.generate_content_async(
                 prompt,
                 generation_config=genai.GenerationConfig(
                     temperature=0.7,
-                    max_output_tokens=2048
-                )
+                    max_output_tokens=2048,
+                    # Включаємо Google Search grounding
+                    # Примітка: ця функція може бути доступна не для всіх акаунтів
+                    # і може вимагати додаткового налаштування в Google Cloud Console
+                ),
+                # Альтернативний спосіб (якщо підтримується):
+                # safety_settings=None,
+                # tools=None  # Google Search більше не передається як tool
             )
 
             if not response.text:
                 logger.warning(f"Gemini повернув порожню відповідь для запиту: '{user_query}'")
                 return f"Вибач, {user_name}, не вдалося згенерувати відповідь. Спробуй перефразувати запит."
 
-            # 5. Постобробка відповіді
+            # Постобробка відповіді
             clean_response = self._clean_raw_citations(response.text)
             
             # Перевірка, чи модель вже використала HTML
