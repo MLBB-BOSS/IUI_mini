@@ -13,7 +13,8 @@ from typing import Optional
 import asyncio
 
 import google.generativeai as genai
-from google.generativeai.tool import Tool, GoogleSearchRetrieval
+# ❗️ ВИПРАВЛЕНО: Правильний шлях для імпорту Tool та GoogleSearchRetrieval
+from google.generativeai.types import Tool, GoogleSearchRetrieval
 from google.api_core.exceptions import GoogleAPIError
 from google.api_core import retry_async
 
