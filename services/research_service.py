@@ -62,7 +62,7 @@ class MLBBDeepResearch:
             input=detailed_prompt,
             tools=[
                 {"type": "web_search_preview"},
-                {"type": "code_interpreter", "container": {"type": "auto"}},
+                # {"type": "code_interpreter", "container": {"type": "auto"}}, # 👈 ВИМКНЕНО
             ],
         )
         
