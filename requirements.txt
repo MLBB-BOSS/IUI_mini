@@ -9,3 +9,4 @@ google-cloud-aiplatform>=1.59.0
 cloudinary==1.40.0
 SQLAlchemy==2.0.30
 asyncpg==0.29.0
+openai>=1.93.0
