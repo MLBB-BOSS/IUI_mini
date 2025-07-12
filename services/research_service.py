@@ -2,10 +2,14 @@
 Сервіс для виконання глибоких досліджень за допомогою OpenAI.
 """
 import asyncio
+import logging # 👈 Новий імпорт
 from openai import OpenAI
 from typing import Dict, Any
 
-from config import logger, OPENAI_API_KEY
+from config import OPENAI_API_KEY
+
+# 👈 Ініціалізуємо логер для цього модуля
+logger = logging.getLogger(__name__)
 
 # Налаштування клієнта для довгих запитів
 # Використовуємо наш ключ з конфігурації
