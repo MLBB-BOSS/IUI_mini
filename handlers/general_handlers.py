@@ -32,6 +32,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
+from openai import RateLimitError # 👈 Новий імпорт
 
 # Імпорти з нашого проєкту
 from config import (
@@ -44,7 +45,7 @@ from config import (
 # Імпортуємо сервіси та утиліти
 from services.openai_service import MLBBChatGPT
 from services.gemini_service import GeminiSearch
-from services.research_service import MLBBDeepResearch  # Новий імпорт
+from services.research_service import MLBBDeepResearch
 from utils.message_utils import send_message_in_chunks
 from keyboards.inline_keyboards import (
     create_party_confirmation_keyboard,
@@ -801,7 +802,6 @@ async def cmd_research(message: Message, bot: Bot):
 
     thinking_msg = await message.reply(f"🔬 {user_name}, починаю швидке дослідження... Це може зайняти до хвилини.")
     
-    # Ініціалізуємо сервіс зі швидкою моделлю
     researcher = MLBBDeepResearch(model="o4-mini-deep-research")
     
     try:
@@ -817,9 +817,14 @@ async def cmd_research(message: Message, bot: Bot):
         
         full_response_to_send = f"{output_text}{admin_info}"
         
-        # Використовуємо утиліту для надсилання довгих повідомлень
         await send_message_in_chunks(bot, message.chat.id, full_response_to_send, ParseMode.HTML, thinking_msg)
-
+    
+    except RateLimitError: # 👈 Обробка помилки лімітів
+        logger.warning(f"Rate limit exceeded for /research command by user {user_name}")
+        await thinking_msg.edit_text(
+            f"⏳ {user_name}, зараз забагато запитів до AI-аналітика. "
+            "Будь ласка, спробуй ще раз за хвилину."
+        )
     except Exception as e:
         logger.error(f"Error during /research command for query '{query}': {e}", exc_info=True)
         await thinking_msg.edit_text(f"Вибач, {user_name}, сталася помилка під час дослідження.")
