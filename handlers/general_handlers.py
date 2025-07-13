@@ -44,7 +44,6 @@ from config import (
 )
 # Імпортуємо сервіси та утиліти
 from services.openai_service import MLBBChatGPT
-from services.gemini_service import GeminiSearch
 from services.research_service import MLBBDeepResearch
 from utils.message_utils import send_message_in_chunks
 from keyboards.inline_keyboards import (
