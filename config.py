@@ -68,6 +68,7 @@ BOT_NAMES: list[str] = [
     "ai", "аі", "іі"         # Технічні та фонетичні
 ]
 CONVERSATIONAL_COOLDOWN_SECONDS: int = 600  # 10 minutes
+SEARCH_COOLDOWN_SECONDS: int = 300 # 5 minutes
 VISION_AUTO_RESPONSE_ENABLED: bool = True
 VISION_RESPONSE_COOLDOWN_SECONDS: int = 30
 VISION_MAX_IMAGE_SIZE_MB: float = 10.0
