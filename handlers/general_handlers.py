@@ -40,7 +40,7 @@ from config import (
     CONVERSATIONAL_TRIGGERS, MAX_CHAT_HISTORY_LENGTH,
     BOT_NAMES, CONVERSATIONAL_COOLDOWN_SECONDS,
     VISION_AUTO_RESPONSE_ENABLED, VISION_RESPONSE_COOLDOWN_SECONDS, 
-    VISION_MAX_IMAGE_SIZE_MB, VISION_CONTENT_EMOJIS
+    VISION_MAX_IMAGE_SIZE_MB, VISION_CONTENT_EMOJIS, SEARCH_COOLDOWN_SECONDS
 )
 # Імпортуємо сервіси та утиліти
 from services.openai_service import MLBBChatGPT
@@ -74,6 +74,7 @@ class PartyCreationFSM(StatesGroup):
 # === СХОВИЩА ДАНИХ У ПАМ'ЯТІ ===
 chat_cooldowns: Dict[int, float] = {}
 vision_cooldowns: Dict[int, float] = {}
+search_cooldowns: Dict[int, float] = {}
 active_lobbies: Dict[int, Dict] = {} 
 
 # 🧠 Визначаємо тригери для завантаження повного профілю
@@ -693,6 +694,24 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
     if not user: return
     user_name_escaped = get_user_display_name(user)
     user_id = user.id
+
+    # --- 🚀 НОВА ЛОГІКА ОБМЕЖЕННЯ ЧАСТОТИ ЗАПИТІВ 🚀 ---
+    current_time = time.time()
+    
+    # Адмін ігнорує обмеження
+    if user_id != ADMIN_USER_ID:
+        last_search_time = search_cooldowns.get(user_id, 0)
+        time_elapsed = current_time - last_search_time
+        
+        if time_elapsed < SEARCH_COOLDOWN_SECONDS:
+            time_left = round(SEARCH_COOLDOWN_SECONDS - time_elapsed)
+            logger.warning(f"Користувач {user_name_escaped} (ID: {user_id}) перевищив ліміт /search. Залишилось {time_left} сек.")
+            await message.reply(
+                f"⏳ Забагато запитів, {user_name_escaped}. "
+                f"Наступний пошук буде доступний через <b>{time_left} секунд</b>."
+            )
+            return
+    
     user_query = message.text.replace("/search", "", 1).strip() if message.text else ""
 
     logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) зробив пошуковий запит: '{user_query}'")
@@ -700,6 +719,10 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
     if not user_query:
         await message.reply(f"Привіт, <b>{user_name_escaped}</b>! 🔎\nНапиши запит після <code>/search</code>, наприклад:\n<code>/search останні зміни балансу героїв</code>", parse_mode=ParseMode.HTML)
         return
+
+    # Оновлюємо час останнього запиту для користувача (тільки якщо запит валідний)
+    if user_id != ADMIN_USER_ID:
+        search_cooldowns[user_id] = current_time
 
     thinking_msg = await message.reply(f"🛰️ {user_name_escaped}, шукаю найсвіжішу інформацію в Інтернеті...")
     start_time = time.time()
