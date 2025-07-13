@@ -279,15 +279,35 @@ UNIVERSAL_VISION_PROMPT_TEMPLATE = """
 Дай живу, людську реакцію як справжній член MLBB-спільноти!
 """
 
+# 🚀 НОВИЙ ПРОМПТ ДЛЯ ВЕБ-ПОШУКУ
+WEB_SEARCH_PROMPT_TEMPLATE = """
+Ти — GGenius, AI-асистент для спільноти гри Mobile Legends.
+Тобі поставлено запит від користувача '{user_name}'.
+
+ЗАПИТ: "{user_query}"
+
+ІНСТРУКЦІЇ:
+1. Дай актуальну та повну відповідь на запит користувача, використовуючи інформацію з Інтернету.
+2. Структуруй відповідь чітко: заголовок, основні пункти, висновок.
+3. **ВАЖЛИВО**: Відповідь має бути відформатована за допомогою HTML-тегів (`<b>`, `<i>`, `<code>`). Не використовуй Markdown.
+4. Відповідай українською мовою.
+5. Інтегруй цитати природно в текст.
+
+Надай відповідь у дружньому, але експертному стилі.
+"""
+
+
 class MLBBChatGPT:
     TEXT_MODEL = "gpt-4.1" 
-    VISION_MODEL = "gpt-4.1" 
+    VISION_MODEL = "gpt-4.1"
+    # 🚀 НОВА МОДЕЛЬ ДЛЯ ПОШУКУ
+    SEARCH_MODEL = "gpt-4o-mini-search-preview"
 
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
         self.session: Optional[ClientSession] = None
         self.class_logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-        self.class_logger.info(f"GGenius Service (MLBBChatGPT) ініціалізовано. Текстова модель: {self.TEXT_MODEL}, Vision модель: {self.VISION_MODEL}")
+        self.class_logger.info(f"GGenius Service (MLBBChatGPT) ініціалізовано. Текстова модель: {self.TEXT_MODEL}, Vision модель: {self.VISION_MODEL}, Пошукова модель: {self.SEARCH_MODEL}")
 
     async def __aenter__(self) -> "MLBBChatGPT":
         self.session = ClientSession(
@@ -910,3 +930,88 @@ class MLBBChatGPT:
             if temp_session_created and current_session and not current_session.closed:
                 await current_session.close()
                 self.class_logger.debug(f"Тимчасову сесію для analyze_user_profile (mode={mode}) закрито.")
+
+    # 🚀 НОВИЙ МЕТОД ДЛЯ ВЕБ-ПОШУКУ
+    async def get_web_search_response(self, user_name: str, user_query: str) -> str:
+        """
+        Виконує запит до спеціалізованої пошукової моделі OpenAI та форматує відповідь з цитатами.
+        """
+        user_name_escaped = html.escape(user_name)
+        self.class_logger.info(f"Запит до Web Search (/search) від '{user_name_escaped}': '{user_query[:100]}...'")
+
+        prompt = WEB_SEARCH_PROMPT_TEMPLATE.format(user_name=user_name_escaped, user_query=html.escape(user_query))
+        
+        payload = {
+            "model": self.SEARCH_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "web_search_options": {
+                "search_context_size": "medium", # Збалансований варіант
+                 "user_location": {
+                    "type": "approximate",
+                    "approximate": {
+                        "country": "UA",
+                        "timezone": "Europe/Kyiv"
+                    }
+                }
+            },
+            "max_tokens": 2048,
+            "temperature": 0.7
+        }
+        self.class_logger.debug(f"Параметри для Web Search: модель={payload['model']}, context_size={payload['web_search_options']['search_context_size']}")
+
+        current_session = self.session
+        temp_session_created = False
+        if not current_session or current_session.closed:
+            self.class_logger.warning("Aiohttp сесія для Web Search була закрита. Створюю тимчасову.")
+            current_session = ClientSession(timeout=ClientTimeout(total=120), headers={"Authorization": f"Bearer {self.api_key}"})
+            temp_session_created = True
+        
+        try:
+            async with current_session.post("https://api.openai.com/v1/chat/completions", json=payload) as response:
+                response_data = await response.json()
+                if response.status != 200:
+                    error_details = response_data.get("error", {}).get("message", str(response_data))
+                    self.class_logger.error(f"Web Search API HTTP помилка: {response.status} - {error_details}")
+                    return f"Вибач, {user_name_escaped}, сервіс пошуку тимчасово недоступний (код: {response.status})."
+
+                choice = response_data.get("choices", [{}])[0]
+                message_content = choice.get("message", {}).get("content")
+                annotations = choice.get("message", {}).get("annotations", [])
+
+                if not message_content:
+                    self.class_logger.warning(f"Web Search API повернув порожню відповідь для запиту: '{user_query}'")
+                    return f"На жаль, {user_name_escaped}, не вдалося знайти інформацію за твоїм запитом."
+
+                # Обробка цитат
+                if annotations:
+                    # Сортуємо анотації за start_index у зворотному порядку, щоб не збити індекси при заміні
+                    sorted_annotations = sorted(
+                        [anno for anno in annotations if anno.get("type") == "url_citation"],
+                        key=lambda x: x['url_citation']['start_index'],
+                        reverse=True
+                    )
+                    
+                    sources = []
+                    for i, anno in enumerate(sorted_annotations, 1):
+                        citation = anno['url_citation']
+                        start, end = citation['start_index'], citation['end_index']
+                        url = html.escape(citation['url'])
+                        title = html.escape(citation.get('title', 'Джерело'))
+                        
+                        # Вставляємо номер цитати в текст
+                        message_content = f"{message_content[:start]}<sup><a href='{url}'>[<b>{i}</b>]</a></sup>{message_content[end:]}"
+                        sources.append(f"{i}. <a href='{url}'>{title}</a>")
+
+                    if sources:
+                        sources_list_str = "\n\n<b>Джерела:</b>\n" + "\n".join(sources)
+                        message_content += sources_list_str
+
+                return self._beautify_response(message_content)
+
+        except Exception as e:
+            self.class_logger.exception(f"Критична помилка в get_web_search_response для {user_name_escaped}: {e}")
+            return f"Щось пішло не так під час пошуку, {user_name_escaped}. Спробуй пізніше."
+        finally:
+            if temp_session_created and current_session and not current_session.closed:
+                await current_session.close()
+                self.class_logger.debug("Тимчасову сесію для Web Search закрито.")
