@@ -998,7 +998,8 @@ class MLBBChatGPT:
                         title = html.escape(citation.get('title', 'Джерело'))
                         
                         # Вставляємо номер цитати в текст
-                        message_content = f"{message_content[:start]}<sup><a href='{url}'>[<b>{i}</b>]</a></sup>{message_content[end:]}"
+                        # ❗️ ВИДАЛЕНО НЕСУМІСНИЙ ТЕГ <sup>
+                        message_content = f"{message_content[:start]}<a href='{url}'>[<b>{i}</b>]</a>{message_content[end:]}"
                         sources.append(f"{i}. <a href='{url}'>{title}</a>")
 
                     if sources:
