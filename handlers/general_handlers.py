@@ -87,7 +87,9 @@ PERSONALIZATION_TRIGGERS = [
 # === ІНІЦІАЛІЗАЦІЯ РОУТЕРІВ ТА КЛІЄНТІВ ===
 party_router = Router()
 general_router = Router()
-gemini_client = GeminiSearch()
+# 🚀 Ініціалізуємо GPT клієнт для використання в різних обробниках
+gpt_client = MLBBChatGPT(OPENAI_API_KEY)
+
 
 # === ФУНКЦІЯ ДЛЯ ВСТАНОВЛЕННЯ КОМАНД БОТА ===
 async def set_bot_commands(bot: Bot):
@@ -687,6 +689,7 @@ async def cmd_help(message: Message):
 """
     await message.reply(help_text, parse_mode=ParseMode.HTML)
 
+# 🚀 ОНОВЛЕНИЙ ОБРОБНИК /SEARCH
 @general_router.message(Command("search"))
 async def cmd_search(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
@@ -702,10 +705,11 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
         await message.reply(f"Привіт, <b>{user_name_escaped}</b>! 🔎\nНапиши запит після <code>/search</code>, наприклад:\n<code>/search останні зміни балансу героїв</code>", parse_mode=ParseMode.HTML)
         return
 
-    thinking_msg = await message.reply(f"🛰️ {user_name_escaped}, шукаю найсвіжішу інформацію через Google...")
+    thinking_msg = await message.reply(f"🛰️ {user_name_escaped}, шукаю найсвіжішу інформацію в Інтернеті...")
     start_time = time.time()
     
-    response_text = await gemini_client.get_search_response(user_query, user_name_escaped)
+    async with gpt_client as gpt:
+        response_text = await gpt.get_web_search_response(user_name_escaped, user_query)
     
     processing_time = time.time() - start_time
     logger.info(f"Час обробки /search для '{user_query}': {processing_time:.2f}с")
@@ -715,7 +719,7 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
 
     admin_info = ""
     if user_id == ADMIN_USER_ID:
-        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | Gemini (gemini-1.5-flash)</i>"
+        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | OpenAI ({gpt_client.SEARCH_MODEL})</i>"
     
     full_response_to_send = f"{response_text}{admin_info}"
 
@@ -756,7 +760,7 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
 
     response_text = f"Вибач, {user_name_escaped}, сталася помилка генерації відповіді. 😔"
     try:
-        async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+        async with gpt_client as gpt:
             response_text = await gpt.get_response(user_name_escaped, user_query)
     except Exception as e:
         logger.exception(f"Критична помилка MLBBChatGPT для '{user_query}': {e}")
@@ -766,7 +770,7 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
 
     admin_info = ""
     if user_id == ADMIN_USER_ID:
-        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | GPT (gpt-4.1-turbo)</i>"
+        admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | GPT ({gpt_client.TEXT_MODEL})</i>"
     
     full_response_to_send = f"{response_text}{admin_info}"
 
@@ -881,7 +885,7 @@ async def handle_image_messages(message: Message, bot: Bot):
 
         image_base64 = base64.b64encode(image_bytes_io.read()).decode('utf-8')
         
-        async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+        async with gpt_client as gpt:
             # 🔑 Передаємо і зображення, і caption
             vision_response = await gpt.analyze_image_universal(
                 image_base64, 
@@ -1000,7 +1004,7 @@ async def handle_trigger_messages(message: Message, bot: Bot):
             chat_history = chat_history[-MAX_CHAT_HISTORY_LENGTH:]
 
         try:
-            async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
+            async with gpt_client as gpt:
                 reply_text = await gpt.generate_conversational_reply(
                     user_name=current_user_name,
                     chat_history=chat_history,
