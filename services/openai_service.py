@@ -974,26 +974,50 @@ class MLBBChatGPT:
                 if any(word in user_query.lower() for word in ["посилання", "сайт", "ресурс", "source", "link"]):
                     annotations = choice.get("message", {}).get("annotations", [])
                     if annotations:
-                        sorted_annotations = sorted(
-                            [anno for anno in annotations if anno.get("type") == "url_citation"],
-                            key=lambda x: x['url_citation']['start_index'],
-                            reverse=True
-                        )
+                        # Створюємо унікальний список джерел
+                        unique_sources = {}
+                        for anno in annotations:
+                            if anno.get("type") == "url_citation":
+                                citation = anno['url_citation']
+                                url = citation.get('url')
+                                if url and url not in unique_sources:
+                                    unique_sources[url] = {
+                                        'title': citation.get('title', url.split('/')[2]),
+                                        'text_markers': []
+                                    }
                         
-                        sources = []
-                        for i, anno in enumerate(sorted_annotations, 1):
-                            citation = anno['url_citation']
-                            start, end = citation['start_index'], citation['end_index']
-                            url = html.escape(citation['url'])
-                            title = html.escape(citation.get('title', 'Джерело'))
-                            
-                            message_content = f"{message_content[:start]}<a href='{url}'>[<b>{i}</b>]</a>{message_content[end:]}"
-                            sources.append(f"{i}. <a href='{url}'>{title}</a>")
+                        # Збираємо всі текстові маркери для кожного унікального джерела
+                        for text_marker in re.finditer(r'\[citation:(\d+)]', message_content):
+                            index = int(text_marker.group(1)) - 1
+                            if 0 <= index < len(annotations) and annotations[index].get("type") == "url_citation":
+                                url = annotations[index]['url_citation'].get('url')
+                                if url in unique_sources:
+                                    unique_sources[url]['text_markers'].append(text_marker.group(0))
 
-                        if sources:
-                            sources_list_str = "\n\n<b>Джерела:</b>\n" + "\n".join(sources)
+                        # Замінюємо маркери та формуємо список джерел
+                        sources_list = []
+                        source_counter = 1
+                        for url, data in unique_sources.items():
+                            # Замінюємо всі входження маркерів для цього URL на один номер
+                            replacement_tag = f"<a href='{html.escape(url)}'>[<b>{source_counter}</b>]</a>"
+                            for marker in data['text_markers']:
+                                message_content = message_content.replace(marker, replacement_tag, 1) # Замінюємо лише раз, щоб уникнути подвійних посилань
+                            
+                            # Видаляємо інші можливі дублікати маркерів
+                            for marker in data['text_markers']:
+                                message_content = message_content.replace(marker, "")
+
+                            title = html.escape(data['title'])
+                            sources_list.append(f"{source_counter}. <a href='{html.escape(url)}'>{title}</a>")
+                            source_counter += 1
+                        
+                        if sources_list:
+                            sources_list_str = "\n\n<b>Джерела:</b>\n" + "\n".join(sources_list)
                             message_content += sources_list_str
 
+                # Видаляємо будь-які залишкові маркери, що не були оброблені
+                message_content = re.sub(r'\[\s*citation:\s*\d+\s*\]', '', message_content)
+                
                 return self._beautify_response(message_content)
 
         except Exception as e:
