@@ -32,7 +32,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from openai import RateLimitError # 👈 Новий імпорт
+from openai import RateLimitError
 
 # Імпорти з нашого проєкту
 from config import (
@@ -44,7 +44,6 @@ from config import (
 )
 # Імпортуємо сервіси та утиліти
 from services.openai_service import MLBBChatGPT
-from services.research_service import MLBBDeepResearch
 from utils.message_utils import send_message_in_chunks
 from keyboards.inline_keyboards import (
     create_party_confirmation_keyboard,
@@ -97,7 +96,6 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="profile", description="👤 Мій профіль (реєстрація/оновлення)"),
         BotCommand(command="go", description="💬 Задати питання AI-помічнику"),
         BotCommand(command="search", description="🔍 Пошук новин та оновлень"),
-        BotCommand(command="research", description="🔬 Глибокий аналіз теми"), # Нова команда
         BotCommand(command="analyzeprofile", description="📸 Аналіз скріншота профілю"),
         BotCommand(command="analyzestats", description="📊 Аналіз скріншота статистики"),
         BotCommand(command="help", description="❓ Допомога та інфо"),
@@ -679,7 +677,6 @@ async def cmd_help(message: Message):
 /profile - Зареєструвати або оновити свій ігровий профіль.
 /go <code>&lt;питання&gt;</code> - Задати будь-яке питання про гру (герої, предмети, тактики).
 /search <code>&lt;запит&gt;</code> - Знайти останні новини або інформацію в Інтернеті.
-/research <code>&lt;запит&gt;</code> - Провести глибокий аналіз теми.
 /analyzeprofile - Запустити аналіз скріншота вашого профілю.
 /analyzestats - Запустити аналіз скріншота вашої статистики.
 /help - Показати це повідомлення.
@@ -783,55 +780,6 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
             else: await message.reply(final_error_msg, parse_mode=None)
         except Exception as final_err:
              logger.error(f"Не вдалося надіслати навіть фінальне повідомлення про помилку: {final_err}")
-
-# === НОВИЙ ОБРОБНИК ДЛЯ DEEP RESEARCH ===
-@general_router.message(Command("research"))
-async def cmd_research(message: Message, bot: Bot):
-    """Обробник команди /research для швидкого глибокого аналізу."""
-    if not message.from_user:
-        return
-        
-    query = message.text.replace("/research", "").strip()
-    user_name = get_user_display_name(message.from_user)
-
-    if not query:
-        await message.reply(
-            f"Привіт, {user_name}! 🔬\n"
-            "Напиши тему для дослідження після <code>/research</code>, наприклад:\n"
-            "<code>/research найкращі предмети для стрільців у поточному патчі</code>",
-            parse_mode=ParseMode.HTML
-        )
-        return
-
-    thinking_msg = await message.reply(f"🔬 {user_name}, починаю швидке дослідження... Це може зайняти до хвилини.")
-    
-    researcher = MLBBDeepResearch(model="o4-mini-deep-research")
-    
-    try:
-        start_time = time.time()
-        result = await researcher.start_research_task(query)
-        processing_time = time.time() - start_time
-        
-        output_text = result.get("output_text", "Не вдалося отримати результат.")
-        
-        admin_info = ""
-        if message.from_user.id == ADMIN_USER_ID:
-            admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | {researcher.model}</i>"
-        
-        full_response_to_send = f"{output_text}{admin_info}"
-        
-        await send_message_in_chunks(bot, message.chat.id, full_response_to_send, ParseMode.HTML, thinking_msg)
-    
-    except RateLimitError: # 👈 Обробка помилки лімітів
-        logger.warning(f"Rate limit exceeded for /research command by user {user_name}")
-        await thinking_msg.edit_text(
-            f"⏳ {user_name}, зараз забагато запитів до AI-аналітика. "
-            "Будь ласка, спробуй ще раз за хвилину."
-        )
-    except Exception as e:
-        logger.error(f"Error during /research command for query '{query}': {e}", exc_info=True)
-        await thinking_msg.edit_text(f"Вибач, {user_name}, сталася помилка під час дослідження.")
-
 
 # === ОБРОБНИКИ ПОВІДОМЛЕНЬ (ФОТО ТА ТЕКСТ) ===
 @general_router.message(F.photo)
