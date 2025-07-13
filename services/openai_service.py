@@ -954,8 +954,7 @@ class MLBBChatGPT:
                     }
                 }
             },
-            "max_tokens": 2048,
-            "temperature": 0.7
+            "max_tokens": 2048
         }
         self.class_logger.debug(f"Параметри для Web Search: модель={payload['model']}, context_size={payload['web_search_options']['search_context_size']}")
 
