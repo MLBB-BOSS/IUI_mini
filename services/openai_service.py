@@ -23,7 +23,7 @@ BANNED_PHRASES = [
 def _filter_cringy_phrases(response: str) -> str:
     """Видаляє або замінює заїжджені фрази з відповіді."""
     original_response = response
-    for phrase in BANNED_PHRASES:
+    for phrase in BANNED_PHrases:
         if phrase in response.lower():
             # Проста стратегія: видаляємо речення, що містить фразу
             sentences = re.split(r'(?<=[.!?])\s+', response)
@@ -266,21 +266,25 @@ UNIVERSAL_VISION_PROMPT_TEMPLATE = """
 Дай живу, людську реакцію як справжній член MLBB-спільноти!
 """
 
-# 🚀 НОВИЙ ПРОМПТ ДЛЯ ВЕБ-ПОШУКУ
+# 🚀 ОНОВЛЕНИЙ ПРОМПТ ДЛЯ ВЕБ-ПОШУКУ
 WEB_SEARCH_PROMPT_TEMPLATE = """
-Ти — GGenius, AI-асистент для спільноти гри Mobile Legends.
-Тобі поставлено запит від користувача '{user_name}'.
+Ти — GGenius, твій персональний AI-наставник та стратегічний аналітик у світі Mobile Legends. Ти "свій пацан", який завжди на вайбі.
 
-ЗАПИТ: "{user_query}"
+**Твоя місія:**
+Надати коротку, але вичерпну відповідь на запит користувача, використовуючи найсвіжішу інформацію з Інтернету.
 
-ІНСТРУКЦІЇ:
-1. Дай актуальну та повну відповідь на запит користувача, використовуючи інформацію з Інтернету.
-2. Структуруй відповідь чітко: заголовок, основні пункти, висновок.
-3. **ВАЖЛИВО**: Відповідь має бути відформатована за допомогою HTML-тегів (`<b>`, `<i>`, `<code>`). Не використовуй Markdown.
-4. Відповідай українською мовою.
-5. Інтегруй цитати природно в текст.
+**Контекст:**
+- Користувач: '{user_name}'
+- Запит: "{user_query}"
 
-Надай відповідь у дружньому, але експертному стилі.
+**КРИТИЧНІ ІНСТРУКЦІЇ:**
+1.  **СТИЛЬ GGENIUS:** Говори як досвідчений геймер — впевнено, з гумором, використовуючи ігровий сленг ("катка", "імба", "нерф", "мета"). Додавай доречні емодзі (🔥, 🧠, 🏆, 💡).
+2.  **МАКСИМАЛЬНА ДОВЖИНА:** Твоя відповідь має бути дуже стислою, приблизно **1000 символів**. Фокусуйся на найголовнішому. Не пиши довгих полотен тексту.
+3.  **БЕЗ ДЖЕРЕЛ:** **НЕ** додавай посилання або список джерел у свою відповідь. Просто дай інформацію. Виняток: якщо користувач прямо попросив посилання.
+4.  **ФОРМАТУВАННЯ:** Використовуй HTML-теги для структурування: `<b>` для акцентів, `<i>` для порад, `<code>` для назв.
+5.  **МОВА:** Відповідай українською.
+
+Давай, видай базу по запиту! 🔥
 """
 
 
@@ -927,7 +931,7 @@ class MLBBChatGPT:
                 await current_session.close()
                 self.class_logger.debug(f"Тимчасову сесію для analyze_user_profile (mode={mode}) закрито.")
 
-    # 🚀 НОВИЙ МЕТОД ДЛЯ ВЕБ-ПОШУКУ
+    # 🚀 ОНОВЛЕНИЙ МЕТОД ДЛЯ ВЕБ-ПОШУКУ
     async def get_web_search_response(self, user_name: str, user_query: str) -> str:
         """
         Виконує запит до спеціалізованої пошукової моделі OpenAI та форматує відповідь з цитатами.
@@ -940,19 +944,10 @@ class MLBBChatGPT:
         payload = {
             "model": self.SEARCH_MODEL,
             "messages": [{"role": "user", "content": prompt}],
-            "web_search_options": {
-                "search_context_size": "medium", # Збалансований варіант
-                 "user_location": {
-                    "type": "approximate",
-                    "approximate": {
-                        "country": "UA",
-                        "timezone": "Europe/Kyiv"
-                    }
-                }
-            },
-            "max_tokens": 2048
+            "max_tokens": 400, # Обмежуємо токени для коротшої відповіді
+            "temperature": 0.5,
         }
-        self.class_logger.debug(f"Параметри для Web Search: модель={payload['model']}, context_size={payload['web_search_options']['search_context_size']}")
+        self.class_logger.debug(f"Параметри для Web Search: модель={payload['model']}, max_tokens={payload['max_tokens']}")
 
         current_session = self.session
         temp_session_created = False
@@ -971,35 +966,34 @@ class MLBBChatGPT:
 
                 choice = response_data.get("choices", [{}])[0]
                 message_content = choice.get("message", {}).get("content")
-                annotations = choice.get("message", {}).get("annotations", [])
 
                 if not message_content:
                     self.class_logger.warning(f"Web Search API повернув порожню відповідь для запиту: '{user_query}'")
                     return f"На жаль, {user_name_escaped}, не вдалося знайти інформацію за твоїм запитом."
 
-                # Обробка цитат
-                if annotations:
-                    # Сортуємо анотації за start_index у зворотному порядку, щоб не збити індекси при заміні
-                    sorted_annotations = sorted(
-                        [anno for anno in annotations if anno.get("type") == "url_citation"],
-                        key=lambda x: x['url_citation']['start_index'],
-                        reverse=True
-                    )
-                    
-                    sources = []
-                    for i, anno in enumerate(sorted_annotations, 1):
-                        citation = anno['url_citation']
-                        start, end = citation['start_index'], citation['end_index']
-                        url = html.escape(citation['url'])
-                        title = html.escape(citation.get('title', 'Джерело'))
+                # Перевіряємо, чи потрібно додавати джерела
+                if any(word in user_query.lower() for word in ["посилання", "сайт", "ресурс", "source", "link"]):
+                    annotations = choice.get("message", {}).get("annotations", [])
+                    if annotations:
+                        sorted_annotations = sorted(
+                            [anno for anno in annotations if anno.get("type") == "url_citation"],
+                            key=lambda x: x['url_citation']['start_index'],
+                            reverse=True
+                        )
                         
-                        # Вставляємо номер цитати в текст
-                        message_content = f"{message_content[:start]}<a href='{url}'>[<b>{i}</b>]</a>{message_content[end:]}"
-                        sources.append(f"{i}. <a href='{url}'>{title}</a>")
+                        sources = []
+                        for i, anno in enumerate(sorted_annotations, 1):
+                            citation = anno['url_citation']
+                            start, end = citation['start_index'], citation['end_index']
+                            url = html.escape(citation['url'])
+                            title = html.escape(citation.get('title', 'Джерело'))
+                            
+                            message_content = f"{message_content[:start]}<a href='{url}'>[<b>{i}</b>]</a>{message_content[end:]}"
+                            sources.append(f"{i}. <a href='{url}'>{title}</a>")
 
-                    if sources:
-                        sources_list_str = "\n\n<b>Джерела:</b>\n" + "\n".join(sources)
-                        message_content += sources_list_str
+                        if sources:
+                            sources_list_str = "\n\n<b>Джерела:</b>\n" + "\n".join(sources)
+                            message_content += sources_list_str
 
                 return self._beautify_response(message_content)
 
