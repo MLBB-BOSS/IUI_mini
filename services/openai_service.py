@@ -980,7 +980,7 @@ class MLBBChatGPT:
                 clean_text = re.sub(r'【\d+†source】', '', message_content).strip()
                 
                 sources_list_str = ""
-                # 2. Формуємо список джерел, якщо вони є
+                # 2. Формуємо список джерел, тільки якщо вони є і користувач їх попросив
                 if annotations and any(word in user_query.lower() for word in ["посилання", "сайт", "ресурс", "source", "link"]):
                     unique_sources = {}
                     for anno in annotations:
