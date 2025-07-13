@@ -699,7 +699,8 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
     current_time = time.time()
     
     # Адмін ігнорує обмеження
-    if user_id != ADMIN_USER_ID:
+    # ❗️ FIX: Явне перетворення типів для надійного порівняння
+    if int(user_id) != int(ADMIN_USER_ID):
         last_search_time = search_cooldowns.get(user_id, 0)
         time_elapsed = current_time - last_search_time
         
@@ -721,7 +722,7 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
         return
 
     # Оновлюємо час останнього запиту для користувача (тільки якщо запит валідний)
-    if user_id != ADMIN_USER_ID:
+    if int(user_id) != int(ADMIN_USER_ID):
         search_cooldowns[user_id] = current_time
 
     thinking_msg = await message.reply(f"🛰️ {user_name_escaped}, шукаю найсвіжішу інформацію в Інтернеті...")
