@@ -357,6 +357,9 @@ class MLBBChatGPT:
         # Обережна заміна одинарних * на курсив, щоб не зачепити маркери списків
         text = re.sub(r'(?<!\*)\*(?!\s|\*)(.+?)(?<!\s|\*)\*(?!\*)', r'<i>\1</i>', text)
         text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
+        # ❗️ НОВЕ: Обробка Markdown-посилань
+        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+
 
         # Потім обробляємо списки та заголовки
         header_emojis = {
@@ -944,7 +947,7 @@ class MLBBChatGPT:
         payload = {
             "model": self.SEARCH_MODEL,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 400, # Обмежуємо токени для коротшої відповіді
+            "max_tokens": 1500, 
         }
         self.class_logger.debug(f"Параметри для Web Search: модель={payload['model']}, max_tokens={payload['max_tokens']}")
 
@@ -970,55 +973,30 @@ class MLBBChatGPT:
                     self.class_logger.warning(f"Web Search API повернув порожню відповідь для запиту: '{user_query}'")
                     return f"На жаль, {user_name_escaped}, не вдалося знайти інформацію за твоїм запитом."
 
-                # Перевіряємо, чи потрібно додавати джерела
-                if any(word in user_query.lower() for word in ["посилання", "сайт", "ресурс", "source", "link"]):
-                    annotations = choice.get("message", {}).get("annotations", [])
-                    if annotations:
-                        # Створюємо унікальний список джерел
-                        unique_sources = {}
-                        for anno in annotations:
-                            if anno.get("type") == "url_citation":
-                                citation = anno['url_citation']
-                                url = citation.get('url')
-                                if url and url not in unique_sources:
-                                    unique_sources[url] = {
-                                        'title': citation.get('title', url.split('/')[2]),
-                                        'text_markers': []
-                                    }
-                        
-                        # Збираємо всі текстові маркери для кожного унікального джерела
-                        for text_marker in re.finditer(r'\[citation:(\d+)]', message_content):
-                            index = int(text_marker.group(1)) - 1
-                            if 0 <= index < len(annotations) and annotations[index].get("type") == "url_citation":
-                                url = annotations[index]['url_citation'].get('url')
-                                if url in unique_sources:
-                                    unique_sources[url]['text_markers'].append(text_marker.group(0))
-
-                        # Замінюємо маркери та формуємо список джерел
-                        sources_list = []
-                        source_counter = 1
-                        for url, data in unique_sources.items():
-                            # Замінюємо всі входження маркерів для цього URL на один номер
-                            replacement_tag = f"<a href='{html.escape(url)}'>[<b>{source_counter}</b>]</a>"
-                            for marker in data['text_markers']:
-                                message_content = message_content.replace(marker, replacement_tag, 1) # Замінюємо лише раз, щоб уникнути подвійних посилань
-                            
-                            # Видаляємо інші можливі дублікати маркерів
-                            for marker in data['text_markers']:
-                                message_content = message_content.replace(marker, "")
-
-                            title = html.escape(data['title'])
-                            sources_list.append(f"{source_counter}. <a href='{html.escape(url)}'>{title}</a>")
-                            source_counter += 1
-                        
-                        if sources_list:
-                            sources_list_str = "\n\n<b>Джерела:</b>\n" + "\n".join(sources_list)
-                            message_content += sources_list_str
-
-                # Видаляємо будь-які залишкові маркери, що не були оброблені
-                message_content = re.sub(r'\[\s*citation:\s*\d+\s*\]', '', message_content)
+                # ❗️ НОВА, НАДІЙНА ЛОГІКА ОБРОБКИ ПОСИЛАНЬ
+                annotations = choice.get("message", {}).get("tool_calls", [{}])[0].get("function",{}).get("arguments",{}).get("citations", [])
                 
-                return self._beautify_response(message_content)
+                # 1. Очищуємо текст від маркерів цитат
+                clean_text = re.sub(r'【\d+†source】', '', message_content).strip()
+                
+                sources_list_str = ""
+                # 2. Формуємо список джерел, якщо вони є
+                if annotations and any(word in user_query.lower() for word in ["посилання", "сайт", "ресурс", "source", "link"]):
+                    unique_sources = {}
+                    for anno in annotations:
+                        url = anno.get('url')
+                        if url and url not in unique_sources:
+                             unique_sources[url] = anno.get('title', url.split('/')[2])
+
+                    if unique_sources:
+                        sources_list = []
+                        for i, (url, title) in enumerate(unique_sources.items(), 1):
+                            sources_list.append(f"{i}. <a href='{html.escape(url)}'>{html.escape(title)}</a>")
+                        
+                        sources_list_str = "\n\n<b>Джерела:</b>\n" + "\n".join(sources_list)
+
+                final_response = clean_text + sources_list_str
+                return self._beautify_response(final_response)
 
         except Exception as e:
             self.class_logger.exception(f"Критична помилка в get_web_search_response для {user_name_escaped}: {e}")
