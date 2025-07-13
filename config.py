@@ -30,7 +30,6 @@ load_dotenv()
 # ------------------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-GEMINI_API_KEY: str = os.getenv("API_Gemini", "")
 GOOGLE_CLOUD_PROJECT_ID: str = os.getenv("GOOGLE_CLOUD_PROJECT_ID", "")
 CLOUDINARY_URL: str = os.getenv("CLOUDINARY_URL", "")
 
@@ -167,7 +166,6 @@ CONVERSATIONAL_TRIGGERS: dict[str, str] = {
 _critical_vars = {
     "TELEGRAM_BOT_TOKEN": bool(TELEGRAM_BOT_TOKEN),
     "OPENAI_API_KEY": bool(OPENAI_API_KEY),
-    "API_Gemini": bool(GEMINI_API_KEY),
     "GOOGLE_CLOUD_PROJECT_ID": bool(GOOGLE_CLOUD_PROJECT_ID),
     "CLOUDINARY_URL": bool(CLOUDINARY_URL),
     "DATABASE_URL (sync)": bool(SYNC_DATABASE_URL),
@@ -188,7 +186,6 @@ if _missing:
 # ------------------------------------------------------------------------------
 logger.info("✅ TELEGRAM_BOT_TOKEN loaded.")
 logger.info("✅ OPENAI_API_KEY loaded.")
-logger.info("✅ GEMINI_API_KEY loaded.")
 logger.info("✅ GOOGLE_CLOUD_PROJECT_ID loaded.")
 logger.info("✅ CLOUDINARY_URL loaded.")
 logger.info("✅ SYNC_DATABASE_URL loaded.")
