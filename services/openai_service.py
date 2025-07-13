@@ -23,7 +23,7 @@ BANNED_PHRASES = [
 def _filter_cringy_phrases(response: str) -> str:
     """Видаляє або замінює заїжджені фрази з відповіді."""
     original_response = response
-    for phrase in BANNED_PHrases:
+    for phrase in BANNED_PHRASES:
         if phrase in response.lower():
             # Проста стратегія: видаляємо речення, що містить фразу
             sentences = re.split(r'(?<=[.!?])\s+', response)
@@ -945,7 +945,6 @@ class MLBBChatGPT:
             "model": self.SEARCH_MODEL,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 400, # Обмежуємо токени для коротшої відповіді
-            "temperature": 0.5,
         }
         self.class_logger.debug(f"Параметри для Web Search: модель={payload['model']}, max_tokens={payload['max_tokens']}")
 
