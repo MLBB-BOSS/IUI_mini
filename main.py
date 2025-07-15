@@ -13,6 +13,10 @@ from aiogram.exceptions import TelegramAPIError
 from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, logger, ASYNC_DATABASE_URL
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
+
+# ❗️ НОВЕ: Імпортуємо модуль з моделями ДО ініціалізації БД
+# Це гарантує, що SQLAlchemy Base знає про всі таблиці, які потрібно створити.
+import database.models
 from database.init_db import init_db
 from handlers.general_handlers import (
     register_general_handlers, 
@@ -81,7 +85,7 @@ async def sanitize_database():
 
 async def main() -> None:
     """Головна функція запуску бота."""
-    bot_version = "v4.2.0 (Router Priority Fix)"
+    bot_version = "v4.3.0 (DB Schema Fix)"
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
     await sanitize_database()
@@ -121,8 +125,8 @@ async def main() -> None:
                     f"🆔 @{bot_info.username}",
                     f"⏰ {launch_time_kyiv}",
                     "✨ <b>Зміни:</b>",
-                    "  • Виправлено пріоритет роутерів.",
-                    "  • Ігрові команди тепер мають вищий пріоритет.",
+                    "  • Виправлено збій БД (UndefinedTableError).",
+                    "  • Додано модель та міграцію для reaction_scores.",
                     "🟢 Готовий до роботи!"
                 ]
                 admin_message = "\n".join(admin_message_lines)
