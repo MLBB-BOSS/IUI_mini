@@ -8,6 +8,7 @@ from contextlib import suppress
 
 from aiogram import F, Router, types
 from aiogram.exceptions import TelegramAPIError
+from aiogram.filters import Command
 
 from config import logger
 from database.crud import get_user_by_telegram_id
@@ -18,6 +19,17 @@ from games.reaction.keyboards import (create_leaderboard_keyboard,
 # Словник для зберігання активних ігор
 active_games: dict[int, dict] = {}
 reaction_router = Router()
+
+
+async def cmd_reaction(message: types.Message):
+    """
+    Обробник команди /reaction.
+    Надсилає початкове меню гри на реакцію.
+    """
+    await message.answer(
+        "<b>Гра на реакцію</b>\n\nПеревірте свою швидкість!",
+        reply_markup=create_reaction_game_keyboard("initial", 0)
+    )
 
 
 async def start_reaction_game(callback_query: types.CallbackQuery):
@@ -185,6 +197,7 @@ async def back_to_game_menu(callback_query: types.CallbackQuery):
 
 def register_reaction_handlers(dp: Router):
     """Реєструє всі обробники для гри 'Reaction Time'."""
+    dp.message.register(cmd_reaction, Command("reaction"))
     dp.callback_query.register(start_reaction_game, F.data == "reaction_game_start")
     dp.callback_query.register(stop_reaction_game_handler, F.data.startswith("reaction_game_press:"))
     dp.callback_query.register(show_leaderboard, F.data == "reaction_game_leaderboard")
