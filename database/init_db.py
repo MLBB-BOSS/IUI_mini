@@ -3,108 +3,84 @@
 Створює всі необхідні таблиці на основі моделей SQLAlchemy
 та забезпечує м'які міграції для додаткових колонок.
 """
+import asyncio
+
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 from config import ASYNC_DATABASE_URL, logger
 from database.models import Base
 
 
-async def init_db():
+async def init_db() -> None:
     """
     Ініціалізує базу даних: створює таблиці та додає нові колонки й індекси,
-    якщо вони ще не існують.
+    якщо вони ще не існують, використовуючи паралельні запити.
     """
     engine = create_async_engine(ASYNC_DATABASE_URL)
     async with engine.begin() as conn:
         logger.info("Initializing database tables...")
-        # Створюємо всі таблиці, визначені в Base.metadata
         await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables initialized successfully.")
 
-        # --- 🧠 Блок "м'якої" міграції ---
         try:
             logger.info("Applying soft migrations for 'users' table...")
-
-            # Chat history
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_history JSON"
-            ))
-
-            # Основні дані профілю
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS likes_received INTEGER"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS location TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS squad_name TEXT"
-            ))
-
-            # Розширена статистика
-            stats_cols = [
-                "stats_filter_type TEXT",
-                "mvp_count INTEGER",
-                "legendary_count INTEGER",
-                "maniac_count INTEGER",
-                "double_kill_count INTEGER",
-                "most_kills_in_one_game INTEGER",
-                "longest_win_streak INTEGER",
-                "highest_dmg_per_min INTEGER",
-                "highest_gold_per_min INTEGER",
-                "savage_count INTEGER",
-                "triple_kill_count INTEGER",
-                "mvp_loss_count INTEGER",
-                "most_assists_in_one_game INTEGER",
-                "first_blood_count INTEGER",
-                "highest_dmg_taken_per_min INTEGER",
-                "kda_ratio FLOAT",
-                "teamfight_participation_rate FLOAT",
-                "avg_gold_per_min INTEGER",
-                "avg_hero_dmg_per_min INTEGER",
-                "avg_deaths_per_match FLOAT",
-                "avg_turret_dmg_per_match INTEGER",
-            ]
-            for col in stats_cols:
-                await conn.execute(text(
-                    f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col}"
-                ))
-
-            # Топ-3 улюблених героїв
-            hero_cols = [
-                ("hero1_name", "TEXT"), ("hero1_matches", "INTEGER"), ("hero1_win_rate", "FLOAT"),
-                ("hero2_name", "TEXT"), ("hero2_matches", "INTEGER"), ("hero2_win_rate", "FLOAT"),
-                ("hero3_name", "TEXT"), ("hero3_matches", "INTEGER"), ("hero3_win_rate", "FLOAT"),
-            ]
-            for name, typ in hero_cols:
-                await conn.execute(text(
-                    f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {name} {typ}"
-                ))
-
-            # Колонки для зображень
-            image_cols = [
-                ("basic_profile_file_id", "TEXT"),
-                ("basic_profile_permanent_url", "TEXT"),
-                ("stats_photo_file_id", "TEXT"),
-                ("stats_photo_permanent_url", "TEXT"),
-                ("heroes_photo_file_id", "TEXT"),
-                ("heroes_photo_permanent_url", "TEXT"),
-                ("avatar_file_id", "TEXT"),
-                ("avatar_permanent_url", "TEXT"),
-            ]
-            for name, typ in image_cols:
-                await conn.execute(text(
-                    f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {name} {typ}"
-                ))
-
-            # Унікальний індекс на player_id
-            await conn.execute(text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id "
-                "ON users (player_id)"
-            ))
-
+            
+            # --- 🚀 MIGRATION: Parallel execution with TaskGroup ---
+            async with asyncio.TaskGroup() as tg:
+                # Список усіх ALTER TABLE запитів
+                alter_queries = [
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_history JSON",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS likes_received INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS location TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS squad_name TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS stats_filter_type TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS mvp_count INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS legendary_count INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS maniac_count INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS double_kill_count INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS most_kills_in_one_game INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS longest_win_streak INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS highest_dmg_per_min INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS highest_gold_per_min INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS savage_count INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS triple_kill_count INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS mvp_loss_count INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS most_assists_in_one_game INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS first_blood_count INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS highest_dmg_taken_per_min INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS kda_ratio FLOAT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS teamfight_participation_rate FLOAT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avg_gold_per_min INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avg_hero_dmg_per_min INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avg_deaths_per_match FLOAT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avg_turret_dmg_per_match INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero1_name TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero1_matches INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero1_win_rate FLOAT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero2_name TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero2_matches INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero2_win_rate FLOAT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero3_name TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero3_matches INTEGER",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hero3_win_rate FLOAT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS basic_profile_file_id TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS basic_profile_permanent_url TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS stats_photo_file_id TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS stats_photo_permanent_url TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS heroes_photo_file_id TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS heroes_photo_permanent_url TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_file_id TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_permanent_url TEXT",
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id ON users (player_id)",
+                ]
+                
+                # Створюємо завдання для кожного запиту
+                for query in alter_queries:
+                    tg.create_task(conn.execute(text(query)))
+            
             logger.info("Soft migrations completed successfully.")
-        except Exception as e:
-            logger.error(f"Soft migration failed: {e}", exc_info=True)
+        except* Exception as eg:
+            for e in eg.exceptions:
+                logger.error(f"Soft migration failed: {e}", exc_info=e)
 
     await engine.dispose()
