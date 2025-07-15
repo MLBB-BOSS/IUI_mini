@@ -21,7 +21,6 @@ import base64
 import io
 import random
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Deque, List
 from collections import defaultdict, deque
 
 from aiogram import Bot, Dispatcher, F, Router, types
@@ -72,10 +71,10 @@ class PartyCreationFSM(StatesGroup):
 
 
 # === СХОВИЩА ДАНИХ У ПАМ'ЯТІ ===
-chat_cooldowns: Dict[int, float] = {}
-vision_cooldowns: Dict[int, float] = {}
-search_cooldowns: Dict[int, float] = {}
-active_lobbies: Dict[int, Dict] = {} 
+chat_cooldowns: dict[int, float] = {}
+vision_cooldowns: dict[int, float] = {}
+search_cooldowns: dict[int, float] = {}
+active_lobbies: dict[int, dict] = {} 
 
 # 🧠 Визначаємо тригери для завантаження повного профілю
 PERSONALIZATION_TRIGGERS = [
@@ -108,7 +107,7 @@ async def set_bot_commands(bot: Bot):
         logger.error(f"Помилка під час оновлення команд бота: {e}", exc_info=True)
 
 # === ДОПОМІЖНІ ФУНКЦІЇ ===
-def get_user_display_name(user: Optional[types.User]) -> str:
+def get_user_display_name(user: types.User | None) -> str:
     if not user:
         return "друже"
     if user.first_name and user.first_name.strip():
@@ -130,7 +129,7 @@ def is_party_request_message(message: Message) -> bool:
         logger.warning(f"Помилка при перевірці party request: {e}")
         return False
 
-def get_lobby_message_text(lobby_data: dict, joining_user_name: Optional[str] = None) -> str:
+def get_lobby_message_text(lobby_data: dict, joining_user_name: str | None = None) -> str:
     """
     Створює розширений та візуально привабливий текст для лобі-повідомлення.
     🆕 v3.8: Оновлено назву режиму "Бравл" на "Режим бою".
