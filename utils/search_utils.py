@@ -3,11 +3,11 @@
 """
 import aiohttp
 import json
-from typing import List, Dict, Any, Optional
+from typing import Any
 from config import logger
 
 
-async def search_mlbb_info(query: str) -> Optional[List[Dict[str, Any]]]:
+async def search_mlbb_info(query: str) -> list[dict[str, Any]] | None:
     """
     Альтернативний пошук інформації про MLBB через публічні API.
     
@@ -27,7 +27,7 @@ async def search_mlbb_info(query: str) -> Optional[List[Dict[str, Any]]]:
     return None
 
 
-def format_search_results(results: List[Dict[str, Any]], user_name: str) -> str:
+def format_search_results(results: list[dict[str, Any]], user_name: str) -> str:
     """
     Форматує результати пошуку у HTML.
     
