@@ -791,45 +791,15 @@ class MLBBChatGPT:
         elif any(word in response_lower for word in ["турнір", "змагання", "чемпіонат"]): return "tournament"
         else: return "general"
 
-    async def analyze_user_profile(self, image_base64: str, mode: str = 'basic') -> dict:
+    async def analyze_user_profile(self, image_base64: str, prompt: str) -> dict:
         """
         Аналізує скріншот профілю, статистики або героїв гравця та повертає структуровані дані.
         
         Args:
             image_base64: Зображення у форматі Base64.
-            mode: Тип аналізу ('basic', 'stats', 'heroes').
+            prompt: Системний промпт для Vision API.
         """
-        self.class_logger.info(f"Запит на аналіз профілю в режимі '{mode}'.")
-        
-        # Динамічне завантаження промпту з файлу (якщо це буде реалізовано)
-        # from prompts import get_prompt
-        # system_prompt = get_prompt(f"{mode}.txt")
-        # Або, якщо промпти передаються ззовні:
-        # system_prompt = ... (отримано як аргумент)
-        # Поки що, припустимо, промпти передаються з vision_handlers
-        
-        # Для цього методу потрібен system_prompt. Оскільки ми їх видалили,
-        # цей метод потребуватиме рефакторингу або отримання промпту ззовні.
-        # Для демонстрації, тимчасово повернемо помилку.
-        # У реальному рефакторингу, ми б передавали промпт як аргумент.
-        
-        # Тимчасове рішення для продовження: припустимо, що промпт буде передано.
-        # У нашому випадку, цей метод викликається з registration_handler,
-        # який повинен буде надати відповідний промпт.
-        # Для цього рефакторингу, я оновлюю метод, щоб він вимагав промпт.
-        
-        # Ой, я бачу, що в `registration_handler` промпти не передаються.
-        # Це означає, що `analyze_user_profile` має знати про них.
-        # Повернемо їх назад, але з позначкою про можливий рефакторинг.
-        
-        from database.prompts import PROFILE_SCREENSHOT_PROMPT, PLAYER_STATS_PROMPT, HERO_STATS_PROMPT
-        
-        prompts = {
-            'basic': PROFILE_SCREENSHOT_PROMPT,
-            'stats': PLAYER_STATS_PROMPT,
-            'heroes': HERO_STATS_PROMPT
-        }
-        system_prompt = prompts.get(mode, PROFILE_SCREENSHOT_PROMPT)
+        self.class_logger.info(f"Запит на аналіз профілю з переданим промптом.")
         
         payload = {
             "model": self.VISION_MODEL,
@@ -839,7 +809,7 @@ class MLBBChatGPT:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": system_prompt},
+                        {"type": "text", "text": prompt},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
                     ]
                 }
@@ -851,7 +821,7 @@ class MLBBChatGPT:
         current_session = self.session
         temp_session_created = False
         if not current_session or current_session.closed:
-            self.class_logger.warning(f"Aiohttp сесія для analyze_user_profile (mode={mode}) була закрита. Створюю тимчасову.")
+            self.class_logger.warning(f"Aiohttp сесія для analyze_user_profile була закрита. Створюю тимчасову.")
             current_session = ClientSession(timeout=ClientTimeout(total=90), headers={"Authorization": f"Bearer {self.api_key}"})
             temp_session_created = True
 
@@ -859,27 +829,27 @@ class MLBBChatGPT:
             async with current_session.post("https://api.openai.com/v1/chat/completions", json=payload) as response:
                 if response.status != 200:
                     response_text = await response.text()
-                    self.class_logger.error(f"Помилка OpenAI API при аналізі профілю (mode={mode}): {response.status} - {response_text}")
+                    self.class_logger.error(f"Помилка OpenAI API при аналізі профілю: {response.status} - {response_text}")
                     return {"error": "Помилка відповіді від сервісу аналізу."}
                 
                 response_data = await response.json()
                 content = response_data.get("choices", [{}])[0].get("message", {}).get("content")
                 if not content:
-                    self.class_logger.error(f"OpenAI API повернув порожній контент (mode={mode}): {response_data}")
+                    self.class_logger.error(f"OpenAI API повернув порожній контент: {response_data}")
                     return {"error": "Сервіс аналізу повернув порожню відповідь."}
 
                 return json.loads(content)
 
         except json.JSONDecodeError as e:
-            self.class_logger.error(f"Помилка декодування JSON з OpenAI (mode={mode}): {e}")
+            self.class_logger.error(f"Помилка декодування JSON з OpenAI: {e}")
             return {"error": "Не вдалося обробити відповідь від AI. Спробуйте ще раз."}
         except Exception as e:
-            self.class_logger.exception(f"Критична помилка під час аналізу профілю в OpenAI (mode={mode}):")
+            self.class_logger.exception(f"Критична помилка під час аналізу профілю в OpenAI:")
             return {"error": f"Внутрішня помилка сервісу: {e}"}
         finally:
             if temp_session_created and current_session and not current_session.closed:
                 await current_session.close()
-                self.class_logger.debug(f"Тимчасову сесію для analyze_user_profile (mode={mode}) закрито.")
+                self.class_logger.debug(f"Тимчасову сесію для analyze_user_profile закрито.")
 
     # 🚀 ОНОВЛЕНИЙ МЕТОД ДЛЯ ВЕБ-ПОШУКУ
     async def get_web_search_response(self, user_name: str, user_query: str) -> str:
