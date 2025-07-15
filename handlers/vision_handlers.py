@@ -9,7 +9,7 @@ import html
 import logging
 import random
 import re
-from typing import Any, Coroutine, Dict, Optional, Union, Callable
+from typing import Any, Coroutine, Callable
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
@@ -43,7 +43,7 @@ PROCESSING_MESSAGES: list[str] = [
 
 # === ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ БЕЗПЕЧНОГО ОТРИМАННЯ ЧИСЕЛ ===
 
-def _safe_get_float(data: Optional[Dict[str, Any]], key: str) -> Optional[float]:
+def _safe_get_float(data: dict[str, Any] | None, key: str) -> float | None:
     """Безпечно отримує та конвертує значення у float з словника."""
     if data is None:
         return None
@@ -56,7 +56,7 @@ def _safe_get_float(data: Optional[Dict[str, Any]], key: str) -> Optional[float]
         logger.debug(f"Не вдалося конвертувати '{value}' у float для ключа '{key}'")
         return None
 
-def _safe_get_int(data: Optional[Dict[str, Any]], key: str) -> Optional[int]:
+def _safe_get_int(data: dict[str, Any] | None, key: str) -> int | None:
     """Безпечно отримує та конвертує значення у int з словника."""
     if data is None:
         return None
@@ -72,15 +72,15 @@ def _safe_get_int(data: Optional[Dict[str, Any]], key: str) -> Optional[int]:
 
 # === РОЗРАХУНОК УНІКАЛЬНИХ СТАТИСТИК ===
 
-def calculate_derived_stats(stats_data: Dict[str, Any]) -> Dict[str, Union[str, float, int, None]]:
+def calculate_derived_stats(stats_data: dict[str, Any]) -> dict[str, str | float | int | None]:
     """
     Розраховує похідні (унікальні) статистики на основі наданих даних з OpenAI.
     """
-    derived: Dict[str, Union[str, float, int, None]] = {}
-    main_ind: Dict[str, Any] = stats_data.get("main_indicators", {})
-    details_p: Dict[str, Any] = stats_data.get("details_panel", {})
-    ach_left: Dict[str, Any] = stats_data.get("achievements_left_column", {})
-    ach_right: Dict[str, Any] = stats_data.get("achievements_right_column", {})
+    derived: dict[str, str | float | int | None] = {}
+    main_ind: dict[str, Any] = stats_data.get("main_indicators", {})
+    details_p: dict[str, Any] = stats_data.get("details_panel", {})
+    ach_left: dict[str, Any] = stats_data.get("achievements_left_column", {})
+    ach_right: dict[str, Any] = stats_data.get("achievements_right_column", {})
 
     matches_played = _safe_get_int(main_ind, 'matches_played')
     win_rate_percent = _safe_get_float(main_ind, 'win_rate')
@@ -262,7 +262,7 @@ async def handle_profile_screenshot(message: Message, state: FSMContext, bot: Bo
 
 # === ФОРМАТУВАННЯ РЕЗУЛЬТАТІВ АНАЛІЗУ ===
 
-def format_profile_result(user_name: str, data: Dict[str, Any]) -> str:
+def format_profile_result(user_name: str, data: dict[str, Any]) -> str:
     """Форматує результати аналізу профілю у текстове повідомлення."""
     user_name_escaped = html.escape(user_name)
     if not data:
@@ -298,7 +298,7 @@ def format_profile_result(user_name: str, data: Dict[str, Any]) -> str:
             parts.append(f"\n<i>Не вдалося розпізнати дані. Спробуйте чіткіший скріншот.</i>")
     return "\n".join(parts)
 
-def format_detailed_stats_text(user_name: str, data: Dict[str, Any]) -> str:
+def format_detailed_stats_text(user_name: str, data: dict[str, Any]) -> str:
     """Форматує детальну статистику гравця у текстове повідомлення."""
     user_name_escaped = html.escape(user_name)
     if not data:
@@ -343,7 +343,7 @@ def format_detailed_stats_text(user_name: str, data: Dict[str, Any]) -> str:
     parts.append(f"  • Сер. шкода вежам/матч: {details.get('avg_turret_dmg_per_match', 'N/A')}")
     return "\n".join(parts)
 
-def format_unique_analytics_text(user_name: str, derived_data: Optional[Dict[str, Any]]) -> str:
+def format_unique_analytics_text(user_name: str, derived_data: dict[str, Any] | None) -> str:
     """Форматує унікальну аналітику гравця у текстове повідомлення."""
     user_name_escaped = html.escape(user_name)
     if not derived_data:
@@ -410,11 +410,11 @@ async def trigger_vision_analysis_callback(callback_query: CallbackQuery, state:
     chat_id_from_cq: int = cq_msg.chat.id
     message_id_from_cq: int = cq_msg.message_id
 
-    user_data: Dict[str, Any] = await state.get_data()
-    user_name_original: Optional[str] = user_data.get("original_user_name")
-    photo_file_id: Optional[str] = user_data.get("vision_photo_file_id")
-    vision_prompt: Optional[str] = user_data.get("vision_prompt")
-    analysis_type: Optional[str] = user_data.get("analysis_type")
+    user_data: dict[str, Any] = await state.get_data()
+    user_name_original: str | None = user_data.get("original_user_name")
+    photo_file_id: str | None = user_data.get("vision_photo_file_id")
+    vision_prompt: str | None = user_data.get("vision_prompt")
+    analysis_type: str | None = user_data.get("analysis_type")
     
     if not user_name_original:
         user_name_original = callback_query.from_user.first_name
