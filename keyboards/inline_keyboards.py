@@ -7,13 +7,11 @@
 - підтвердження видалення профілю
 🆕 v3.9: Мінімалістичний однокнопковий режим "Меню" та динамічний огляд з навігацією.
 """
-from typing import List, Dict, Optional
-
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # Короткі коди ролей для паті
-ALL_ROLES: List[str] = ["EXP", "ЛІС", "МІД", "АДК", "РОУМ"]
+ALL_ROLES: list[str] = ["EXP", "ЛІС", "МІД", "АДК", "РОУМ"]
 
 # -------------------------------------------------------------------
 # Клавіатури для створення паті (FSM)
@@ -69,7 +67,7 @@ def create_party_size_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 def create_role_selection_keyboard(
-    available_roles: List[str],
+    available_roles: list[str],
     lobby_id: str
 ) -> InlineKeyboardMarkup:
     """
@@ -100,8 +98,8 @@ def create_role_selection_keyboard(
     return builder.as_markup()
 
 def create_required_roles_keyboard(
-    available_roles: List[str],
-    selected_roles: List[str],
+    available_roles: list[str],
+    selected_roles: list[str],
     num_to_select: int
 ) -> InlineKeyboardMarkup:
     """
@@ -139,7 +137,7 @@ def create_required_roles_keyboard(
 
 def create_lobby_keyboard(
     lobby_id: int,
-    lobby_data: Dict
+    lobby_data: dict
 ) -> InlineKeyboardMarkup:
     """
     Клавіатура для активного лобі:
