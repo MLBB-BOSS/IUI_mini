@@ -4,12 +4,11 @@ utils/redis_client.py
 Асинхронний менеджер з’єднань до Redis через офіційний redis-py (asyncio).
 """
 import asyncio
-from typing import Optional
 
-from redis import asyncio as aioredis  # ← замість окремого aioredis
+from redis import asyncio as aioredis
 from config import REDIS_URL, logger
 
-_redis: Optional[aioredis.Redis] = None
+_redis: aioredis.Redis | None = None
 _lock = asyncio.Lock()
 
 async def get_redis() -> aioredis.Redis:
