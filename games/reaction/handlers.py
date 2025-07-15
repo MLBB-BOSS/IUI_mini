@@ -13,8 +13,17 @@ from aiogram.filters import Command
 from config import logger
 from database.crud import get_user_by_telegram_id
 from games.reaction.crud import get_leaderboard, save_reaction_score
+from games.reaction.facts import get_fact_for_time
 from games.reaction.keyboards import (create_leaderboard_keyboard,
                                       create_reaction_game_keyboard)
+# ❗️ НОВЕ: Імпортуємо повідомлення
+from games.reaction.messages import (MSG_ERROR_NO_MESSAGE,
+                                     MSG_ERROR_NOT_REGISTERED, MSG_GAME_OVER,
+                                     MSG_GAME_TITLE, MSG_PREPARE, MSG_SUBTITLE,
+                                     MSG_TOO_EARLY, get_leaderboard_text,
+                                     get_loading_text, get_personal_best_text,
+                                     get_result_text, get_user_time_answer,
+                                     MSG_PRESS_NOW, MSG_FALSE_START, MSG_NEW_TOP_10_ENTRY)
 
 # Словник для зберігання активних ігор
 active_games: dict[int, dict] = {}
@@ -27,7 +36,7 @@ async def cmd_reaction(message: types.Message):
     Надсилає початкове меню гри на реакцію.
     """
     await message.answer(
-        "<b>Гра на реакцію</b>\n\nПеревірте свою швидкість!",
+        f"{MSG_GAME_TITLE}\n\n{MSG_SUBTITLE}",
         reply_markup=create_reaction_game_keyboard("initial", 0)
     )
 
@@ -41,21 +50,18 @@ async def start_reaction_game(callback_query: types.CallbackQuery):
     message = callback_query.message
 
     if not message:
-        await callback_query.answer("Помилка: не вдалося отримати повідомлення.", show_alert=True)
+        await callback_query.answer(MSG_ERROR_NO_MESSAGE, show_alert=True)
         return
 
     # Перевірка, чи гравець зареєстрований
     user_profile = await get_user_by_telegram_id(user_id)
     if not user_profile:
-        await callback_query.answer(
-            "Будь ласка, спочатку зареєструйтесь за допомогою команди /profile",
-            show_alert=True
-        )
+        await callback_query.answer(MSG_ERROR_NOT_REGISTERED, show_alert=True)
         return
 
     game_id = message.message_id
     active_games[game_id] = {"status": "running", "start_time": None}
-    await callback_query.answer("Приготуйся...")
+    await callback_query.answer(MSG_PREPARE)
 
     try:
         # Анімація завантаження
@@ -63,13 +69,11 @@ async def start_reaction_game(callback_query: types.CallbackQuery):
             if game_id not in active_games or active_games[game_id]["status"] != "running":
                 return
             
-            loading_text = "🔴" * i + "⚪️" * (5 - i)
+            loading_bar = "🔴" * i + "⚪️" * (5 - i)
             await message.edit_text(
-                f"<b>Гра на реакцію</b>\n\n{loading_text}\n\n"
-                "Щойно кружечок стане зеленим (🟢), тисни на нього!",
+                get_loading_text(loading_bar),
                 reply_markup=create_reaction_game_keyboard("wait", game_id)
             )
-            # ❗️ ВИПРАВЛЕННЯ: Замінюємо статичну затримку на динамічну
             await asyncio.sleep(random.uniform(0.3, 0.8))
 
         # Рандомна затримка перед зміною кольору
@@ -79,9 +83,7 @@ async def start_reaction_game(callback_query: types.CallbackQuery):
             active_games[game_id]["start_time"] = time.monotonic()
             logger.info(f"Game ({game_id}): Light is GREEN at {active_games[game_id]['start_time']}")
             await message.edit_text(
-                "<b>Гра на реакцію</b>\n\n"
-                "🟢\n\n"
-                "ТИСНИ!",
+                MSG_PRESS_NOW,
                 reply_markup=create_reaction_game_keyboard("ready", game_id)
             )
     except TelegramAPIError as e:
@@ -99,7 +101,7 @@ async def stop_reaction_game_handler(callback_query: types.CallbackQuery):
     game_id = message.message_id if message else None
 
     if not message or game_id not in active_games or active_games[game_id]["status"] != "running":
-        await callback_query.answer("Гра вже закінчилась або неактивна.", show_alert=True)
+        await callback_query.answer(MSG_GAME_OVER, show_alert=True)
         return
 
     start_time = active_games[game_id].get("start_time")
@@ -107,62 +109,44 @@ async def stop_reaction_game_handler(callback_query: types.CallbackQuery):
         # Фальстарт
         active_games[game_id]["status"] = "finished"
         await message.edit_text(
-            "<b>Фальстарт!</b>\n\n"
-            "Ви натиснули занадто рано. Спробуйте ще раз.",
+            MSG_FALSE_START,
             reply_markup=create_reaction_game_keyboard("finished", game_id)
         )
-        await callback_query.answer("Зарано!", show_alert=True)
+        await callback_query.answer(MSG_TOO_EARLY, show_alert=True)
         return
 
     reaction_time = time.monotonic() - start_time
     reaction_time_ms = int(reaction_time * 1000)
     active_games[game_id]["status"] = "finished"
 
-    # Отримуємо таблицю лідерів до збереження результату
     leaderboard_before = await get_leaderboard(limit=10)
-    
-    # Зберігаємо результат
     await save_reaction_score(user_id, reaction_time_ms)
-    
-    # Оновлюємо таблицю лідерів
     leaderboard_after = await get_leaderboard(limit=10)
 
-    # Формуємо текст результату
     user_in_top_before = any(p["telegram_id"] == user_id for p in leaderboard_before)
     user_in_top_after = any(p["telegram_id"] == user_id for p in leaderboard_after)
     
     new_best_text = ""
     if user_in_top_after and not user_in_top_before:
-        new_best_text = "🏆 Ви увірвалися в топ-10!"
+        new_best_text = MSG_NEW_TOP_10_ENTRY
     elif user_in_top_after:
-        # Перевіряємо, чи покращив гравець свою позицію
         pos_before = next((i for i, p in enumerate(leaderboard_before) if p["telegram_id"] == user_id), 11)
         pos_after = next((i for i, p in enumerate(leaderboard_after) if p["telegram_id"] == user_id), 11)
         if pos_after < pos_before:
-            new_best_text = f"🚀 Новий особистий рекорд! Ви піднялись на {pos_after + 1} місце!"
+            new_best_text = get_personal_best_text(pos_after + 1)
     
-    result_text = (
-        f"<b>Ваш результат: {reaction_time_ms} мс</b>\n"
-        f"<i>{new_best_text}</i>\n\n"
-    )
-    
-    # Формуємо таблицю лідерів
-    leaderboard_lines = ["<b>🏆 Таблиця лідерів:</b>"]
-    for i, record in enumerate(leaderboard_after, 1):
-        is_current_user = "👉" if record["telegram_id"] == user_id else "  "
-        leaderboard_lines.append(
-            f"{is_current_user}{i}. {record['nickname']} - <b>{record['best_time']} мс</b>"
-        )
+    fact = get_fact_for_time(reaction_time_ms)
+    result_text = get_result_text(reaction_time_ms, new_best_text, fact)
+    leaderboard_text = get_leaderboard_text(leaderboard_after, user_id)
         
-    final_text = result_text + "\n".join(leaderboard_lines)
+    final_text = result_text + "\n\n" + leaderboard_text
 
     await message.edit_text(
         final_text,
         reply_markup=create_reaction_game_keyboard("finished", game_id)
     )
-    await callback_query.answer(f"Ваш час: {reaction_time_ms} мс")
+    await callback_query.answer(get_user_time_answer(reaction_time_ms))
     
-    # Очистка
     with suppress(KeyError):
         del active_games[game_id]
 
@@ -170,14 +154,7 @@ async def stop_reaction_game_handler(callback_query: types.CallbackQuery):
 async def show_leaderboard(callback_query: types.CallbackQuery):
     """Показує актуальну таблицю лідерів."""
     leaderboard_data = await get_leaderboard(limit=10)
-    
-    if not leaderboard_data:
-        text = "<b>🏆 Таблиця лідерів порожня.</b>\n\nСтаньте першим!"
-    else:
-        lines = ["<b>🏆 Таблиця лідерів (Топ-10):</b>"]
-        for i, record in enumerate(leaderboard_data, 1):
-            lines.append(f"{i}. {record['nickname']} - <b>{record['best_time']} мс</b>")
-        text = "\n".join(lines)
+    text = get_leaderboard_text(leaderboard_data, callback_query.from_user.id)
         
     await callback_query.message.edit_text(
         text,
@@ -189,7 +166,7 @@ async def show_leaderboard(callback_query: types.CallbackQuery):
 async def back_to_game_menu(callback_query: types.CallbackQuery):
     """Повертає до початкового меню гри."""
     await callback_query.message.edit_text(
-        "<b>Гра на реакцію</b>\n\nПеревірте свою швидкість!",
+        f"{MSG_GAME_TITLE}\n\n{MSG_SUBTITLE}",
         reply_markup=create_reaction_game_keyboard("initial", 0)
     )
     await callback_query.answer()
