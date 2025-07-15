@@ -281,6 +281,8 @@ class MLBBChatGPT:
         text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
         # ❗️ НОВЕ: Обробка Markdown-посилань
         text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+        # ❗️❗️ FIX: Заміна <br> тегів на новий рядок
+        text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
 
 
         # Потім обробляємо списки та заголовки
