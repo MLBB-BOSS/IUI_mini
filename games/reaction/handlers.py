@@ -107,10 +107,15 @@ async def show_leaderboard_callback_handler(callback: CallbackQuery):
     )
     await callback.answer()
 
+# ❗️ НОВА, РОЗШИРЕНА ЛОГІКА ОБРОБКИ РЕЗУЛЬТАТІВ
 @reaction_router.callback_query(
     F.data == "reaction_game:stop", StateFilter(ReactionGameState.in_progress)
 )
 async def stop_reaction_game_handler(callback: CallbackQuery, state: FSMContext):
+    """
+    Обробляє натискання кнопки "СТОП", розраховує результат,
+    перевіряє рекорди та показує контекстну таблицю лідерів.
+    """
     if not callback.message:
         return
 
@@ -123,20 +128,58 @@ async def stop_reaction_game_handler(callback: CallbackQuery, state: FSMContext)
     if not green_light_time:
         result_text = "🔴 Фальстарт! 🔴\n\nТи натиснув ще до зеленого сигналу. Результат не зараховано."
         await callback.answer("Фальстарт!", show_alert=True)
-    else:
-        reaction_time_ms = int((end_time - green_light_time) * 1000)
-        fact = get_fact_for_time(reaction_time_ms)
-        
-        # ❗️ НОВЕ: Додаємо результат у секундах для прозорості
-        reaction_time_sec = reaction_time_ms / 1000.0
-        
-        result_text = f"🚀 Твій результат: <b>{reaction_time_ms} мс</b> <i>({reaction_time_sec:.3f} сек)</i>"
-        result_text += f"\n\n💡 <i>{fact}</i>"
-        
-        await save_reaction_score(callback.from_user.id, reaction_time_ms)
-        await callback.answer(f"Ваш час: {reaction_time_ms} мс")
+        await callback.message.edit_text(result_text, reply_markup=None)
+        return
 
-    await callback.message.edit_text(result_text, reply_markup=None)
+    reaction_time_ms = int((end_time - green_light_time) * 1000)
+    user_id = callback.from_user.id
+
+    # Крок 1: Отримати таблицю лідерів ДО оновлення
+    leaderboard_before = await get_leaderboard(limit=10)
+    personal_best = next(
+        (p["best_time"] for p in leaderboard_before if p["telegram_id"] == user_id), 99999
+    )
+
+    # Крок 2: Зберегти новий результат
+    await save_reaction_score(user_id, reaction_time_ms)
+    
+    # Крок 3: Отримати таблицю лідерів ПІСЛЯ оновлення
+    leaderboard_after = await get_leaderboard(limit=10)
+    new_pos = next(
+        (i + 1 for i, p in enumerate(leaderboard_after) if p["telegram_id"] == user_id), -1
+    )
+
+    # Крок 4: Сформувати динамічне повідомлення
+    record_message = ""
+    if reaction_time_ms < personal_best:
+        if new_pos != -1:
+            record_message = f"🎉 <b>Новий рекорд!</b> Ти тепер на <b>{new_pos}-му місці</b>!\n\n"
+        else:
+            record_message = "🎉 <b>Новий особистий рекорд!</b>\n\n"
+
+    result_text = f"🚀 Твій результат: <b>{reaction_time_ms} мс</b> <i>({reaction_time_ms / 1000.0:.3f} сек)</i>"
+    fact_text = f"💡 <i>{get_fact_for_time(reaction_time_ms)}</i>"
+
+    # Форматуємо таблицю лідерів
+    leaderboard_lines = ["\n\n🏆 <b>Таблиця лідерів:</b>"]
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    for i, record in enumerate(leaderboard_after):
+        rank = i + 1
+        place = medals.get(rank, f"  <b>{rank}.</b>")
+        nickname = html.escape(record.get("nickname", "Анонім"))
+        best_time = record.get("best_time", "N/A")
+        line = f"{place} {nickname} — <code>{best_time} мс</code>"
+        if record["telegram_id"] == user_id:
+            line = f"<b>➡️ {line} ⬅️</b>"
+        leaderboard_lines.append(line)
+        
+    leaderboard_text = "\n".join(leaderboard_lines)
+
+    # Збираємо все разом
+    final_text = record_message + result_text + "\n" + fact_text + leaderboard_text
+    
+    await callback.message.edit_text(final_text, reply_markup=None)
+    await callback.answer(f"Ваш час: {reaction_time_ms} мс")
 
 @reaction_router.message(Command("reaction_top"))
 async def show_leaderboard_command_handler(message: Message):
