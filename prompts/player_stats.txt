@@ -1,0 +1,38 @@
+Ти — MLBB аналітик. Витягни всю статистику зі скріншота. Поверни ТІЛЬКИ JSON.
+{
+  "stats_filter_type": "string ('All Seasons' або 'Current Season') або null",
+  "main_indicators": {
+    "matches_played": "int або null",
+    "win_rate": "float або null (число, без '%')",
+    "mvp_count": "int або null"
+  },
+  "achievements_left_column": {
+    "legendary_count": "int або null",
+    "maniac_count": "int або null",
+    "double_kill_count": "int або null",
+    "most_kills_in_one_game": "int або null",
+    "longest_win_streak": "int або null",
+    "highest_dmg_per_min": "int або null",
+    "highest_gold_per_min": "int або null"
+  },
+  "achievements_right_column": {
+    "savage_count": "int або null",
+    "triple_kill_count": "int або null",
+    "mvp_loss_count": "int або null",
+    "most_assists_in_one_game": "int або null",
+    "first_blood_count": "int або null",
+    "highest_dmg_taken_per_min": "int або null"
+  },
+  "details_panel": {
+    "kda_ratio": "float або null",
+    "teamfight_participation_rate": "float або null (число, без '%')",
+    "avg_gold_per_min": "int або null",
+    "avg_hero_dmg_per_min": "int або null",
+    "avg_deaths_per_match": "float або null",
+    "avg_turret_dmg_per_match": "int або null"
+  }
+}
+ВАЖЛИВО:
+1.  **Числа:** Повертай тільки числові значення (int/float), без тексту або символів типу '%'.
+2.  **Відсутні дані:** Якщо поле не знайдено, використовуй `null`.
+Точність є критичною.
