@@ -101,6 +101,12 @@ class User(Base):
             f"nickname='{self.nickname}', player_id={self.player_id})>"
         )
 
+# ❗️ НОВЕ: Імпортуємо моделі з інших модулів, щоб Base.metadata.create_all знав про них.
+# Це робить систему модульною: просто додайте сюди імпорт нової моделі,
+# і її таблиця буде створена автоматично.
+from games.reaction.models import ReactionGameScore
+
+
 if __name__ == '__main__':
     # При прямому запуску створює/оновлює таблицю в БД
     engine = create_engine(SYNC_DATABASE_URL)
