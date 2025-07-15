@@ -10,6 +10,7 @@ import logging
 import random
 import re
 from typing import Any, Coroutine, Callable
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
@@ -20,13 +21,27 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton,
                            InlineKeyboardMarkup, Message)
 
 from config import OPENAI_API_KEY
-from services.openai_service import (MLBBChatGPT, PLAYER_STATS_PROMPT,
-                                     PROFILE_SCREENSHOT_PROMPT)
+from services.openai_service import MLBBChatGPT
 from states.vision_states import VisionAnalysisStates
 from utils.message_utils import (MAX_TELEGRAM_MESSAGE_LENGTH,
                                  send_message_in_chunks)
 
 logger = logging.getLogger(__name__)
+
+# --- 🚀 Завантаження промптів з файлів ---
+try:
+    PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+    with open(PROMPTS_DIR / "profile.txt", "r", encoding="utf-8") as f:
+        PROFILE_SCREENSHOT_PROMPT = f.read()
+    with open(PROMPTS_DIR / "player_stats.txt", "r", encoding="utf-8") as f:
+        PLAYER_STATS_PROMPT = f.read()
+    logger.info("✅ Промпти для Vision API успішно завантажено.")
+except FileNotFoundError as e:
+    logger.error(f"❌ Не вдалося знайти файл з промптом: {e}")
+    # Встановлюємо заглушки, щоб уникнути падіння при старті
+    PROFILE_SCREENSHOT_PROMPT = "Analyze profile screenshot."
+    PLAYER_STATS_PROMPT = "Analyze player statistics screenshot."
+
 
 PROCESSING_MESSAGES: list[str] = [
     "🔎 Сканую ваш скріншот, хвилинку...",
