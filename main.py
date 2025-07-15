@@ -11,10 +11,8 @@ from aiogram.exceptions import TelegramAPIError
 
 # Імпорти з проєкту
 from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, logger, ASYNC_DATABASE_URL
-# ❗️ Імпортуємо напряму, щоб виконати "санітарну" чистку
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
-# 🆕 Імпортуємо функцію ініціалізації БД
 from database.init_db import init_db
 from handlers.general_handlers import (
     register_general_handlers, 
@@ -24,19 +22,20 @@ from handlers.general_handlers import (
 )
 from handlers.vision_handlers import register_vision_handlers
 from handlers.registration_handler import register_registration_handlers
+# 👇 ВАЖЛИВО: Імпортуємо реєстратор для нової гри
+from games.reaction.handlers import register_reaction_handlers
 
 
 async def sanitize_database():
     """
     Одноразова функція для очищення бази даних від дублікатів player_id.
+    (Код функції залишається без змін)
     """
     logger.info("🩺 Starting database sanitization process...")
     engine = create_async_engine(ASYNC_DATABASE_URL)
     async with engine.connect() as conn:
         try:
-            # Починаємо транзакцію
             async with conn.begin():
-                # 1. Знаходимо всі player_id, які мають дублікати
                 find_duplicates_sql = text("""
                     SELECT player_id, COUNT(*)
                     FROM users
@@ -50,9 +49,6 @@ async def sanitize_database():
                     logger.info("✅ No duplicate player_id found. Database is clean.")
                 else:
                     logger.warning(f"Found duplicate player_ids: {duplicate_player_ids}. Proceeding with cleanup...")
-                    
-                    # 2. Для кожного дубліката видаляємо всі записи, крім найновішого
-                    # Використовуємо `ctid` - унікальний ідентифікатор рядка в PostgreSQL
                     cleanup_sql = text("""
                         DELETE FROM users
                         WHERE ctid IN (
@@ -70,8 +66,6 @@ async def sanitize_database():
                     result = await conn.execute(cleanup_sql, {"player_ids": duplicate_player_ids})
                     logger.info(f"✅ Successfully deleted {result.rowcount} duplicate user entries.")
 
-            # 3. Після очищення (або якщо дублікатів не було) знову намагаємося створити індекс
-            # Цей код взято з init_db.py для гарантованого виконання після очищення
             async with conn.begin():
                 logger.info("Attempting to create unique index on 'player_id' after sanitization...")
                 add_unique_index_sql = text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id ON users (player_id)")
@@ -80,7 +74,6 @@ async def sanitize_database():
 
         except Exception as e:
             logger.error(f"❌ Critical error during database sanitization: {e}", exc_info=True)
-            # Не перериваємо запуск, але логуємо критичну помилку
         finally:
             await conn.close()
 
@@ -90,23 +83,22 @@ async def sanitize_database():
 
 async def main() -> None:
     """Головна функція запуску бота."""
-    bot_version = "v4.0.0 (Python 3.13 Migration)" # Оновлюємо версію
+    bot_version = "v4.1.0 (Reaction Game Fix)"
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
-    # ❗️ Виконуємо санітарну обробку та ініціалізацію
     await sanitize_database()
     await init_db()
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # Встановлюємо команди бота при старті
     await set_bot_commands(bot)
 
-    # Реєструємо роутери
+    # --- РЕЄСТРАЦІЯ ВСІХ РОУТЕРІВ ---
     register_registration_handlers(dp)
     register_vision_handlers(dp, cmd_go_handler_func=cmd_go) 
     register_general_handlers(dp)
+    register_reaction_handlers(dp)  # 👈 ВАЖЛИВО: Реєструємо роутер гри
 
     # Реєстрація глобального обробника помилок
     @dp.errors()
@@ -128,9 +120,8 @@ async def main() -> None:
                     f"🆔 @{bot_info.username}",
                     f"⏰ {launch_time_kyiv}",
                     "✨ <b>Зміни:</b>",
-                    "  • Повна міграція на Python 3.13.",
-                    "  • Оновлено синтаксис типів (PEP 585, 604).",
-                    "  • Видалено застарілий код та залежності.",
+                    "  • Зареєстровано модуль гри 'Reaction Time'.",
+                    "  • Виправлено логіку розпізнавання команд гри.",
                     "🟢 Готовий до роботи!"
                 ]
                 admin_message = "\n".join(admin_message_lines)
