@@ -11,7 +11,7 @@ Cache layer for registered users:
 
 import asyncio
 import json
-from typing import Dict, Any
+from typing import Any
 
 from config import logger
 from utils.redis_client import get_redis
@@ -22,7 +22,7 @@ CACHE_TTL = 86400  # 24 hours
 
 _lock = asyncio.Lock()
 
-async def load_user_cache(user_id: int) -> Dict[str, Any]:
+async def load_user_cache(user_id: int) -> dict[str, Any]:
     """
     Повертає дані користувача (profile + chat_history).
     Спроба завантажити з Redis; при невдачі або cache miss → із БД + кешування.
@@ -44,7 +44,7 @@ async def load_user_cache(user_id: int) -> Dict[str, Any]:
         # fallback → БД
         return await get_user_by_telegram_id(user_id) or {}
 
-async def save_user_cache(user_id: int, user_data: Dict[str, Any]) -> None:
+async def save_user_cache(user_id: int, user_data: dict[str, Any]) -> None:
     """
     Зберігає дані користувача в Redis з TTL та синхронно в БД (write-through).
     Якщо Redis недоступний, робить лише запис у БД.
