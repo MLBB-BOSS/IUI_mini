@@ -1,8 +1,8 @@
 """
 Функції для взаємодії з базою даних (Create, Read, Update, Delete).
 """
-import asyncpg
-from typing import Optional, Dict, Any, Literal
+from typing import Any, Literal
+
 from sqlalchemy import insert, update, select, delete
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.exc import IntegrityError
@@ -10,24 +10,10 @@ from sqlalchemy.exc import IntegrityError
 from database.models import User
 from config import ASYNC_DATABASE_URL, logger
 
-from datetime import datetime
-
 engine = create_async_engine(ASYNC_DATABASE_URL)
 
-def _ensure_datetime(val):
-    """
-    Перетворює рядок у datetime, якщо потрібно.
-    Приймає None або datetime – повертає як є.
-    """
-    if isinstance(val, str):
-        try:
-            # ISO 8601 format з +00:00
-            return datetime.fromisoformat(val.replace('Z', '+00:00'))
-        except Exception:
-            return None
-    return val
 
-async def add_or_update_user(user_data: Dict[str, Any]) -> Literal['success', 'conflict', 'error']:
+async def add_or_update_user(user_data: dict[str, Any]) -> Literal['success', 'conflict', 'error']:
     """
     Додає або оновлює користувача, перевіряючи унікальність player_id.
 
@@ -88,7 +74,7 @@ async def add_or_update_user(user_data: Dict[str, Any]) -> Literal['success', 'c
                 return 'error'
 
 
-async def get_user_by_telegram_id(telegram_id: int) -> Optional[Dict[str, Any]]:
+async def get_user_by_telegram_id(telegram_id: int) -> dict[str, Any] | None:
     # ... (код функції залишається без змін) ...
     async with engine.connect() as conn:
         stmt = select(User).where(User.telegram_id == telegram_id)
