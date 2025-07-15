@@ -27,7 +27,8 @@ async def send_message_in_chunks(
     chat_id: int,
     text: str,
     parse_mode: str | None,
-    initial_message_to_edit: Message | None = None
+    initial_message_to_edit: Message | None = None,
+    reply_to_message_id: int | None = None,
 ):
     """
     Надсилає повідомлення, розбиваючи його на частини, якщо воно занадто довге.
@@ -91,11 +92,16 @@ async def send_message_in_chunks(
             continue
 
         try:
+            # FIX: Передаємо reply_to_message_id у всі виклики send_message
             if not processed_initial_message and initial_message_to_edit is None:
-                 await bot_instance.send_message(chat_id, chunk, parse_mode=parse_mode)
+                 await bot_instance.send_message(
+                     chat_id, chunk, parse_mode=parse_mode, reply_to_message_id=reply_to_message_id
+                 )
                  processed_initial_message = True 
             else:
-                 await bot_instance.send_message(chat_id, chunk, parse_mode=parse_mode)
+                 await bot_instance.send_message(
+                     chat_id, chunk, parse_mode=parse_mode, reply_to_message_id=reply_to_message_id
+                 )
 
             logger.info(f"Надіслано частину повідомлення для chat_id {chat_id}. Довжина: {len(chunk)}")
         except TelegramAPIError as e:
@@ -104,7 +110,9 @@ async def send_message_in_chunks(
                 plain_chunk = re.sub(r"<[^>]+>", "", chunk) 
                 if plain_chunk.strip():
                     try:
-                        await bot_instance.send_message(chat_id, plain_chunk, parse_mode=None)
+                        await bot_instance.send_message(
+                            chat_id, plain_chunk, parse_mode=None, reply_to_message_id=reply_to_message_id
+                        )
                         logger.info(f"Надіслано частину повідомлення як простий текст для chat_id {chat_id}. Довжина: {len(plain_chunk)}")
                         continue
                     except TelegramAPIError as plain_e:
