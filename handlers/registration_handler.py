@@ -4,6 +4,7 @@
 """
 import html
 import base64
+from pathlib import Path
 from typing import Any
 
 from aiogram import Bot, F, Router
@@ -29,6 +30,22 @@ from utils.cache_manager import clear_user_cache
 from config import OPENAI_API_KEY, logger
 
 registration_router = Router()
+
+# --- 🚀 Завантаження промптів з файлів ---
+try:
+    PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+    with open(PROMPTS_DIR / "profile.txt", "r", encoding="utf-8") as f:
+        PROFILE_PROMPT = f.read()
+    with open(PROMPTS_DIR / "player_stats.txt", "r", encoding="utf-8") as f:
+        STATS_PROMPT = f.read()
+    with open(PROMPTS_DIR / "hero_stats.txt", "r", encoding="utf-8") as f:
+        HEROES_PROMPT = f.read()
+    logger.info("✅ Промпти для реєстрації (profile, stats, heroes) успішно завантажено.")
+except FileNotFoundError as e:
+    logger.error(f"❌ Не вдалося знайти файл з промптом для реєстрації: {e}")
+    PROFILE_PROMPT = "Analyze profile screenshot."
+    STATS_PROMPT = "Analyze player statistics screenshot."
+    HEROES_PROMPT = "Analyze favorite heroes screenshot."
 
 
 def format_profile_display(user_data: dict[str, Any]) -> str:
@@ -324,17 +341,19 @@ async def handle_profile_update_photo(
         pass
 
     # Визначаємо режим: basic / stats / heroes
+    current_fsm_state = await state.get_state()
     mode_map = {
-        RegistrationFSM.waiting_for_basic_photo.state: "basic",
-        RegistrationFSM.waiting_for_stats_photo.state: "stats",
-        RegistrationFSM.waiting_for_heroes_photo.state: "heroes",
+        RegistrationFSM.waiting_for_basic_photo.state: ("basic", PROFILE_PROMPT),
+        RegistrationFSM.waiting_for_stats_photo.state: ("stats", STATS_PROMPT),
+        RegistrationFSM.waiting_for_heroes_photo.state: ("heroes", HEROES_PROMPT),
     }
-    mode = mode_map.get(await state.get_state())
-    if not mode or not last_id:
+    mode_info = mode_map.get(current_fsm_state)
+    if not mode_info or not last_id:
         await bot.send_message(cid, "Сталася помилка. Спробуйте /profile ще раз.")
         await state.clear()
         return
 
+    mode, prompt_text = mode_info
     thinking = await bot.edit_message_text(
         chat_id=cid,
         message_id=last_id,
@@ -349,7 +368,7 @@ async def handle_profile_update_photo(
         b64 = base64.b64encode(img_bytes).decode("utf-8")
 
         async with MLBBChatGPT(OPENAI_API_KEY) as gpt:
-            result = await gpt.analyze_user_profile(b64, mode=mode)
+            result = await gpt.analyze_user_profile(b64, prompt=prompt_text)
 
         if not result or "error" in result:
             err = result.get("error", "Не вдалося розпізнати дані.")
