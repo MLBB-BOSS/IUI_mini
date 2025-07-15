@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import greenlet  # ❗️ Гарантуємо, що greenlet завантажено
 from datetime import datetime, timezone, timedelta
 
 from aiogram import Bot, Dispatcher, types
