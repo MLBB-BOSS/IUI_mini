@@ -37,7 +37,7 @@ class ReactionGameLogic:
     async def _animate_and_trigger_green_light(self):
         """
         Фонове завдання, що реалізує просунуту анімацію
-        з контрольованими випадковими затримками.
+        з контрольованими випадковими затримками та коректним фіналом.
         """
         slots = ["⚪️"] * 6
         
@@ -51,18 +51,18 @@ class ReactionGameLogic:
             text = f"Приготуйся...\n\n{PADDING}\n{' '.join(slots)}\n{PADDING}"
             await self._update_message(text, reply_markup=create_reaction_game_keyboard())
             
-            # ❗️ НОВА ЛОГІКА: Контрольована випадкова затримка
-            # Це запобігає блокуванню, але зберігає непередбачуваність
             if i < len(slots) - 1:
                 await asyncio.sleep(random.uniform(0.5, 1.2))
 
-        # Фаза 2: Фінальна випадкова затримка після заповнення
+        # ❗️ ВИПРАВЛЕННЯ: Тепер, коли всі індикатори червоні,
+        # ми робимо фінальну випадкову затримку перед зеленим світлом.
+        # Це гарантує, що гравець бачить стабільний стан "всі червоні".
         await asyncio.sleep(random.uniform(0.5, 2.0))
         
         if await self.state.get_state() != ReactionGameState.in_progress:
             return
 
-        # Фаза 3: Зелене світло
+        # Фаза 2: Зелене світло
         green_light_time = time.monotonic()
         await self.state.update_data(green_light_time=green_light_time)
         logger.info(f"Game ({self.message_id}): Light is GREEN at {green_light_time}")
