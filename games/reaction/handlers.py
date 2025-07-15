@@ -1,202 +1,192 @@
 """
-Обробники для гри на реакцію.
-Реалізує логіку ігрового лобі, запуску гри та перегляду лідерів.
+Обробники для міні-гри на перевірку реакції.
 """
 import asyncio
-import html
+import random
 import time
+from contextlib import suppress
 
-from aiogram import Bot, F, Router
+from aiogram import F, Router, types
 from aiogram.exceptions import TelegramAPIError
-from aiogram.filters import Command, StateFilter
-from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
 
 from config import logger
+from database.crud import get_user_by_telegram_id
 from games.reaction.crud import get_leaderboard, save_reaction_score
-from games.reaction.facts import get_fact_for_time
-from games.reaction.keyboards import (
-    create_leaderboard_view_keyboard,
-    create_reaction_lobby_keyboard,
-)
-from games.reaction.logic import ReactionGameLogic
-from games.reaction.messages import LOBBY_MESSAGE_TEXT
-from games.reaction.states import ReactionGameState
+from games.reaction.keyboards import (create_leaderboard_keyboard,
+                                      create_reaction_game_keyboard)
 
-reaction_router = Router(name="reaction_game")
+# Словник для зберігання активних ігор
+active_games: dict[int, dict] = {}
+reaction_router = Router()
 
-# ... (код лобі, старту, виходу, таблиці лідерів залишається без змін) ...
-async def show_lobby(message: Message, state: FSMContext):
-    await state.set_state(ReactionGameState.menu)
-    sent_message = await message.answer(
-        text=LOBBY_MESSAGE_TEXT,
-        reply_markup=create_reaction_lobby_keyboard(),
-    )
-    await state.update_data(lobby_message_id=sent_message.message_id)
 
-@reaction_router.message(Command("reaction"))
-async def reaction_command_handler(message: Message, state: FSMContext):
-    await show_lobby(message, state)
+async def start_reaction_game(callback_query: types.CallbackQuery):
+    """
+    Запускає новий раунд гри на реакцію.
+    Показує анімацію завантаження з кружечків.
+    """
+    user_id = callback_query.from_user.id
+    message = callback_query.message
 
-@reaction_router.callback_query(
-    F.data == "reaction_game:show_lobby", StateFilter(ReactionGameState.menu)
-)
-async def show_lobby_callback_handler(callback: CallbackQuery, state: FSMContext):
-    if not callback.message:
+    if not message:
+        await callback_query.answer("Помилка: не вдалося отримати повідомлення.", show_alert=True)
         return
-    await callback.message.edit_text(
-        text=LOBBY_MESSAGE_TEXT,
-        reply_markup=create_reaction_lobby_keyboard(),
-    )
-    await callback.answer()
 
-@reaction_router.callback_query(
-    F.data == "reaction_game:start", StateFilter(ReactionGameState.menu)
-)
-async def start_game_callback_handler(callback: CallbackQuery, bot: Bot, state: FSMContext):
-    if not callback.message:
-        return
-    try:
-        game = ReactionGameLogic(
-            bot=bot,
-            state=state,
-            chat_id=callback.message.chat.id,
-            message_id=callback.message.message_id,
+    # Перевірка, чи гравець зареєстрований
+    user_profile = await get_user_by_telegram_id(user_id)
+    if not user_profile:
+        await callback_query.answer(
+            "Будь ласка, спочатку зареєструйтесь за допомогою команди /profile",
+            show_alert=True
         )
-        asyncio.create_task(game.start_game())
-        await callback.answer("Гра починається!")
-    except Exception as e:
-        logger.error(f"Error starting reaction game from callback: {e}", exc_info=True)
-        await callback.answer("Не вдалося почати гру.", show_alert=True)
-
-@reaction_router.callback_query(
-    F.data == "reaction_game:exit", StateFilter(ReactionGameState.menu)
-)
-async def exit_lobby_handler(callback: CallbackQuery, state: FSMContext):
-    if not callback.message:
         return
-    await state.clear()
+
+    game_id = message.message_id
+    active_games[game_id] = {"status": "running", "start_time": None}
+    await callback_query.answer("Приготуйся...")
+
     try:
-        await callback.message.delete()
-        await callback.answer("Ви вийшли з гри.")
-    except TelegramAPIError:
-        await callback.answer()
+        # Анімація завантаження
+        for i in range(1, 6):
+            if game_id not in active_games or active_games[game_id]["status"] != "running":
+                return
+            
+            loading_text = "🔴" * i + "⚪️" * (5 - i)
+            await message.edit_text(
+                f"<b>Гра на реакцію</b>\n\n{loading_text}\n\n"
+                "Щойно кружечок стане зеленим (🟢), тисни на нього!",
+                reply_markup=create_reaction_game_keyboard("wait", game_id)
+            )
+            # ❗️ ВИПРАВЛЕННЯ: Замінюємо статичну затримку на динамічну
+            await asyncio.sleep(random.uniform(0.3, 0.8))
 
-@reaction_router.callback_query(
-    F.data == "reaction_game:show_leaderboard", StateFilter(ReactionGameState.menu)
-)
-async def show_leaderboard_callback_handler(callback: CallbackQuery):
-    if not callback.message:
-        return
-    leaderboard_data = await get_leaderboard(limit=10)
-    if not leaderboard_data:
-        text = "🏆 **Таблиця лідерів 'Світлофор'** 🏆\n\nРекордів ще немає. Будь першим!"
-    else:
-        response_lines = ["🏆 <b>Таблиця лідерів 'Світлофор'</b> 🏆\n"]
-        medals = {0: "🥇", 1: "🥈", 2: "🥉"}
-        for i, record in enumerate(leaderboard_data):
-            place = medals.get(i, f"  <b>{i + 1}.</b>")
-            nickname = html.escape(record.get("nickname", "Анонім"))
-            best_time = record.get("best_time", "N/A")
-            response_lines.append(f"{place} {nickname} — <code>{best_time} мс</code>")
-        text = "\n".join(response_lines)
+        # Рандомна затримка перед зміною кольору
+        await asyncio.sleep(random.uniform(1.0, 4.0))
 
-    await callback.message.edit_text(
-        text=text,
-        reply_markup=create_leaderboard_view_keyboard(),
-    )
-    await callback.answer()
+        if game_id in active_games and active_games[game_id]["status"] == "running":
+            active_games[game_id]["start_time"] = time.monotonic()
+            logger.info(f"Game ({game_id}): Light is GREEN at {active_games[game_id]['start_time']}")
+            await message.edit_text(
+                "<b>Гра на реакцію</b>\n\n"
+                "🟢\n\n"
+                "ТИСНИ!",
+                reply_markup=create_reaction_game_keyboard("ready", game_id)
+            )
+    except TelegramAPIError as e:
+        logger.error(f"Error during game animation for game {game_id}: {e}")
+        if game_id in active_games:
+            del active_games[game_id]
 
-# ❗️ НОВА, РОЗШИРЕНА ЛОГІКА ОБРОБКИ РЕЗУЛЬТАТІВ
-@reaction_router.callback_query(
-    F.data == "reaction_game:stop", StateFilter(ReactionGameState.in_progress)
-)
-async def stop_reaction_game_handler(callback: CallbackQuery, state: FSMContext):
+
+async def stop_reaction_game_handler(callback_query: types.CallbackQuery):
     """
-    Обробляє натискання кнопки "СТОП", розраховує результат,
-    перевіряє рекорди та показує контекстну таблицю лідерів.
+    Обробляє натискання на кнопку, коли вона стала зеленою.
     """
-    if not callback.message:
+    user_id = callback_query.from_user.id
+    message = callback_query.message
+    game_id = message.message_id if message else None
+
+    if not message or game_id not in active_games or active_games[game_id]["status"] != "running":
+        await callback_query.answer("Гра вже закінчилась або неактивна.", show_alert=True)
         return
 
-    end_time = time.monotonic()
-    data = await state.get_data()
-    green_light_time = data.get("green_light_time")
-    
-    await state.clear()
-
-    if not green_light_time:
-        result_text = "🔴 Фальстарт! 🔴\n\nТи натиснув ще до зеленого сигналу. Результат не зараховано."
-        await callback.answer("Фальстарт!", show_alert=True)
-        await callback.message.edit_text(result_text, reply_markup=None)
+    start_time = active_games[game_id].get("start_time")
+    if not start_time:
+        # Фальстарт
+        active_games[game_id]["status"] = "finished"
+        await message.edit_text(
+            "<b>Фальстарт!</b>\n\n"
+            "Ви натиснули занадто рано. Спробуйте ще раз.",
+            reply_markup=create_reaction_game_keyboard("finished", game_id)
+        )
+        await callback_query.answer("Зарано!", show_alert=True)
         return
 
-    reaction_time_ms = int((end_time - green_light_time) * 1000)
-    user_id = callback.from_user.id
+    reaction_time = time.monotonic() - start_time
+    reaction_time_ms = int(reaction_time * 1000)
+    active_games[game_id]["status"] = "finished"
 
-    # Крок 1: Отримати таблицю лідерів ДО оновлення
+    # Отримуємо таблицю лідерів до збереження результату
     leaderboard_before = await get_leaderboard(limit=10)
-    personal_best = next(
-        (p["best_time"] for p in leaderboard_before if p["telegram_id"] == user_id), 99999
-    )
-
-    # Крок 2: Зберегти новий результат
+    
+    # Зберігаємо результат
     await save_reaction_score(user_id, reaction_time_ms)
     
-    # Крок 3: Отримати таблицю лідерів ПІСЛЯ оновлення
+    # Оновлюємо таблицю лідерів
     leaderboard_after = await get_leaderboard(limit=10)
-    new_pos = next(
-        (i + 1 for i, p in enumerate(leaderboard_after) if p["telegram_id"] == user_id), -1
-    )
 
-    # Крок 4: Сформувати динамічне повідомлення
-    record_message = ""
-    if reaction_time_ms < personal_best:
-        if new_pos != -1:
-            record_message = f"🎉 <b>Новий рекорд!</b> Ти тепер на <b>{new_pos}-му місці</b>!\n\n"
-        else:
-            record_message = "🎉 <b>Новий особистий рекорд!</b>\n\n"
-
-    result_text = f"🚀 Твій результат: <b>{reaction_time_ms} мс</b> <i>({reaction_time_ms / 1000.0:.3f} сек)</i>"
-    fact_text = f"💡 <i>{get_fact_for_time(reaction_time_ms)}</i>"
-
-    # Форматуємо таблицю лідерів
-    leaderboard_lines = ["\n\n🏆 <b>Таблиця лідерів:</b>"]
-    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-    for i, record in enumerate(leaderboard_after):
-        rank = i + 1
-        place = medals.get(rank, f"  <b>{rank}.</b>")
-        nickname = html.escape(record.get("nickname", "Анонім"))
-        best_time = record.get("best_time", "N/A")
-        line = f"{place} {nickname} — <code>{best_time} мс</code>"
-        if record["telegram_id"] == user_id:
-            line = f"<b>➡️ {line} ⬅️</b>"
-        leaderboard_lines.append(line)
-        
-    leaderboard_text = "\n".join(leaderboard_lines)
-
-    # Збираємо все разом
-    final_text = record_message + result_text + "\n" + fact_text + leaderboard_text
+    # Формуємо текст результату
+    user_in_top_before = any(p["telegram_id"] == user_id for p in leaderboard_before)
+    user_in_top_after = any(p["telegram_id"] == user_id for p in leaderboard_after)
     
-    await callback.message.edit_text(final_text, reply_markup=None)
-    await callback.answer(f"Ваш час: {reaction_time_ms} мс")
+    new_best_text = ""
+    if user_in_top_after and not user_in_top_before:
+        new_best_text = "🏆 Ви увірвалися в топ-10!"
+    elif user_in_top_after:
+        # Перевіряємо, чи покращив гравець свою позицію
+        pos_before = next((i for i, p in enumerate(leaderboard_before) if p["telegram_id"] == user_id), 11)
+        pos_after = next((i for i, p in enumerate(leaderboard_after) if p["telegram_id"] == user_id), 11)
+        if pos_after < pos_before:
+            new_best_text = f"🚀 Новий особистий рекорд! Ви піднялись на {pos_after + 1} місце!"
+    
+    result_text = (
+        f"<b>Ваш результат: {reaction_time_ms} мс</b>\n"
+        f"<i>{new_best_text}</i>\n\n"
+    )
+    
+    # Формуємо таблицю лідерів
+    leaderboard_lines = ["<b>🏆 Таблиця лідерів:</b>"]
+    for i, record in enumerate(leaderboard_after, 1):
+        is_current_user = "👉" if record["telegram_id"] == user_id else "  "
+        leaderboard_lines.append(
+            f"{is_current_user}{i}. {record['nickname']} - <b>{record['best_time']} мс</b>"
+        )
+        
+    final_text = result_text + "\n".join(leaderboard_lines)
 
-@reaction_router.message(Command("reaction_top"))
-async def show_leaderboard_command_handler(message: Message):
+    await message.edit_text(
+        final_text,
+        reply_markup=create_reaction_game_keyboard("finished", game_id)
+    )
+    await callback_query.answer(f"Ваш час: {reaction_time_ms} мс")
+    
+    # Очистка
+    with suppress(KeyError):
+        del active_games[game_id]
+
+
+async def show_leaderboard(callback_query: types.CallbackQuery):
+    """Показує актуальну таблицю лідерів."""
     leaderboard_data = await get_leaderboard(limit=10)
+    
     if not leaderboard_data:
-        await message.answer("Рекордів ще немає. Зіграй у /reaction, щоб стати першим!")
-        return
+        text = "<b>🏆 Таблиця лідерів порожня.</b>\n\nСтаньте першим!"
+    else:
+        lines = ["<b>🏆 Таблиця лідерів (Топ-10):</b>"]
+        for i, record in enumerate(leaderboard_data, 1):
+            lines.append(f"{i}. {record['nickname']} - <b>{record['best_time']} мс</b>")
+        text = "\n".join(lines)
+        
+    await callback_query.message.edit_text(
+        text,
+        reply_markup=create_leaderboard_keyboard()
+    )
+    await callback_query.answer()
 
-    response_lines = ["🏆 <b>Таблиця лідерів 'Світлофор'</b> 🏆\n"]
-    medals = {0: "🥇", 1: "🥈", 2: "🥉"}
-    for i, record in enumerate(leaderboard_data):
-        place = medals.get(i, f"  <b>{i + 1}.</b>")
-        nickname = html.escape(record.get("nickname", "Анонім"))
-        best_time = record.get("best_time", "N/A")
-        response_lines.append(f"{place} {nickname} — <code>{best_time} мс</code>")
-    await message.answer("\n".join(response_lines))
 
-def register_reaction_handlers(dp):
-    dp.include_router(reaction_router)
+async def back_to_game_menu(callback_query: types.CallbackQuery):
+    """Повертає до початкового меню гри."""
+    await callback_query.message.edit_text(
+        "<b>Гра на реакцію</b>\n\nПеревірте свою швидкість!",
+        reply_markup=create_reaction_game_keyboard("initial", 0)
+    )
+    await callback_query.answer()
+
+
+def register_reaction_handlers(dp: Router):
+    """Реєструє всі обробники для гри 'Reaction Time'."""
+    dp.callback_query.register(start_reaction_game, F.data == "reaction_game_start")
+    dp.callback_query.register(stop_reaction_game_handler, F.data.startswith("reaction_game_press:"))
+    dp.callback_query.register(show_leaderboard, F.data == "reaction_game_leaderboard")
+    dp.callback_query.register(back_to_game_menu, F.data == "reaction_game_back_to_menu")
     logger.info("✅ Обробники для гри 'Reaction Time' зареєстровано.")
