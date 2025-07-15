@@ -11,13 +11,13 @@ import asyncio
 import json
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from config import MAX_CHAT_HISTORY_LENGTH, logger
 from utils.redis_client import get_redis
 
 # In-memory fallback store
-_in_memory_sessions: Dict[int, Dict[str, Any]] = {}
+_in_memory_sessions: dict[int, dict[str, Any]] = {}
 _in_memory_lock = asyncio.Lock()
 
 # Session settings
@@ -28,9 +28,9 @@ KEY_TEMPLATE: str = "session:chat:{user_id}"
 @dataclass
 class SessionData:
     """Data structure for a user session."""
-    chat_history: List[Dict[str, Any]]
+    chat_history: list[dict[str, Any]]
     last_activity: str
-    session_context: Dict[str, Any]
+    session_context: dict[str, Any]
 
 
 async def _now_iso() -> str:
