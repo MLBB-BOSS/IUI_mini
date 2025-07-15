@@ -9,3 +9,4 @@ cloudinary==1.40.0
 SQLAlchemy==2.0.32
 asyncpg==0.30.0
 openai>=1.93.0
+greenlet>=3.0.0
