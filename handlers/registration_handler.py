@@ -4,7 +4,7 @@
 """
 import html
 import base64
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, StateFilter
@@ -31,7 +31,7 @@ from config import OPENAI_API_KEY, logger
 registration_router = Router()
 
 
-def format_profile_display(user_data: Dict[str, Any]) -> str:
+def format_profile_display(user_data: dict[str, Any]) -> str:
     """
     Форматує базову сторінку профілю, показуючи ранг саме як збережено в БД.
     Обгортає текст у HTML-цитату.
@@ -54,12 +54,12 @@ def format_profile_display(user_data: Dict[str, Any]) -> str:
     return "<blockquote>\n" + "\n".join(lines) + "\n</blockquote>"
 
 
-async def build_profile_pages(user_data: Dict[str, Any]) -> List[Dict[str, str]]:
+async def build_profile_pages(user_data: dict[str, Any]) -> list[dict[str, str]]:
     """
     Формує карусель профілю: basic → stats → heroes → avatar.
     Кожний caption обгорнутий у цитату.
     """
-    pages: List[Dict[str, str]] = []
+    pages: list[dict[str, str]] = []
 
     # 1) Basic profile
     pages.append({
@@ -186,7 +186,7 @@ async def show_profile_menu(
     bot: Bot,
     chat_id: int,
     user_id: int,
-    message_to_delete_id: Optional[int] = None,
+    message_to_delete_id: int | None = None,
 ) -> None:
     """Відправляє першу сторінку профілю з меню."""
     if message_to_delete_id:
@@ -357,7 +357,7 @@ async def handle_profile_update_photo(
             await state.clear()
             return
 
-        payload: Dict[str, Any] = {"telegram_id": uid}
+        payload: dict[str, Any] = {"telegram_id": uid}
         if mode == "basic":
             ml = result.get("mlbb_id_server", "0 (0)").split()
             payload.update({
