@@ -37,12 +37,12 @@ class ReactionGameLogic:
     async def _animate_and_trigger_green_light(self):
         """
         Фонове завдання, що реалізує просунуту анімацію
-        з контрольованими випадковими затримками та коректним фіналом.
+        з гарантовано безпечними затримками та покращеним ігровим циклом.
         """
         slots = ["⚪️"] * 6
         
-        # Фаза 1: Анімація послідовного заповнення
-        for i in range(len(slots)):
+        # ❗️ НОВА ЛОГІКА: Заповнюємо лише 5 індикаторів
+        for i in range(len(slots) - 1): # Цикл до 5-го елемента (індекс 4)
             if await self.state.get_state() != ReactionGameState.in_progress:
                 logger.debug(f"Game ({self.message_id}): Canceled during animation.")
                 return
@@ -51,18 +51,16 @@ class ReactionGameLogic:
             text = f"Приготуйся...\n\n{PADDING}\n{' '.join(slots)}\n{PADDING}"
             await self._update_message(text, reply_markup=create_reaction_game_keyboard())
             
-            if i < len(slots) - 1:
-                await asyncio.sleep(random.uniform(0.5, 1.2))
+            # ❗️ НОВА ЛОГІКА: Гарантовано безпечна затримка
+            await asyncio.sleep(random.uniform(0.8, 1.5))
 
-        # ❗️ ВИПРАВЛЕННЯ: Тепер, коли всі індикатори червоні,
-        # ми робимо фінальну випадкову затримку перед зеленим світлом.
-        # Це гарантує, що гравець бачить стабільний стан "всі червоні".
+        # Фінальна випадкова затримка після заповнення 5 індикаторів
         await asyncio.sleep(random.uniform(0.5, 2.0))
         
         if await self.state.get_state() != ReactionGameState.in_progress:
             return
 
-        # Фаза 2: Зелене світло
+        # ❗️ НОВА ЛОГІКА: Зелене світло з'являється замість 6-го червоного
         green_light_time = time.monotonic()
         await self.state.update_data(green_light_time=green_light_time)
         logger.info(f"Game ({self.message_id}): Light is GREEN at {green_light_time}")
