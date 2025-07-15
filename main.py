@@ -22,14 +22,12 @@ from handlers.general_handlers import (
 )
 from handlers.vision_handlers import register_vision_handlers
 from handlers.registration_handler import register_registration_handlers
-# 👇 ВАЖЛИВО: Імпортуємо реєстратор для нової гри
 from games.reaction.handlers import register_reaction_handlers
 
 
 async def sanitize_database():
     """
     Одноразова функція для очищення бази даних від дублікатів player_id.
-    (Код функції залишається без змін)
     """
     logger.info("🩺 Starting database sanitization process...")
     engine = create_async_engine(ASYNC_DATABASE_URL)
@@ -83,7 +81,7 @@ async def sanitize_database():
 
 async def main() -> None:
     """Головна функція запуску бота."""
-    bot_version = "v4.1.0 (Reaction Game Fix)"
+    bot_version = "v4.2.0 (Router Priority Fix)"
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
     await sanitize_database()
@@ -95,10 +93,13 @@ async def main() -> None:
     await set_bot_commands(bot)
 
     # --- РЕЄСТРАЦІЯ ВСІХ РОУТЕРІВ ---
+    # ❗️ ВАЖЛИВО: Реєструємо специфічні роутери (ігри, реєстрація) ПЕРЕД загальними.
+    register_reaction_handlers(dp)
     register_registration_handlers(dp)
-    register_vision_handlers(dp, cmd_go_handler_func=cmd_go) 
+    register_vision_handlers(dp, cmd_go_handler_func=cmd_go)
+    
+    # Загальний роутер, що містить "жадібні" обробники, реєструємо в останню чергу.
     register_general_handlers(dp)
-    register_reaction_handlers(dp)  # 👈 ВАЖЛИВО: Реєструємо роутер гри
 
     # Реєстрація глобального обробника помилок
     @dp.errors()
@@ -120,8 +121,8 @@ async def main() -> None:
                     f"🆔 @{bot_info.username}",
                     f"⏰ {launch_time_kyiv}",
                     "✨ <b>Зміни:</b>",
-                    "  • Зареєстровано модуль гри 'Reaction Time'.",
-                    "  • Виправлено логіку розпізнавання команд гри.",
+                    "  • Виправлено пріоритет роутерів.",
+                    "  • Ігрові команди тепер мають вищий пріоритет.",
                     "🟢 Готовий до роботи!"
                 ]
                 admin_message = "\n".join(admin_message_lines)
