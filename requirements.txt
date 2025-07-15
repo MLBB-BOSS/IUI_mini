@@ -6,6 +6,6 @@ aiohttp>=3.8.0
 redis>=4.2.0
 apscheduler==3.10.4
 cloudinary==1.40.0
-SQLAlchemy==2.0.30
+SQLAlchemy==2.0.32
 asyncpg==0.30.0
 openai>=1.93.0
