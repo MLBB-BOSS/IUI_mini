@@ -1,5 +1,5 @@
 """
-Визначення моделі даних SQLAlchemy для гри на реакцію.
+Моделі даних SQLAlchemy для гри на реакцію.
 """
 from sqlalchemy import (
     Column,
@@ -7,45 +7,38 @@ from sqlalchemy import (
     BigInteger,
     ForeignKey,
     DateTime,
-    Index,
+    func,
 )
-from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 
-# Імпортуємо декларативну базу з основного файлу моделей,
-# щоб ця таблиця була частиною того ж самого Metadata.
-# Це критично важливо для коректної роботи Alembic або Base.metadata.create_all().
-from database.models import Base
+# Імпортуємо Base з центрального файлу моделей,
+# щоб ця модель була частиною єдиного каталогу метаданих.
+from database.models import Base, User
 
 
 class ReactionGameScore(Base):
     """
-    Модель для зберігання результатів гри на реакцію.
+    Модель для зберігання найкращого результату гри на реакцію.
+    Зберігає лише один, найкращий запис для кожного гравця.
     """
-    __tablename__ = 'reaction_game_scores'
+    __tablename__ = 'reaction_scores'
 
     id = Column(Integer, primary_key=True)
-    
-    # Використовуємо ForeignKey для зв'язку з таблицею users.
-    # Це забезпечує цілісність даних: не можна зберегти результат для неіснуючого гравця.
-    # ondelete="CASCADE" означає, що при видаленні користувача всі його рекорди будуть видалені.
-    user_telegram_id = Column(
-        BigInteger, 
-        ForeignKey('users.telegram_id', ondelete="CASCADE"), 
+    # Зв'язок з таблицею users через telegram_id, який є унікальним
+    user_id = Column(
+        BigInteger,
+        ForeignKey('users.telegram_id', ondelete='CASCADE'),
+        unique=True,
         nullable=False,
-        index=True  # Індекс для швидкого пошуку результатів конкретного гравця
+        index=True
     )
-    
-    reaction_time_ms = Column(Integer, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    best_time = Column(Integer, nullable=False)
+    last_played_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Створюємо індекс для колонки з часом реакції.
-    # Це значно прискорить запити до таблиці лідерів (ORDER BY).
-    __table_args__ = (
-        Index('ix_reaction_time_ms', 'reaction_time_ms'),
-    )
+    # Зворотний зв'язок для легкого доступу до об'єкта User
+    user = relationship("User")
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return (
-            f"<ReactionGameScore(user_id={self.user_telegram_id}, "
-            f"time_ms={self.reaction_time_ms})>"
+            f"<ReactionGameScore(user_id={self.user_id}, best_time={self.best_time})>"
         )
