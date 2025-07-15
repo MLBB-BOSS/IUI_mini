@@ -16,7 +16,6 @@ from config import logger
 from games.reaction.crud import get_leaderboard, save_reaction_score
 from games.reaction.keyboards import (
     create_leaderboard_view_keyboard,
-    create_reaction_game_keyboard,
     create_reaction_lobby_keyboard,
 )
 from games.reaction.logic import ReactionGameLogic
@@ -25,6 +24,8 @@ from games.reaction.states import ReactionGameState
 
 reaction_router = Router(name="reaction_game")
 
+
+# --- Лобі та навігація (без змін) ---
 
 async def show_lobby(message: Message, state: FSMContext):
     """Відображає ігрове лобі."""
@@ -55,6 +56,7 @@ async def show_lobby_callback_handler(callback: CallbackQuery, state: FSMContext
     )
     await callback.answer()
 
+# --- Запуск та вихід (без змін) ---
 
 @reaction_router.callback_query(
     F.data == "reaction_game:start", StateFilter(ReactionGameState.menu)
@@ -91,6 +93,7 @@ async def exit_lobby_handler(callback: CallbackQuery, state: FSMContext):
     except TelegramAPIError:
         await callback.answer()
 
+# --- Таблиця лідерів (без змін) ---
 
 @reaction_router.callback_query(
     F.data == "reaction_game:show_leaderboard", StateFilter(ReactionGameState.menu)
@@ -118,37 +121,46 @@ async def show_leaderboard_callback_handler(callback: CallbackQuery):
     )
     await callback.answer()
 
+# --- ❗️ ОНОВЛЕНА ЛОГІКА ЗАВЕРШЕННЯ ГРИ ---
 
 @reaction_router.callback_query(
     F.data == "reaction_game:stop", StateFilter(ReactionGameState.in_progress)
 )
 async def stop_reaction_game_handler(callback: CallbackQuery, state: FSMContext):
-    """Обробляє натискання кнопки "СТОП"."""
+    """Обробляє натискання кнопки "СТОП" та розраховує результат."""
     if not callback.message:
         return
+
+    end_time = time.monotonic()
     data = await state.get_data()
-    start_time = data.get("start_time")
-
-    if not start_time:
-        await state.clear()
-        return
-
-    reaction_time_ms = int((time.monotonic() - start_time) * 1000)
+    green_light_time = data.get("green_light_time")
+    
     await state.clear()
 
-    if reaction_time_ms < 100:
-        result_text = f"⏱️ Час: {reaction_time_ms} мс\n\n🤔 Фальстарт! Результат не зараховано."
+    if not green_light_time:
+        # Фальстарт: користувач натиснув до того, як з'явилося зелене світло
+        result_text = "🔴 Фальстарт! 🔴\n\nТи натиснув ще до зеленого сигналу. Результат не зараховано."
+        await callback.answer("Фальстарт!", show_alert=True)
     else:
+        # Коректне натискання
+        reaction_time_ms = int((end_time - green_light_time) * 1000)
+        
+        # Відсікаємо нереалістично швидкі результати (можливі чіти або лаги)
+        if reaction_time_ms < 100:
+             result_text = f"🚀 Неймовірно! {reaction_time_ms} мс! 🚀\n\nЦе майже надлюдська реакція! Результат зараховано, але чи зможеш повторити?"
+        else:
+            result_text = f"🚀 Твій результат: <b>{reaction_time_ms} мс</b>!"
+
         await save_reaction_score(callback.from_user.id, reaction_time_ms)
-        result_text = f"🚀 Твій результат: <b>{reaction_time_ms} мс</b>!"
+        await callback.answer(f"Ваш час: {reaction_time_ms} мс")
 
     await callback.message.edit_text(result_text, reply_markup=None)
-    await callback.answer(f"Ваш час: {reaction_time_ms} мс")
 
 
 @reaction_router.message(Command("reaction_top"))
 async def show_leaderboard_command_handler(message: Message):
     """Обробник команди /reaction_top для зворотної сумісності."""
+    # (Код без змін)
     leaderboard_data = await get_leaderboard(limit=10)
     if not leaderboard_data:
         await message.answer("Рекордів ще немає. Зіграй у /reaction, щоб стати першим!")
