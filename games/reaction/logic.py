@@ -1,6 +1,6 @@
 """
 Бізнес-логіка для гри на реакцію.
-Керує ігровим циклом: анімація "заповнення", очікування, зміна сигналу.
+Керує ігровим циклом: просунута анімація, очікування, зміна сигналу.
 """
 import asyncio
 import random
@@ -36,27 +36,27 @@ class ReactionGameLogic:
 
     async def _animate_and_trigger_green_light(self):
         """
-        Фонове завдання, що реалізує безпечну анімацію "заповнення індикаторів".
+        Фонове завдання, що реалізує просунуту анімацію
+        з контрольованими випадковими затримками.
         """
-        # ❗️ НОВА ЛОГІКА: Безпечна анімація з меншою кількістю кроків
-        animation_frames = [
-            ["🔴", "⚪️", "⚪️", "⚪️", "⚪️", "⚪️"],
-            ["🔴", "🔴", "🔴", "⚪️", "⚪️", "⚪️"],
-            ["🔴", "🔴", "🔴", "🔴", "🔴", "⚪️"],
-            ["🔴", "🔴", "🔴", "🔴", "🔴", "🔴"],
-        ]
-
-        # Фаза 1: Анімація заповнення
-        for frame in animation_frames:
+        slots = ["⚪️"] * 6
+        
+        # Фаза 1: Анімація послідовного заповнення
+        for i in range(len(slots)):
             if await self.state.get_state() != ReactionGameState.in_progress:
                 logger.debug(f"Game ({self.message_id}): Canceled during animation.")
                 return
             
-            text = f"Приготуйся...\n\n{PADDING}\n{' '.join(frame)}\n{PADDING}"
+            slots[i] = "🔴"
+            text = f"Приготуйся...\n\n{PADDING}\n{' '.join(slots)}\n{PADDING}"
             await self._update_message(text, reply_markup=create_reaction_game_keyboard())
-            await asyncio.sleep(0.6) # Збільшена, безпечна затримка
+            
+            # ❗️ НОВА ЛОГІКА: Контрольована випадкова затримка
+            # Це запобігає блокуванню, але зберігає непередбачуваність
+            if i < len(slots) - 1:
+                await asyncio.sleep(random.uniform(0.5, 1.2))
 
-        # Фаза 2: Випадкова затримка після заповнення
+        # Фаза 2: Фінальна випадкова затримка після заповнення
         await asyncio.sleep(random.uniform(0.5, 2.0))
         
         if await self.state.get_state() != ReactionGameState.in_progress:
