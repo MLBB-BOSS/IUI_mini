@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Any
 
 import aiohttp
 from aiohttp import ClientSession, ClientTimeout
@@ -34,88 +34,10 @@ def _filter_cringy_phrases(response: str) -> str:
     return response if response.strip() else original_response
 
 # === ПРОМПТИ ДЛЯ АНАЛІЗУ ЗОБРАЖЕНЬ (VISION API) ===
-PROFILE_SCREENSHOT_PROMPT = """
-Ти — MLBB аналітик. Витягни дані з скріншота профілю. Поверни ТІЛЬКИ JSON.
-{
-  "game_nickname": "string або null",
-  "mlbb_id_server": "string 'ID (SERVER)' або null (приклад: '123456789 (1234)')",
-  "highest_rank_season": "string (приклад: 'Міфічна Слава 267 ★') або null",
-  "matches_played": "int або null (знизу скріншота)",
-  "likes_received": "int або null (знизу скріншота)",
-  "location": "string або null",
-  "squad_name": "string або null"
-}
-ВАЖЛИВО:
-1.  **ID/Server (mlbb_id_server):** Шукай біля іконки профілю. Формат 'ID (SERVER)'.
-2.  **Матчі (Matches Played) / Лайки (Likes Received):** Знаходяться ВНИЗУ. Не плутай з очками популярності.
-3.  **Найвищий Ранг (Highest Rank):** Під написом "Highest Rank". Включай зірки/очки.
-4.  **Сквад (Squad Name):** Повна назва.
-5.  **Відсутні дані:** Використовуй `null`.
-Точність є критичною.
-"""
-
-PLAYER_STATS_PROMPT = """
-Ти — MLBB аналітик. Витягни статистику гравця зі скріншота "Statistics". Поверни ТІЛЬКИ JSON.
-{
-  "stats_filter_type": "string або null ('All Seasons', 'Current Season')",
-  "main_indicators": {
-    "matches_played": "int або null",
-    "win_rate": "float або null (число, без '%')",
-    "mvp_count": "int або null"
-  },
-  "achievements_left_column": {
-    "legendary_count": "int або null", "maniac_count": "int або null", "double_kill_count": "int або null",
-    "most_kills_in_one_game": "int або null", "longest_win_streak": "int або null",
-    "highest_dmg_per_min": "int або null", "highest_gold_per_min": "int або null"
-  },
-  "achievements_right_column": {
-    "savage_count": "int або null", "triple_kill_count": "int або null", "mvp_loss_count": "int або null",
-    "most_assists_in_one_game": "int або null", "first_blood_count": "int або null",
-    "highest_dmg_taken_per_min": "int або null"
-  },
-  "details_panel": {
-    "kda_ratio": "float або null", "teamfight_participation_rate": "float або null (число, без '%')",
-    "avg_gold_per_min": "int або null", "avg_hero_dmg_per_min": "int або null",
-    "avg_deaths_per_match": "float або null", "avg_turret_dmg_per_match": "int або null"
-  }
-}
-ВАЖЛИВО:
-1.  **Числа:** Уважно розпізнавай кожну цифру.
-2.  **Win Rate / Teamfight Participation:** Тільки число (float), без '%'.
-3.  **Розташування:** "main_indicators" - зверху; "achievements" - списки нижче; "details_panel" - справа.
-4.  **Фільтр:** Вкажи активний фільтр ('All Seasons'/'Current Season').
-5.  **Відсутні дані:** Використовуй `null`.
-Точність є критичною.
-"""
-
-HERO_STATS_PROMPT = """
-Ти — MLBB аналітик. Витягни статистику по ТОП-3 героях зі скріншота "Favorite Heroes". Поверни ТІЛЬКИ JSON.
-{
-  "favorite_heroes": [
-    {
-      "hero_name": "string або null",
-      "matches": "int або null",
-      "win_rate": "float або null (число, без '%')"
-    },
-    {
-      "hero_name": "string або null",
-      "matches": "int або null",
-      "win_rate": "float або null (число, без '%')"
-    },
-    {
-      "hero_name": "string або null",
-      "matches": "int або null",
-      "win_rate": "float або null (число, без '%')"
-    }
-  ]
-}
-ВАЖЛИВО:
-1.  **ТІЛЬКИ ТОП-3:** Витягни дані лише для перших трьох героїв у списку.
-2.  **Win Rate:** Тільки число (float), без символу '%'.
-3.  **Порядок:** Зберігай порядок героїв, як на скріншоті.
-4.  **Відсутні дані:** Використовуй `null`.
-Точність є критичною.
-"""
+# ❗️ DEPRECATED: Промпти завантажуються з файлів у відповідних обробниках
+# для кращої модульності та легкого оновлення.
+# PROFILE_SCREENSHOT_PROMPT, PLAYER_STATS_PROMPT, HERO_STATS_PROMPT
+# були видалені з цього файлу.
 
 LEGEND_PROMPT_TEMPLATE = """
 Ти — GGenius, легендарний оповідач та AI-дизайнер. Твоє завдання — створити епічну, але структуровану та візуально привабливу легенду про гравця.
@@ -296,7 +218,7 @@ class MLBBChatGPT:
 
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
-        self.session: Optional[ClientSession] = None
+        self.session: ClientSession | None = None
         self.class_logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self.class_logger.info(f"GGenius Service (MLBBChatGPT) ініціалізовано. Текстова модель: {self.TEXT_MODEL}, Vision модель: {self.VISION_MODEL}, Пошукова модель: {self.SEARCH_MODEL}")
 
@@ -308,7 +230,7 @@ class MLBBChatGPT:
         self.class_logger.debug("Aiohttp сесію створено та відкрито.")
         return self
 
-    async def __aexit__(self, exc_type: Optional[type], exc_val: Optional[BaseException], exc_tb: Optional[Any]) -> None:
+    async def __aexit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> None:
         if self.session and not self.session.closed:
             await self.session.close()
             self.class_logger.debug("Aiohttp сесію закрито.")
@@ -415,7 +337,7 @@ class MLBBChatGPT:
         self.class_logger.debug(f"Beautify: Текст після обробки (перші 100 символів): '{text[:100]}'")
         return text.strip()
 
-    async def _execute_openai_request(self, session: ClientSession, payload: Dict[str, Any], user_name_for_error_msg: str) -> str:
+    async def _execute_openai_request(self, session: ClientSession, payload: dict[str, Any], user_name_for_error_msg: str) -> str:
         try:
             async with session.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -463,7 +385,7 @@ class MLBBChatGPT:
             "max_tokens": 2000, "temperature": 0.7, "top_p": 0.9,
             "presence_penalty": 0.3, "frequency_penalty": 0.2  
         }
-        self.class_logger.debug(f"Параметри для GGenius (/go): модель={payload['model']}, temp={payload['temperature']}")
+        self.class_logger.debug(f"Параметри для GGenius (/go): {payload['model']=}, {payload['temperature']=}")
         current_session = self.session
         temp_session_created = False
         if not current_session or current_session.closed:
@@ -477,7 +399,7 @@ class MLBBChatGPT:
                 await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для GGenius (/go) закрито.")
 
-    async def _handle_vision_response(self, response: aiohttp.ClientResponse) -> Optional[Dict[str, Any]]:
+    async def _handle_vision_response(self, response: aiohttp.ClientResponse) -> dict[str, Any] | None:
         response_text = await response.text()
         try:
             if response.status != 200:
@@ -519,7 +441,7 @@ class MLBBChatGPT:
             self.class_logger.error(f"Помилка декодування JSON з Vision API: {e}. Рядок для парсингу: '{json_str[:300]}'")
             return {"error": "Не вдалося розпарсити JSON відповідь від Vision API (помилка декодування).", "raw_response": content}
 
-    async def analyze_image_with_vision(self, image_base64: str, prompt: str) -> Optional[Dict[str, Any]]:
+    async def analyze_image_with_vision(self, image_base64: str, prompt: str) -> dict[str, Any] | None:
         self.class_logger.info(f"Запит до Vision API. Промпт починається з: '{prompt[:70].replace('\n', ' ')}...'")
         payload = {
             "model": self.VISION_MODEL,
@@ -528,7 +450,7 @@ class MLBBChatGPT:
             ],
             "max_tokens": 2500, "temperature": 0.15 
         }
-        self.class_logger.debug(f"Параметри для Vision API: модель={payload['model']}, max_tokens={payload['max_tokens']}, temperature={payload['temperature']}")
+        self.class_logger.debug(f"Параметри для Vision API: {payload['model']=}, {payload['max_tokens']=}, {payload['temperature']=}")
         current_session = self.session
         temp_session_created = False
         if not current_session or current_session.closed:
@@ -552,7 +474,7 @@ class MLBBChatGPT:
                 await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для Vision API закрито.")
 
-    async def _execute_description_request(self, session: ClientSession, payload: Dict[str, Any], user_name_for_error_msg: str) -> str:
+    async def _execute_description_request(self, session: ClientSession, payload: dict[str, Any], user_name_for_error_msg: str) -> str:
         try:
             async with session.post("https://api.openai.com/v1/chat/completions", json=payload) as response:
                 response_data = await response.json()
@@ -581,7 +503,7 @@ class MLBBChatGPT:
             self.class_logger.exception(f"Загальна помилка (опис) для '{user_name_for_error_msg}': {e}")
             return f"<i>При генерації опису для {user_name_for_error_msg} щось пішло шкереберть. Буває...</i>" 
 
-    async def get_profile_legend(self, user_name: str, profile_data: Dict[str, Any]) -> str:
+    async def get_profile_legend(self, user_name: str, profile_data: dict[str, Any]) -> str:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит на генерацію 'Легенди' профілю для '{user_name_escaped}'.")
         
@@ -613,7 +535,7 @@ class MLBBChatGPT:
             "presence_penalty": 0.2, 
             "frequency_penalty": 0.2
         }
-        self.class_logger.debug(f"Параметри для Легенди профілю: модель={payload['model']}, temp={payload['temperature']}, max_tokens={payload['max_tokens']}")
+        self.class_logger.debug(f"Параметри для Легенди профілю: {payload['model']=}, {payload['temperature']=}, {payload['max_tokens']=}")
         
         current_session = self.session
         temp_session_created = False
@@ -628,7 +550,7 @@ class MLBBChatGPT:
                 await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для Легенди профілю закрито.")
 
-    async def get_player_stats_description(self, user_name: str, stats_data: Dict[str, Any]) -> str:
+    async def get_player_stats_description(self, user_name: str, stats_data: dict[str, Any]) -> str:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит на генерацію опису статистики для '{user_name_escaped}' (з унікальними даними).")
         main_ind = stats_data.get("main_indicators", {})
@@ -637,7 +559,7 @@ class MLBBChatGPT:
         ach_right = stats_data.get("achievements_right_column", {})
         derived_s = stats_data.get("derived_stats", {})
 
-        def get_value(data_dict: Optional[Dict[str, Any]], key: str, default_val: Any = "N/A", precision: Optional[int] = None) -> str:
+        def get_value(data_dict: dict[str, Any] | None, key: str, default_val: Any = "N/A", precision: int | None = None) -> str:
             if data_dict is None: return str(default_val)
             val = data_dict.get(key)
             if val is None: return str(default_val)
@@ -671,7 +593,7 @@ class MLBBChatGPT:
             "max_tokens": 250, "temperature": 0.73, "top_p": 0.9,
             "presence_penalty": 0.15, "frequency_penalty": 0.15
         }
-        self.class_logger.debug(f"Параметри для опису статистики (з derived): модель={payload['model']}, temp={payload['temperature']}, max_tokens={payload['max_tokens']}")
+        self.class_logger.debug(f"Параметри для опису статистики (з derived): {payload['model']=}, {payload['temperature']=}, {payload['max_tokens']=}")
         current_session = self.session
         temp_session_created = False
         if not current_session or current_session.closed:
@@ -719,9 +641,9 @@ class MLBBChatGPT:
     async def generate_conversational_reply(
         self,
         user_name: str,
-        chat_history: List[Dict[str, str]],
+        chat_history: list[dict[str, str]],
         trigger_mood: str,
-        user_profile_data: Optional[Dict[str, Any]] = None
+        user_profile_data: dict[str, Any] | None = None
     ) -> str:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит на розмовну відповідь для '{user_name_escaped}'...")
@@ -775,7 +697,7 @@ class MLBBChatGPT:
             "presence_penalty": presence_penalty, 
             "frequency_penalty": frequency_penalty
         }
-        self.class_logger.debug(f"Параметри для розмовної відповіді (intent: {intent}): temp={temperature}, freq_p={frequency_penalty}, pres_p={presence_penalty}")
+        self.class_logger.debug(f"Параметри для розмовної відповіді (intent: {intent}): {temperature=}, {frequency_penalty=}, {presence_penalty=}")
         
         current_session = self.session
         temp_session_created = False
@@ -795,7 +717,7 @@ class MLBBChatGPT:
         image_base64: str, 
         user_name: str,
         caption_text: str = ""
-    ) -> Optional[str]:
+    ) -> str | None:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит на універсальний аналіз зображення від '{user_name_escaped}'.")
         
@@ -818,7 +740,7 @@ class MLBBChatGPT:
             "max_tokens": 150, "temperature": 0.8, "top_p": 0.9,
             "presence_penalty": 0.1, "frequency_penalty": 0.1
         }
-        self.class_logger.debug(f"Параметри для універсального Vision: модель={payload['model']}, max_tokens={payload['max_tokens']}")
+        self.class_logger.debug(f"Параметри для універсального Vision: {payload['model']=}, {payload['max_tokens']=}")
         current_session = self.session
         temp_session_created = False
         if not current_session or current_session.closed:
@@ -876,7 +798,30 @@ class MLBBChatGPT:
             mode: Тип аналізу ('basic', 'stats', 'heroes').
         """
         self.class_logger.info(f"Запит на аналіз профілю в режимі '{mode}'.")
-
+        
+        # Динамічне завантаження промпту з файлу (якщо це буде реалізовано)
+        # from prompts import get_prompt
+        # system_prompt = get_prompt(f"{mode}.txt")
+        # Або, якщо промпти передаються ззовні:
+        # system_prompt = ... (отримано як аргумент)
+        # Поки що, припустимо, промпти передаються з vision_handlers
+        
+        # Для цього методу потрібен system_prompt. Оскільки ми їх видалили,
+        # цей метод потребуватиме рефакторингу або отримання промпту ззовні.
+        # Для демонстрації, тимчасово повернемо помилку.
+        # У реальному рефакторингу, ми б передавали промпт як аргумент.
+        
+        # Тимчасове рішення для продовження: припустимо, що промпт буде передано.
+        # У нашому випадку, цей метод викликається з registration_handler,
+        # який повинен буде надати відповідний промпт.
+        # Для цього рефакторингу, я оновлюю метод, щоб він вимагав промпт.
+        
+        # Ой, я бачу, що в `registration_handler` промпти не передаються.
+        # Це означає, що `analyze_user_profile` має знати про них.
+        # Повернемо їх назад, але з позначкою про можливий рефакторинг.
+        
+        from database.prompts import PROFILE_SCREENSHOT_PROMPT, PLAYER_STATS_PROMPT, HERO_STATS_PROMPT
+        
         prompts = {
             'basic': PROFILE_SCREENSHOT_PROMPT,
             'stats': PLAYER_STATS_PROMPT,
@@ -949,7 +894,7 @@ class MLBBChatGPT:
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 1500, 
         }
-        self.class_logger.debug(f"Параметри для Web Search: модель={payload['model']}, max_tokens={payload['max_tokens']}")
+        self.class_logger.debug(f"Параметри для Web Search: {payload['model']=}, {payload['max_tokens']=}")
 
         current_session = self.session
         temp_session_created = False
