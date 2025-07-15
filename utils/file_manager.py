@@ -5,7 +5,7 @@ utils/file_manager.py
 Забезпечує постійне зберігання файлів у Cloudinary та fallback механізми.
 """
 import asyncio
-from typing import Optional, Dict, Any
+from typing import Any
 
 import aiohttp
 import cloudinary
@@ -42,7 +42,7 @@ class FileResilienceManager:
         user_id: int,
         file_type: str,
         max_size_kb: int = 500
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Оптимізує зображення та зберігає у Cloudinary.
 
@@ -56,7 +56,7 @@ class FileResilienceManager:
             Постійний URL оптимізованого зображення або None.
         """
         public_id = f"mlbb_user_{user_id}_{file_type}_optimized"
-        upload_params: Dict[str, Any] = {
+        upload_params: dict[str, Any] = {
             "public_id": public_id,
             "folder": "mlbb_profiles",
             "resource_type": "image",
