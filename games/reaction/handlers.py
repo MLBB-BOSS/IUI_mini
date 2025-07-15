@@ -5,6 +5,7 @@
 та делегуючи виконання бізнес-логіки сервісному класу ReactionGameLogic.
 """
 import asyncio
+import html
 import time
 
 from aiogram import Bot, F, Router
@@ -14,9 +15,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from config import logger
+from games.reaction.crud import get_leaderboard, save_reaction_score
 from games.reaction.logic import ReactionGameLogic
 from games.reaction.states import ReactionGameState
-from games.reaction.crud import save_reaction_score, get_leaderboard
 
 reaction_router = Router(name="reaction_game")
 
@@ -38,14 +39,14 @@ async def start_reaction_game_handler(message: Message, bot: Bot, state: FSMCont
 
     try:
         game_message = await message.answer("🚦 Гра на реакцію починається...")
-        
+
         game = ReactionGameLogic(
             bot=bot,
             state=state,
             chat_id=game_message.chat.id,
             message_id=game_message.message_id,
         )
-        
+
         asyncio.create_task(game.start_game())
         logger.info(
             f"User {message.from_user.id} started a reaction game. "
@@ -61,8 +62,7 @@ async def start_reaction_game_handler(message: Message, bot: Bot, state: FSMCont
 
 
 @reaction_router.callback_query(
-    F.data == "reaction_game:stop",
-    StateFilter(ReactionGameState.in_progress)
+    F.data == "reaction_game:stop", StateFilter(ReactionGameState.in_progress)
 )
 async def stop_reaction_game_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """
@@ -73,19 +73,21 @@ async def stop_reaction_game_handler(callback: CallbackQuery, state: FSMContext,
 
     user_id = callback.from_user.id
     end_time = time.monotonic()
-    
+
     data = await state.get_data()
     start_time = data.get("start_time")
     game_message_id = data.get("game_message_id")
 
     if not all([start_time, game_message_id]):
         logger.warning(f"User {user_id} pressed stop, but state data is missing.")
-        await callback.answer("Помилка: дані гри втрачено. Спробуйте почати знову.", show_alert=True)
+        await callback.answer(
+            "Помилка: дані гри втрачено. Спробуйте почати знову.", show_alert=True
+        )
         await state.clear()
         return
 
     await state.clear()
-    
+
     reaction_time_sec = end_time - start_time
     reaction_time_ms = int(reaction_time_sec * 1000)
 
@@ -96,7 +98,6 @@ async def stop_reaction_game_handler(callback: CallbackQuery, state: FSMContext,
             "Результат не зараховано. Спробуй ще раз!"
         )
     else:
-        # Зберігаємо валідний результат в БД
         await save_reaction_score(user_id, reaction_time_ms)
         result_text = (
             f"🚀 Твій результат: <b>{reaction_time_ms} мс</b>!\n\n"
@@ -114,19 +115,36 @@ async def stop_reaction_game_handler(callback: CallbackQuery, state: FSMContext,
         await callback.answer(f"Ваш час: {reaction_time_ms} мс", show_alert=False)
     except TelegramAPIError as e:
         logger.warning(f"Could not edit game message {game_message_id} after completion: {e}")
-        await callback.answer(f"Ваш час: {reaction_time_ms} мс. Не вдалося оновити повідомлення.", show_alert=True)
+        await callback.answer(
+            f"Ваш час: {reaction_time_ms} мс. Не вдалося оновити повідомлення.",
+            show_alert=True,
+        )
 
 
 @reaction_router.message(Command("reaction_top", prefix="!/"))
 async def show_leaderboard_handler(message: Message):
     """
-    Обробник команди /reaction_top. Показує таблицю лідерів.
+    Обробник команди /reaction_top. Формує та показує таблицю лідерів.
     """
-    # TODO: Реалізувати логіку відображення таблиці лідерів
-    # 1. Викликати get_leaderboard() з crud.py
-    # 2. Відформатувати результат у красиве повідомлення
-    # 3. Надіслати повідомлення користувачу
-    await message.answer("🏆 Таблиця лідерів для гри 'Reaction Time' ще в розробці. Слідкуйте за оновленнями!")
+    leaderboard_data = await get_leaderboard(limit=10)
+
+    if not leaderboard_data:
+        await message.answer(
+            "🏆 <b>Таблиця лідерів 'Світлофор'</b> 🏆\n\n"
+            "Ще ніхто не встановив рекорд! Будь першим — зіграй у гру /reaction"
+        )
+        return
+
+    response_lines = ["🏆 <b>Таблиця лідерів 'Світлофор'</b> 🏆\n"]
+    medals = {0: "🥇", 1: "🥈", 2: "🥉"}
+
+    for i, record in enumerate(leaderboard_data):
+        place = medals.get(i, f"  <b>{i + 1}.</b>")
+        nickname = html.escape(record.get("nickname", "Анонім"))
+        best_time = record.get("best_time", "N/A")
+        response_lines.append(f"{place} {nickname} — <code>{best_time} мс</code>")
+
+    await message.answer("\n".join(response_lines))
 
 
 def register_reaction_handlers(dp):
