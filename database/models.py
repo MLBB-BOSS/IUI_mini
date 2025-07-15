@@ -2,6 +2,8 @@
 Визначення моделей даних SQLAlchemy для бази даних.
 Розширено для збереження детальної статистики та інформації з усіх скріншотів.
 """
+from typing import override
+
 from sqlalchemy import (
     create_engine,
     Column,
@@ -92,6 +94,7 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    @override
     def __repr__(self) -> str:
         return (
             f"<User(telegram_id={self.telegram_id}, "
