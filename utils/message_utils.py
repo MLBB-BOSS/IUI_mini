@@ -1,7 +1,6 @@
 import html
 import logging
 import re
-from typing import Optional
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
@@ -27,8 +26,8 @@ async def send_message_in_chunks(
     bot_instance: Bot,
     chat_id: int,
     text: str,
-    parse_mode: Optional[str],
-    initial_message_to_edit: Optional[Message] = None
+    parse_mode: str | None,
+    initial_message_to_edit: Message | None = None
 ):
     """
     Надсилає повідомлення, розбиваючи його на частини, якщо воно занадто довге.
