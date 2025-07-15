@@ -22,7 +22,7 @@ from games.reaction.states import ReactionGameState
 reaction_router = Router(name="reaction_game")
 
 
-@reaction_router.message(Command("reaction", prefix="!/"))
+@reaction_router.message(Command("reaction"))  # 👈 ВИДАЛЕНО ПАРАМЕТР prefix="!/"
 async def start_reaction_game_handler(message: Message, bot: Bot, state: FSMContext):
     """
     Обробник команди /reaction. Запускає гру для користувача.
@@ -121,7 +121,7 @@ async def stop_reaction_game_handler(callback: CallbackQuery, state: FSMContext,
         )
 
 
-@reaction_router.message(Command("reaction_top", prefix="!/"))
+@reaction_router.message(Command("reaction_top")) # 👈 ВИДАЛЕНО ПАРАМЕТР prefix="!/"
 async def show_leaderboard_handler(message: Message):
     """
     Обробник команди /reaction_top. Формує та показує таблицю лідерів.
