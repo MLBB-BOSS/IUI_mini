@@ -296,10 +296,10 @@ def create_mute_settings_keyboard(settings: UserSettings) -> InlineKeyboardMarku
         
         builder.button(text=button_text, callback_data=callback_data)
 
-    # Додаємо кнопку для закриття меню
+    # Розташовуємо кнопки налаштувань у два стовпці, а останню - в один
+    builder.adjust(2, 1)
+
+    # Додаємо кнопку для закриття меню в окремому рядку
     builder.row(InlineKeyboardButton(text="👌 Готово", callback_data="close_settings_menu"))
-    
-    # Розташовуємо кнопки налаштувань в один стовпець
-    builder.adjust(1, 1, 1, 1)
     
     return builder.as_markup()
