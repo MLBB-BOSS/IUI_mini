@@ -55,9 +55,9 @@ from keyboards.inline_keyboards import (
     create_party_info_keyboard 
 )
 # 🧠 ІМПОРТУЄМО ФУНКЦІЇ ДЛЯ РОБОТИ З БД ТА НОВИМИ ШАРАМИ ПАМ'ЯТІ
-from database.crud import get_user_by_telegram_id
+from database.crud import get_user_by_telegram_id, set_user_mute_status
 from utils.session_memory import SessionData, load_session, save_session
-from utils.cache_manager import load_user_cache, save_user_cache
+from utils.cache_manager import load_user_cache, save_user_cache, clear_user_cache
 
 
 # === 🔄 ОНОВЛЕННЯ СТАНІВ FSM ===
@@ -92,12 +92,14 @@ gpt_client = MLBBChatGPT(OPENAI_API_KEY)
 # === ФУНКЦІЯ ДЛЯ ВСТАНОВЛЕННЯ КОМАНД БОТА ===
 async def set_bot_commands(bot: Bot):
     commands = [
-        BotCommand(command="start", description="🏁 Перезапустити бота"),
+        BotCommand(command="start", description="🏁 Перезапустити та активувати бота"),
         BotCommand(command="profile", description="👤 Мій профіль (реєстрація/оновлення)"),
         BotCommand(command="go", description="💬 Задати питання AI-помічнику"),
         BotCommand(command="search", description="🔍 Пошук новин та оновлень"),
         BotCommand(command="analyzeprofile", description="📸 Аналіз скріншота профілю"),
         BotCommand(command="analyzestats", description="📊 Аналіз скріншота статистики"),
+        BotCommand(command="mute", description="🔇 Вимкнути автоматичні відповіді"),
+        BotCommand(command="unmute", description="🔊 Увімкнути автоматичні відповіді"),
         BotCommand(command="help", description="❓ Допомога та інфо"),
     ]
     try:
@@ -629,12 +631,22 @@ async def cancel_join_selection(callback: CallbackQuery, bot: Bot):
         await callback.answer("Ти не можеш скасувати цю дію.", show_alert=True)
 
 
-# === ЗАГАЛЬНІ ОБРОБНИКИ КОМАНД (без змін) ===
+# === ЗАГАЛЬНІ ОБРОБНИКИ КОМАНД ===
 @general_router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
+    """Обробник команди /start, який також знімає м'ют."""
     await state.clear()
     user = message.from_user
     if not user: return
+
+    # ❗️ ЛОГІКА ЗНЯТТЯ М'ЮТУ ПРИ СТАРТІ
+    user_data = await get_user_by_telegram_id(user.id)
+    if user_data and user_data.get('is_muted'):
+        logger.info(f"Користувач {user.id} використав /start, знімаю м'ют.")
+        await set_user_mute_status(user.id, is_muted=False)
+        await clear_user_cache(user.id)
+        # Можна додати повідомлення, але для /start краще просто мовчки зняти
+    
     user_name_escaped = get_user_display_name(user)
     logger.info(f"Користувач {user_name_escaped} (ID: {user.id}) запустив бота /start.")
     kyiv_tz = timezone(timedelta(hours=3))
@@ -679,6 +691,8 @@ async def cmd_help(message: Message):
 /search <code>&lt;запит&gt;</code> - Знайти останні новини або інформацію в Інтернеті.
 /analyzeprofile - Запустити аналіз скріншота вашого профілю.
 /analyzestats - Запустити аналіз скріншота вашої статистики.
+/mute - Вимкнути мої автоматичні відповіді для вас.
+/unmute - Увімкнути мої автоматичні відповіді.
 /help - Показати це повідомлення.
 
 Також я можу автоматично реагувати на зображення в чаті та підтримувати розмову, якщо ви звернетесь до мене.
@@ -810,12 +824,28 @@ async def handle_image_messages(message: Message, bot: Bot):
     if not VISION_AUTO_RESPONSE_ENABLED or not message.photo or not message.from_user:
         return
 
+    user_id = message.from_user.id
+    bot_info = await bot.get_me()
+    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
+
+    # ❗️ ПЕРЕВІРКА СТАТУСУ М'ЮТУ
+    user_cache = await load_user_cache(user_id)
+    if user_cache.get('is_muted', False):
+        if is_reply_to_bot:
+            logger.info(f"Зам'ючений користувач {user_id} відповів боту, знімаю м'ют.")
+            await set_user_mute_status(user_id, is_muted=False)
+            await clear_user_cache(user_id)
+            await message.reply("🔊 Приємно знову спілкуватися! Автоматичні відповіді для вас увімкнено.")
+            # Не виходимо, дозволяємо обробити це повідомлення
+        else:
+            logger.info(f"Ігнорую зображення від зам'юченого користувача {user_id}.")
+            return
+
     chat_id = message.chat.id
     current_time = time.time()
     current_user_name = get_user_display_name(message.from_user)
     
-    bot_info = await bot.get_me()
-    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
+    # is_reply_to_bot вже визначено вище
     
     # 🔑 Зберігаємо caption для подальшого використання
     user_caption = message.caption or ""
@@ -896,15 +926,30 @@ async def handle_trigger_messages(message: Message, bot: Bot):
         logger.info(f"Повідомлення від {message.from_user.id} містить посилання і буде проігноровано.")
         return # Просто ігноруємо повідомлення з посиланнями
 
+    user_id = message.from_user.id
+    bot_info = await bot.get_me()
+    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
+
+    # ❗️ ПЕРЕВІРКА СТАТУСУ М'ЮТУ
+    user_cache = await load_user_cache(user_id)
+    if user_cache.get('is_muted', False):
+        if is_reply_to_bot:
+            logger.info(f"Зам'ючений користувач {user_id} відповів боту, знімаю м'ют.")
+            await set_user_mute_status(user_id, is_muted=False)
+            await clear_user_cache(user_id)
+            await message.reply("🔊 Приємно знову спілкуватися! Автоматичні відповіді для вас увімкнено.")
+            # Не виходимо, дозволяємо обробити це повідомлення
+        else:
+            logger.info(f"Ігнорую текстовий тригер від зам'юченого користувача {user_id}.")
+            return
+
     text_lower = message.text.lower()
     chat_id = message.chat.id
-    user_id = message.from_user.id
     current_user_name = get_user_display_name(message.from_user)
     current_time = time.time()
-    bot_info = await bot.get_me()
-
+    
     is_explicit_mention = f"@{bot_info.username.lower()}" in text_lower
-    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
+    # is_reply_to_bot вже визначено вище
     is_name_mention = any(re.search(r'\b' + name + r'\b', text_lower) for name in BOT_NAMES)
 
     matched_trigger_mood = next((mood for trigger, mood in CONVERSATIONAL_TRIGGERS.items() if re.search(r'\b' + re.escape(trigger) + r'\b', text_lower)), None)
@@ -922,8 +967,8 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     if should_respond:
         is_personalization_request = any(trigger in text_lower for trigger in PERSONALIZATION_TRIGGERS)
         
-        db_user_data = await get_user_by_telegram_id(user_id)
-        is_registered = bool(db_user_data)
+        # user_cache вже завантажено вище
+        is_registered = bool(user_cache)
 
         if not is_registered and is_personalization_request:
             logger.info(f"Незареєстрований користувач {current_user_name} спробував отримати персоналізовану відповідь.")
@@ -936,7 +981,6 @@ async def handle_trigger_messages(message: Message, bot: Bot):
 
         full_profile_for_prompt = None
         if is_registered:
-            user_cache = await load_user_cache(user_id)
             # ✅ FIX: Ensure chat_history is always a list
             chat_history = user_cache.get('chat_history') if user_cache.get('chat_history') is not None else []
             
