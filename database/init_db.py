@@ -71,6 +71,7 @@ async def init_db() -> None:
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS heroes_photo_permanent_url TEXT",
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_file_id TEXT",
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_permanent_url TEXT",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_muted BOOLEAN DEFAULT false", # ❗️ НОВА МІГРАЦІЯ
                     "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id ON users (player_id)",
                 ]
                 
