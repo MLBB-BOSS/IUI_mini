@@ -26,6 +26,7 @@ from handlers.general_handlers import (
 )
 from handlers.vision_handlers import register_vision_handlers
 from handlers.registration_handler import register_registration_handlers
+from handlers.user_settings_handler import register_settings_handlers  # ❗️ НОВИЙ ІМПОРТ
 from games.reaction.handlers import register_reaction_handlers
 
 
@@ -100,6 +101,7 @@ async def main() -> None:
     # ❗️ ВАЖЛИВО: Реєструємо специфічні роутери (ігри, реєстрація) ПЕРЕД загальними.
     register_reaction_handlers(dp)
     register_registration_handlers(dp)
+    register_settings_handlers(dp) # ❗️ РЕЄСТРАЦІЯ НОВИХ ОБРОБНИКІВ
     register_vision_handlers(dp, cmd_go_handler_func=cmd_go)
     
     # Загальний роутер, що містить "жадібні" обробники, реєструємо в останню чергу.
