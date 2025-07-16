@@ -18,7 +18,9 @@ async def init_db() -> None:
     """
     engine = create_async_engine(ASYNC_DATABASE_URL)
     async with engine.begin() as conn:
-        logger.info("Initializing database tables...")
+        logger.info("Initializing database tables (including user_settings)...")
+        # Base.metadata.create_all автоматично знайде всі успадковані класи,
+        # включаючи User та нову UserSettings.
         await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables initialized successfully.")
 
@@ -31,6 +33,7 @@ async def init_db() -> None:
                 alter_queries = [
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_history JSON",
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS likes_received INTEGER",
+                    # ... (решта міграцій для 'users' залишаються без змін) ...
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS location TEXT",
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS squad_name TEXT",
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS stats_filter_type TEXT",
@@ -71,7 +74,7 @@ async def init_db() -> None:
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS heroes_photo_permanent_url TEXT",
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_file_id TEXT",
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_permanent_url TEXT",
-                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_muted BOOLEAN DEFAULT false", # ❗️ НОВА МІГРАЦІЯ
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_muted BOOLEAN DEFAULT false",
                     "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_player_id ON users (player_id)",
                 ]
                 
