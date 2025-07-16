@@ -107,3 +107,37 @@ async def delete_user_by_telegram_id(telegram_id: int) -> bool:
             else:
                 logger.warning(f"Спроба видалити несуществуючого користувача з Telegram ID {telegram_id}.")
                 return False
+
+
+async def set_user_mute_status(telegram_id: int, is_muted: bool) -> bool:
+    """
+    Встановлює або знімає статус "м'юту" для користувача.
+
+    Args:
+        telegram_id: Telegram ID користувача.
+        is_muted: Новий статус м'юту (True - вимкнути, False - увімкнути).
+
+    Returns:
+        True, якщо статус успішно оновлено, інакше False.
+    """
+    async with engine.connect() as conn:
+        try:
+            async with conn.begin():
+                stmt = (
+                    update(User)
+                    .where(User.telegram_id == telegram_id)
+                    .values(is_muted=is_muted)
+                )
+                result = await conn.execute(stmt)
+                await conn.commit()
+
+                if result.rowcount > 0:
+                    logger.info(f"Статус is_muted для користувача {telegram_id} змінено на {is_muted}.")
+                    return True
+                else:
+                    logger.warning(f"Спроба оновити is_muted для несуществуючого користувача {telegram_id}.")
+                    return False
+        except Exception as e:
+            await conn.rollback()
+            logger.error(f"Помилка при оновленні is_muted для {telegram_id}: {e}", exc_info=True)
+            return False
