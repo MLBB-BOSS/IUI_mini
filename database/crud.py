@@ -5,15 +5,19 @@ from typing import Any, Literal
 
 from sqlalchemy import insert, update, select, delete
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
-from database.models import User
+from database.models import User, UserSettings
 from config import ASYNC_DATABASE_URL, logger
 
 engine = create_async_engine(ASYNC_DATABASE_URL)
 
 
+# --- User CRUD ---
+
 async def add_or_update_user(user_data: dict[str, Any]) -> Literal['success', 'conflict', 'error']:
+    # ... (код цієї функції залишається без змін) ...
     """
     Додає або оновлює користувача, перевіряючи унікальність player_id.
 
@@ -75,7 +79,7 @@ async def add_or_update_user(user_data: dict[str, Any]) -> Literal['success', 'c
 
 
 async def get_user_by_telegram_id(telegram_id: int) -> dict[str, Any] | None:
-    # ... (код функції залишається без змін) ...
+    # ... (код цієї функції залишається без змін) ...
     async with engine.connect() as conn:
         stmt = select(User).where(User.telegram_id == telegram_id)
         result = await conn.execute(stmt)
@@ -86,6 +90,7 @@ async def get_user_by_telegram_id(telegram_id: int) -> dict[str, Any] | None:
     return None
 
 async def delete_user_by_telegram_id(telegram_id: int) -> bool:
+    # ... (код цієї функції залишається без змін) ...
     """
     Видаляє користувача з бази даних за його Telegram ID.
 
@@ -108,36 +113,61 @@ async def delete_user_by_telegram_id(telegram_id: int) -> bool:
                 logger.warning(f"Спроба видалити несуществуючого користувача з Telegram ID {telegram_id}.")
                 return False
 
+# --- UserSettings CRUD ---
 
-async def set_user_mute_status(telegram_id: int, is_muted: bool) -> bool:
+async def get_user_settings(telegram_id: int) -> UserSettings:
     """
-    Встановлює або знімає статус "м'юту" для користувача.
-
-    Args:
-        telegram_id: Telegram ID користувача.
-        is_muted: Новий статус м'юту (True - вимкнути, False - увімкнути).
-
-    Returns:
-        True, якщо статус успішно оновлено, інакше False.
+    Отримує налаштування користувача з БД.
+    Якщо користувача немає, повертає об'єкт UserSettings з налаштуваннями за замовчуванням.
     """
+    async with engine.connect() as conn:
+        stmt = select(UserSettings).where(UserSettings.telegram_id == telegram_id)
+        result = await conn.execute(stmt)
+        settings_row = result.first()
+        if settings_row:
+            return UserSettings(**settings_row._mapping)
+    # Якщо запис не знайдено, повертаємо дефолтний об'єкт
+    return UserSettings(telegram_id=telegram_id)
+
+
+async def update_user_settings(telegram_id: int, **kwargs) -> bool:
+    """
+    Оновлює або створює (upsert) налаштування для користувача.
+    Приймає іменовані аргументи, що відповідають полям моделі UserSettings.
+    """
+    if not kwargs:
+        logger.warning("update_user_settings викликано без даних для оновлення.")
+        return False
+
     async with engine.connect() as conn:
         try:
             async with conn.begin():
-                stmt = (
-                    update(User)
-                    .where(User.telegram_id == telegram_id)
-                    .values(is_muted=is_muted)
+                # Використовуємо специфічний для PostgreSQL INSERT ... ON CONFLICT DO UPDATE
+                stmt = pg_insert(UserSettings).values(telegram_id=telegram_id, **kwargs)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=['telegram_id'],
+                    set_=kwargs
                 )
-                result = await conn.execute(stmt)
+                await conn.execute(stmt)
                 await conn.commit()
-
-                if result.rowcount > 0:
-                    logger.info(f"Статус is_muted для користувача {telegram_id} змінено на {is_muted}.")
-                    return True
-                else:
-                    logger.warning(f"Спроба оновити is_muted для несуществуючого користувача {telegram_id}.")
-                    return False
+                logger.info(f"Налаштування для користувача {telegram_id} оновлено: {kwargs}")
+                return True
         except Exception as e:
             await conn.rollback()
-            logger.error(f"Помилка при оновленні is_muted для {telegram_id}: {e}", exc_info=True)
+            logger.error(f"Помилка при оновленні налаштувань для {telegram_id}: {e}", exc_info=True)
             return False
+
+# Застаріла функція, яку можна буде видалити після рефакторингу
+async def set_user_mute_status(telegram_id: int, is_muted: bool) -> bool:
+    """
+    DEPRECATED: Встановлює або знімає статус "м'юту" для користувача.
+    Замінено на update_user_settings.
+    """
+    logger.warning("Викликано застарілу функцію set_user_mute_status. "
+                   "Перейдіть на update_user_settings.")
+    return await update_user_settings(
+        telegram_id,
+        mute_chat=is_muted,
+        mute_vision=is_muted,
+        mute_party=is_muted
+    )
