@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     DateTime,
     JSON,
+    Boolean,  # ❗️ Додано імпорт Boolean
 )
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
@@ -90,6 +91,9 @@ class User(Base):
 
     # Історія чату для AI-асистента
     chat_history = Column(JSON, nullable=True)
+
+    # ❗️ НОВЕ: Налаштування користувача
+    is_muted = Column(Boolean, nullable=False, server_default='false')
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
