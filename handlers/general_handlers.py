@@ -55,7 +55,7 @@ from keyboards.inline_keyboards import (
     create_party_info_keyboard 
 )
 # 🧠 ІМПОРТУЄМО ФУНКЦІЇ ДЛЯ РОБОТИ З БД ТА НОВИМИ ШАРАМИ ПАМ'ЯТІ
-from database.crud import get_user_by_telegram_id, set_user_mute_status
+from database.crud import get_user_settings, update_user_settings
 from utils.session_memory import SessionData, load_session, save_session
 from utils.cache_manager import load_user_cache, save_user_cache, clear_user_cache
 
@@ -98,8 +98,9 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="search", description="🔍 Пошук новин та оновлень"),
         BotCommand(command="analyzeprofile", description="📸 Аналіз скріншота профілю"),
         BotCommand(command="analyzestats", description="📊 Аналіз скріншота статистики"),
-        BotCommand(command="mute", description="🔇 Вимкнути автоматичні відповіді"),
-        BotCommand(command="unmute", description="🔊 Увімкнути автоматичні відповіді"),
+        BotCommand(command="settings", description="⚙️ Налаштування реакцій бота"),
+        BotCommand(command="mute", description="🔇 Вимкнути всі реакції"),
+        BotCommand(command="unmute", description="🔊 Увімкнути всі реакції"),
         BotCommand(command="help", description="❓ Допомога та інфо"),
     ]
     try:
@@ -124,6 +125,10 @@ def is_party_request_message(message: Message) -> bool:
         return False
     try:
         text_lower = message.text.lower()
+        
+        # Перевірка налаштувань м'юту для паті
+        # Цю перевірку краще робити в самому обробнику, щоб не змішувати логіку
+        
         has_party_keywords = re.search(r'\b(паті|пати|команду)\b', text_lower) is not None
         has_action_keywords = re.search(r'\b(збир|го|шука|грат|зібра)\w*\b|\+', text_lower) is not None
         return has_party_keywords and has_action_keywords
@@ -202,7 +207,19 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: str | None = Non
 # === 🔄 ОНОВЛЕНА ЛОГІКА СТВОРЕННЯ ПАТІ (FSM) ===
 @party_router.message(F.text & F.func(is_party_request_message))
 async def ask_for_party_creation(message: Message, state: FSMContext):
+    """Обробник, що реагує на запит створення паті, з перевіркою м'юту."""
+    if not message.from_user:
+        return
+        
+    user_id = message.from_user.id
     user_name = get_user_display_name(message.from_user)
+    
+    # ❗️ НОВА ПЕРЕВІРКА: Перевіряємо налаштування м'юту для паті
+    settings = await get_user_settings(user_id)
+    if settings.mute_party:
+        logger.info(f"Ігнорую запит на паті від {user_name} (ID: {user_id}), оскільки mute_party=True.")
+        return
+
     logger.info(f"Виявлено запит на створення паті від {user_name}: '{message.text}'")
     await state.set_state(PartyCreationFSM.waiting_for_confirmation)
     sent_message = await message.reply(
@@ -640,12 +657,11 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     if not user: return
 
     # ❗️ ЛОГІКА ЗНЯТТЯ М'ЮТУ ПРИ СТАРТІ
-    user_data = await get_user_by_telegram_id(user.id)
-    if user_data and user_data.get('is_muted'):
-        logger.info(f"Користувач {user.id} використав /start, знімаю м'ют.")
-        await set_user_mute_status(user.id, is_muted=False)
+    settings = await get_user_settings(user.id)
+    if settings.mute_chat and settings.mute_vision and settings.mute_party:
+        logger.info(f"Користувач {user.id} використав /start, знімаю всі м'юти.")
+        await update_user_settings(user.id, mute_chat=False, mute_vision=False, mute_party=False)
         await clear_user_cache(user.id)
-        # Можна додати повідомлення, але для /start краще просто мовчки зняти
     
     user_name_escaped = get_user_display_name(user)
     logger.info(f"Користувач {user_name_escaped} (ID: {user.id}) запустив бота /start.")
@@ -691,6 +707,7 @@ async def cmd_help(message: Message):
 /search <code>&lt;запит&gt;</code> - Знайти останні новини або інформацію в Інтернеті.
 /analyzeprofile - Запустити аналіз скріншота вашого профілю.
 /analyzestats - Запустити аналіз скріншота вашої статистики.
+/settings - Відкрити меню налаштувань моїх реакцій.
 /mute - Вимкнути мої автоматичні відповіді для вас.
 /unmute - Увімкнути мої автоматичні відповіді.
 /help - Показати це повідомлення.
@@ -818,6 +835,42 @@ async def cmd_go(message: Message, state: FSMContext, bot: Bot):
         except Exception as final_err:
              logger.error(f"Не вдалося надіслати навіть фінальне повідомлення про помилку: {final_err}")
 
+# ❗️ НОВІ ОБРОБНИКИ ДЛЯ /mute та /unmute
+@general_router.message(Command("mute"))
+async def cmd_mute(message: Message):
+    """Обробник команди /mute, що вимикає всі автоматичні реакції."""
+    if not message.from_user:
+        return
+    user_id = message.from_user.id
+    user_name = get_user_display_name(message.from_user)
+    
+    logger.info(f"Користувач {user_name} (ID: {user_id}) використав /mute.")
+    success = await update_user_settings(
+        user_id, mute_chat=True, mute_vision=True, mute_party=True
+    )
+    if success:
+        await message.reply("🔇 Добре, я буду мовчати. Всі мої автоматичні реакції вимкнено.")
+    else:
+        await message.reply("Щось пішло не так, не вдалося зберегти налаштування. 😕")
+
+@general_router.message(Command("unmute"))
+async def cmd_unmute(message: Message):
+    """Обробник команди /unmute, що вмикає всі автоматичні реакції."""
+    if not message.from_user:
+        return
+    user_id = message.from_user.id
+    user_name = get_user_display_name(message.from_user)
+
+    logger.info(f"Користувач {user_name} (ID: {user_id}) використав /unmute.")
+    success = await update_user_settings(
+        user_id, mute_chat=False, mute_vision=False, mute_party=False
+    )
+    if success:
+        await message.reply("🔊 Я знову в грі! Всі мої автоматичні реакції увімкнено.")
+    else:
+        await message.reply("Щось пішло не так, не вдалося зберегти налаштування. 😕")
+
+
 # === ОБРОБНИКИ ПОВІДОМЛЕНЬ (ФОТО ТА ТЕКСТ) ===
 @general_router.message(F.photo)
 async def handle_image_messages(message: Message, bot: Bot):
@@ -828,26 +881,22 @@ async def handle_image_messages(message: Message, bot: Bot):
     bot_info = await bot.get_me()
     is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
 
-    # ❗️ ПЕРЕВІРКА СТАТУСУ М'ЮТУ
-    user_cache = await load_user_cache(user_id)
-    if user_cache.get('is_muted', False):
+    # ❗️ ОНОВЛЕНА ПЕРЕВІРКА СТАТУСУ М'ЮТУ
+    settings = await get_user_settings(user_id)
+    if settings.mute_vision:
         if is_reply_to_bot:
-            logger.info(f"Зам'ючений користувач {user_id} відповів боту, знімаю м'ют.")
-            await set_user_mute_status(user_id, is_muted=False)
+            logger.info(f"Користувач {user_id} з mute_vision=True відповів боту, знімаю м'ют vision.")
+            await update_user_settings(user_id, mute_vision=False)
             await clear_user_cache(user_id)
-            await message.reply("🔊 Приємно знову спілкуватися! Автоматичні відповіді для вас увімкнено.")
-            # Не виходимо, дозволяємо обробити це повідомлення
+            await message.reply("📸 Приємно знову бачити твої зображення! Реакції на фото увімкнено.")
         else:
-            logger.info(f"Ігнорую зображення від зам'юченого користувача {user_id}.")
+            logger.info(f"Ігнорую зображення від {user_id}, оскільки mute_vision=True.")
             return
 
     chat_id = message.chat.id
     current_time = time.time()
     current_user_name = get_user_display_name(message.from_user)
     
-    # is_reply_to_bot вже визначено вище
-    
-    # 🔑 Зберігаємо caption для подальшого використання
     user_caption = message.caption or ""
     
     is_caption_mention = False
@@ -886,11 +935,10 @@ async def handle_image_messages(message: Message, bot: Bot):
         image_base64 = base64.b64encode(image_bytes_io.read()).decode('utf-8')
         
         async with gpt_client as gpt:
-            # 🔑 Передаємо і зображення, і caption
             vision_response = await gpt.analyze_image_universal(
                 image_base64, 
                 current_user_name,
-                caption_text=user_caption  # Новий параметр
+                caption_text=user_caption
             )
 
         if vision_response and vision_response.strip():
@@ -920,27 +968,25 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     if not message.text or message.text.startswith('/') or not message.from_user:
         return
 
-    # Перевірка на наявність посилань у повідомленні
     url_pattern = re.compile(r'https?://\S+')
     if url_pattern.search(message.text):
         logger.info(f"Повідомлення від {message.from_user.id} містить посилання і буде проігноровано.")
-        return # Просто ігноруємо повідомлення з посиланнями
+        return
 
     user_id = message.from_user.id
     bot_info = await bot.get_me()
     is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
 
-    # ❗️ ПЕРЕВІРКА СТАТУСУ М'ЮТУ
-    user_cache = await load_user_cache(user_id)
-    if user_cache.get('is_muted', False):
+    # ❗️ ОНОВЛЕНА ПЕРЕВІРКА СТАТУСУ М'ЮТУ
+    settings = await get_user_settings(user_id)
+    if settings.mute_chat:
         if is_reply_to_bot:
-            logger.info(f"Зам'ючений користувач {user_id} відповів боту, знімаю м'ют.")
-            await set_user_mute_status(user_id, is_muted=False)
+            logger.info(f"Користувач {user_id} з mute_chat=True відповів боту, знімаю м'ют чату.")
+            await update_user_settings(user_id, mute_chat=False)
             await clear_user_cache(user_id)
             await message.reply("🔊 Приємно знову спілкуватися! Автоматичні відповіді для вас увімкнено.")
-            # Не виходимо, дозволяємо обробити це повідомлення
         else:
-            logger.info(f"Ігнорую текстовий тригер від зам'юченого користувача {user_id}.")
+            logger.info(f"Ігнорую текстовий тригер від {user_id}, оскільки mute_chat=True.")
             return
 
     text_lower = message.text.lower()
@@ -949,7 +995,6 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     current_time = time.time()
     
     is_explicit_mention = f"@{bot_info.username.lower()}" in text_lower
-    # is_reply_to_bot вже визначено вище
     is_name_mention = any(re.search(r'\b' + name + r'\b', text_lower) for name in BOT_NAMES)
 
     matched_trigger_mood = next((mood for trigger, mood in CONVERSATIONAL_TRIGGERS.items() if re.search(r'\b' + re.escape(trigger) + r'\b', text_lower)), None)
@@ -967,7 +1012,7 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     if should_respond:
         is_personalization_request = any(trigger in text_lower for trigger in PERSONALIZATION_TRIGGERS)
         
-        # user_cache вже завантажено вище
+        user_cache = await load_user_cache(user_id)
         is_registered = bool(user_cache)
 
         if not is_registered and is_personalization_request:
@@ -981,14 +1026,10 @@ async def handle_trigger_messages(message: Message, bot: Bot):
 
         full_profile_for_prompt = None
         if is_registered:
-            # ✅ FIX: Ensure chat_history is always a list
             chat_history = user_cache.get('chat_history') if user_cache.get('chat_history') is not None else []
             
-            # --- 🚀 НОВА ЛОГІКА ЗБАГАЧЕННЯ КОНТЕКСТУ 🚀 ---
-            # Завжди готуємо профіль, якщо він є, а не тільки за тригером
-            full_profile_for_prompt = user_cache.copy() # Копіюємо, щоб не змінювати кеш
+            full_profile_for_prompt = user_cache.copy()
             
-            # 1. Витягуємо улюблених героїв у зручний список
             favorite_heroes = []
             for i in range(1, 4):
                 hero_name = user_cache.get(f'hero{i}_name')
@@ -997,7 +1038,6 @@ async def handle_trigger_messages(message: Message, bot: Bot):
             if favorite_heroes:
                 full_profile_for_prompt['favorite_heroes_list'] = favorite_heroes
             
-            # 2. Визначаємо рівень гри на основі рангу
             current_rank = user_cache.get('current_rank', '').lower()
             if 'міфіч' in current_rank:
                 full_profile_for_prompt['skill_level'] = 'high'
@@ -1006,9 +1046,8 @@ async def handle_trigger_messages(message: Message, bot: Bot):
             else:
                 full_profile_for_prompt['skill_level'] = 'developing'
             logger.info(f"Збагачено контекст для {current_user_name}: рівень '{full_profile_for_prompt.get('skill_level', 'N/A')}', герої: {full_profile_for_prompt.get('favorite_heroes_list', [])}")
-            # --- 🚀 КІНЕЦЬ НОВОЇ ЛОГІКИ 🚀 ---
 
-        else: # Незареєстрований користувач
+        else: 
             session = await load_session(user_id)
             chat_history = session.chat_history
             full_profile_for_prompt = None
@@ -1023,7 +1062,7 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                     user_name=current_user_name,
                     chat_history=chat_history,
                     trigger_mood=matched_trigger_mood,
-                    user_profile_data=full_profile_for_prompt # Передаємо збагачений профіль
+                    user_profile_data=full_profile_for_prompt
                 )
             
             if reply_text and "<i>" not in reply_text:
