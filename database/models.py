@@ -13,7 +13,7 @@ from sqlalchemy import (
     String,
     DateTime,
     JSON,
-    Boolean,  # ❗️ Додано імпорт Boolean
+    Boolean,
 )
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
@@ -21,6 +21,31 @@ from sqlalchemy.sql import func
 from config import SYNC_DATABASE_URL
 
 Base = declarative_base()
+
+
+class UserSettings(Base):
+    """
+    Модель для зберігання індивідуальних налаштувань користувача.
+    Використовує telegram_id як первинний ключ для роботи з усіма користувачами.
+    """
+    __tablename__ = 'user_settings'
+
+    telegram_id = Column(BigInteger, primary_key=True)
+    mute_vision = Column(Boolean, nullable=False, default=False, server_default='false')
+    mute_chat = Column(Boolean, nullable=False, default=False, server_default='false')
+    mute_party = Column(Boolean, nullable=False, default=False, server_default='false')
+    # Поля для майбутніх налаштувань
+    # mute_greetings = Column(Boolean, nullable=False, default=False, server_default='false')
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return (
+            f"<UserSettings(telegram_id={self.telegram_id}, "
+            f"chat={self.mute_chat}, vision={self.mute_vision}, party={self.mute_party})>"
+        )
+
 
 class User(Base):
     """
@@ -35,6 +60,8 @@ class User(Base):
     player_id = Column(BigInteger, unique=True, nullable=False)
     server_id = Column(Integer, nullable=False)
     current_rank = Column(String(50), nullable=True)
+
+    # ... (решта полів моделі User залишаються без змін) ...
 
     # Базова статистика
     total_matches = Column(Integer, nullable=True)
@@ -92,7 +119,8 @@ class User(Base):
     # Історія чату для AI-асистента
     chat_history = Column(JSON, nullable=True)
 
-    # ❗️ НОВЕ: Налаштування користувача
+    # ❗️ ПОЛЕ is_muted тепер є застарілим, але ми його не видаляємо, щоб не зламати міграцію.
+    # Воно буде ігноруватися новою логікою.
     is_muted = Column(Boolean, nullable=False, server_default='false')
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -105,14 +133,12 @@ class User(Base):
             f"nickname='{self.nickname}', player_id={self.player_id})>"
         )
 
-# ❗️ НОВЕ: Імпортуємо моделі з інших модулів, щоб Base.metadata.create_all знав про них.
-# Це робить систему модульною: просто додайте сюди імпорт нової моделі,
-# і її таблиця буде створена автоматично.
+# Імпортуємо моделі з інших модулів, щоб Base.metadata.create_all знав про них.
 from games.reaction.models import ReactionGameScore
 
 
 if __name__ == '__main__':
-    # При прямому запуску створює/оновлює таблицю в БД
+    # При прямому запуску створює/оновлює таблиці в БД
     engine = create_engine(SYNC_DATABASE_URL)
     Base.metadata.create_all(engine)
-    print("Таблицю 'users' успішно створено або оновлено відповідно до моделі.")
+    print("Таблиці 'users' та 'user_settings' успішно створено або оновлено.")
