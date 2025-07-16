@@ -5,10 +5,13 @@
 - інтерактивне меню користувача з однокнопковим режимом та розгорнутим оглядом
 - навігацію каруселлю профілю
 - підтвердження видалення профілю
-🆕 v3.9: Мінімалістичний однокнопковий режим "Меню" та динамічний огляд з навігацією.
+- ❗️ НОВЕ: Динамічне меню для налаштувань м'юту.
 """
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+# ❗️ НОВИЙ ІМПОРТ
+from database.models import UserSettings
 
 # Короткі коди ролей для паті
 ALL_ROLES: list[str] = ["EXP", "ЛІС", "МІД", "АДК", "РОУМ"]
@@ -255,4 +258,48 @@ def create_delete_confirm_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✅ Так", callback_data="delete_confirm_yes"),
         InlineKeyboardButton(text="❌ Ні", callback_data="delete_confirm_no")
     )
+    return builder.as_markup()
+
+# -------------------------------------------------------------------
+# ❗️ НОВА СЕКЦІЯ: Клавіатури для налаштувань користувача
+# -------------------------------------------------------------------
+
+def create_mute_settings_keyboard(settings: UserSettings) -> InlineKeyboardMarkup:
+    """
+    Створює динамічну клавіатуру для керування налаштуваннями м'юту.
+    
+    Args:
+        settings: Об'єкт UserSettings з поточними налаштуваннями.
+        
+    Returns:
+        Інлайн-клавіатура для меню налаштувань.
+    """
+    builder = InlineKeyboardBuilder()
+
+    # Словник: ключ_налаштування -> (Текст для кнопки, Емодзі)
+    options = {
+        "chat": ("Спілкування", "💬"),
+        "vision": ("Аналіз фото", "📸"),
+        "party": ("Збір паті", "🎮"),
+    }
+
+    for key, (text, emoji) in options.items():
+        # Отримуємо поточний статус (True/False) для ключа
+        is_muted = getattr(settings, f"mute_{key}", False)
+        
+        # Формуємо текст кнопки
+        status_emoji = "❌" if is_muted else "✅"
+        button_text = f"{status_emoji} {text}"
+        
+        # Формуємо callback_data
+        callback_data = f"toggle_mute:{key}"
+        
+        builder.button(text=button_text, callback_data=callback_data)
+
+    # Додаємо кнопку для закриття меню
+    builder.row(InlineKeyboardButton(text="👌 Готово", callback_data="close_settings_menu"))
+    
+    # Розташовуємо кнопки налаштувань в один стовпець
+    builder.adjust(1, 1, 1, 1)
+    
     return builder.as_markup()
