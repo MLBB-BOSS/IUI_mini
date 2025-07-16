@@ -6,7 +6,6 @@ from aiogram import F, Router, types
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramAPIError
 
-# ❗️ Оновлені імпорти: прибираємо engine, pg_insert, text
 from database.crud import get_user_settings, update_user_settings
 from keyboards.inline_keyboards import create_mute_settings_keyboard
 from config import logger
@@ -39,6 +38,9 @@ async def toggle_setting(callback: types.CallbackQuery):
     """
     Обробляє натискання на кнопку налаштування, перемикаючи її стан.
     """
+    if not callback.message:
+        return
+        
     user_id = callback.from_user.id
     setting_to_toggle = callback.data.split(":")[1]
     
@@ -54,11 +56,9 @@ async def toggle_setting(callback: types.CallbackQuery):
     current_value = getattr(current_settings, setting_key)
     new_value = not current_value
 
-    # ❗️ ВИПРАВЛЕНО: Використовуємо централізовану функцію, що інвалідує кеш
     success = await update_user_settings(user_id, **{setting_key: new_value})
 
     if success:
-        logger.info(f"Налаштування для користувача {user_id} оновлено: {{'{setting_key}': {new_value}}}")
         # Отримуємо свіжі налаштування для оновлення клавіатури
         updated_settings = await get_user_settings(user_id)
         keyboard = create_mute_settings_keyboard(updated_settings)
@@ -66,10 +66,12 @@ async def toggle_setting(callback: types.CallbackQuery):
             await callback.message.edit_reply_markup(reply_markup=keyboard)
             await callback.answer(f"Налаштування '{setting_to_toggle}' оновлено!")
         except TelegramAPIError as e:
-            # Помилка може виникнути, якщо повідомлення не змінилося, ігноруємо
             if "message is not modified" not in str(e).lower():
                 logger.error(f"Error updating settings keyboard for {user_id}: {e}")
                 await callback.answer("Помилка оновлення меню.")
+            else:
+                # Якщо повідомлення не змінилося, все одно відповідаємо на колбек
+                await callback.answer()
     else:
         logger.error(f"Failed to update settings for user {user_id} in DB.")
         await callback.answer("Не вдалося зберегти налаштування. Спробуйте пізніше.", show_alert=True)
