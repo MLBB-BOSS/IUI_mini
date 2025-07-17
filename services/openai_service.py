@@ -533,27 +533,25 @@ class MLBBChatGPT:
         # 3. Готуємо повідомлення для API
         messages = [{"role": "system", "content": system_prompt}] + chat_history
         
-        # Визначаємо ім'я користувача для повідомлень про помилки
         user_name_for_error_msg = "друже"
         if context_vector.user_profile and context_vector.user_profile.get("nickname"):
             user_name_for_error_msg = html.escape(context_vector.user_profile["nickname"])
 
-        # Динамічні параметри для кращої адаптації
+        # 💎 НОВЕ: Динамічні параметри для кращої адаптації
         intent = context_vector.last_message_intent
         temperature = {"technical_help": 0.3, "emotional_support": 0.6, "casual_chat": 0.9, "neutral": 0.7}.get(intent, 0.7)
-        frequency_penalty = {"technical_help": 0.2, "casual_chat": 0.7}.get(intent, 0.5)
-        presence_penalty = {"technical_help": 0.1, "casual_chat": 0.6}.get(intent, 0.4)
-
+        max_tokens = 80 if intent == "casual_chat" else 250  # Обмежуємо токени для чату
+        
         payload = {
             "model": self.TEXT_MODEL, 
             "messages": messages, 
-            "max_tokens": 150, 
+            "max_tokens": max_tokens, 
             "temperature": temperature,
             "top_p": 1.0, 
-            "presence_penalty": presence_penalty, 
-            "frequency_penalty": frequency_penalty
+            "presence_penalty": 0.4, 
+            "frequency_penalty": 0.5
         }
-        self.class_logger.debug(f"Параметри для розмовної відповіді (intent: {intent}): {temperature=}, {frequency_penalty=}, {presence_penalty=}")
+        self.class_logger.debug(f"Параметри для розмовної відповіді (intent: {intent}): {temperature=}, {max_tokens=}")
         
         current_session = self.session
         temp_session_created = False
@@ -562,7 +560,6 @@ class MLBBChatGPT:
             current_session = ClientSession(timeout=ClientTimeout(total=60), headers={"Authorization": f"Bearer {self.api_key}"})
             temp_session_created = True
         try:
-            # Використовуємо _execute_description_request, оскільки він має схожу логіку обробки
             return await self._execute_description_request(current_session, payload, user_name_for_error_msg)
         finally:
             if temp_session_created and current_session and not current_session.closed:
