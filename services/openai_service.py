@@ -539,15 +539,15 @@ class MLBBChatGPT:
 
         # 💎 ОНОВЛЕНА ЛОГІКА: Динамічні параметри для кращої адаптації
         intent = context_vector.last_message_intent
-        temperature = {"technical_help": 0.3, "emotional_support": 0.8, "celebration": 0.8, "casual_chat": 0.9, "neutral": 0.7}.get(intent, 0.7)
+        temperature = {"technical_help": 0.4, "emotional_support": 0.75, "celebration": 0.8, "casual_chat": 0.9, "neutral": 0.7}.get(intent, 0.7)
         
-        # Встановлюємо жорсткіший ліміт для коротких відповідей, і більший для емоційних
-        if intent == "casual_chat":
-            max_tokens = 80
-        elif intent in ["emotional_support", "celebration"]:
-            max_tokens = 120 # Трохи більше для емоцій, але не забагато
+        # ❗️ Радикально зменшуємо max_tokens для коротких відповідей
+        if intent in ["emotional_support", "celebration", "casual_chat"]:
+            max_tokens = 60  # Жорсткий ліміт для 1-3 речень
+        elif intent == "technical_help":
+            max_tokens = 400 # Дозволяємо більше для технічних пояснень
         else:
-            max_tokens = 200 # Для нейтральних/інших запитів
+            max_tokens = 150 # Для нейтральних/інших запитів
 
         payload = {
             "model": self.TEXT_MODEL, 
