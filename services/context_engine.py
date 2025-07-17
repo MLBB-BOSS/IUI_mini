@@ -9,8 +9,11 @@ from typing import Any, Dict, List, Literal
 from config import logger
 from utils.cache_manager import load_user_cache
 
-# Типи для чіткої типізації
-Intent = Literal["technical_help", "emotional_support", "casual_chat", "neutral"]
+# 💎 ОНОВЛЕНО: Додаємо нові стани до типу Intent
+Intent = Literal[
+    "technical_help", "emotional_support", "celebration", 
+    "casual_chat", "neutral"
+]
 TimeOfDay = Literal["morning", "afternoon", "evening", "night"]
 
 @dataclass
@@ -27,29 +30,46 @@ class ContextVector:
 def _analyze_user_intent(message_text: str) -> Intent:
     """
     Визначає намір користувача для адаптації стилю відповіді.
+    💎 ОНОВЛЕНО: Додано патерни для розпізнавання емоцій.
     """
     text_lower = message_text.lower()
 
+    # Патерни впорядковані за пріоритетом: від специфічних до загальних
+    
+    # 1. Емоційні (негативні)
+    EMOTIONAL_PATTERNS = [
+        r'\b(злив|програв|тілт|бісить|дратує|набридло|складно|задовбало)\b',
+        r'\b(не можу|не виходить|важко|проблема|дно|раки)\b',
+        r'(!{2,}|\.{3,})', # Вигуки або багато крапок
+        r'\b(😭|😡|🤬|😤|😩)\b'
+    ]
+    if any(re.search(p, text_lower) for p in EMOTIONAL_PATTERNS):
+        return "emotional_support"
+
+    # 2. Емоційні (позитивні)
+    CELEBRATION_PATTERNS = [
+        r'\b(gg|ez|ізі|виграв|переміг|апнув|тащу|красава|топ)\b',
+        r'\b(mvp|мвп|savage|саваж|маньяк)\b',
+        r'\b(🤣|😂|😎|🏆|🔥|💪)\b'
+    ]
+    if any(re.search(p, text_lower) for p in CELEBRATION_PATTERNS):
+        return "celebration"
+    
+    # 3. Технічні запити
     HELP_PATTERNS = [
         r'\b(допоможи|як|що робити|порадь|підкажи|навчи|поясни)\b',
         r'\b(який|яка|яке|які)\s+(герой|білд|предмет|емблема|збірку)',
         r'\?$',
     ]
-    EMOTIONAL_PATTERNS = [
-        r'\b(злив|програв|тілт|бісить|дратує|набридло|складно)\b',
-        r'\b(не можу|не виходить|важко|проблема)\b',
-        r'(!{2,}|\.{3,})',
-    ]
-    CASUAL_PATTERNS = [
-        r'\b(привіт|йоу|хай|gg|ізі|рофл|лол|кек)\b',
-        r'^(ага|ок|норм|да|ні|неа)',
-        r'\b(🤣|😂|😅|💀|🤡)',
-    ]
-
     if any(re.search(p, text_lower) for p in HELP_PATTERNS):
         return "technical_help"
-    if any(re.search(p, text_lower) for p in EMOTIONAL_PATTERNS):
-        return "emotional_support"
+
+    # 4. Невимушена розмова
+    CASUAL_PATTERNS = [
+        r'\b(привіт|йоу|хай|рофл|лол|кек|чіл|брате)\b',
+        r'^(ага|ок|норм|да|ні|неа|зрозумів)',
+        r'\b(😅|💀|🤡|👍|✊)\b'
+    ]
     if any(re.search(p, text_lower) for p in CASUAL_PATTERNS):
         return "casual_chat"
 
