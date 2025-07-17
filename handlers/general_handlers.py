@@ -1045,7 +1045,10 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                 )
             
             if reply_text and "<i>" not in reply_text:
-                chat_history.append({"role": "assistant", "content": reply_text})
+                # ❗️ FIX: Замінюємо <br> на \n перед відправкою
+                cleaned_reply_text = re.sub(r'<br\s*/?>', '\n', reply_text, flags=re.IGNORECASE)
+                
+                chat_history.append({"role": "assistant", "content": cleaned_reply_text})
                 
                 # Зберігаємо оновлену історію
                 if is_registered:
@@ -1055,7 +1058,7 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                     session.chat_history = chat_history
                     await save_session(user_id, session)
 
-                await message.reply(reply_text)
+                await message.reply(cleaned_reply_text)
         except Exception as e:
             logger.exception(f"Помилка генерації адаптивної відповіді: {e}")
 
