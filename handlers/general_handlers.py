@@ -81,6 +81,12 @@ PERSONALIZATION_TRIGGERS = [
     "мій ранг", "мої герої", "моїх героїв", "мої улюблені",
     "мій вінрейт", "моя стата", "мій профіль", "про мене"
 ]
+# 💎 НОВЕ: Тригери для детальних запитів, які краще обробити через /go
+DETAILED_REQUEST_TRIGGERS = [
+    "порадь", "поясни", "розкажи", "гайд", "кого краще", "що краще",
+    "як грати", "що збирати", "контрпік"
+]
+
 
 # === ІНІЦІАЛІЗАЦІЯ РОУТЕРІВ ТА КЛІЄНТІВ ===
 party_router = Router()
@@ -999,6 +1005,20 @@ async def handle_trigger_messages(message: Message, bot: Bot):
 
     # Перевірка наявності будь-якого тригера для активації
     is_trigger_present = next((True for trigger in CONVERSATIONAL_TRIGGERS if re.search(r'\b' + re.escape(trigger) + r'\b', text_lower)), False)
+    
+    # 💎 НОВЕ: Перевірка на детальний запит
+    is_detailed_request = any(trigger in text_lower for trigger in DETAILED_REQUEST_TRIGGERS)
+    
+    if is_detailed_request:
+        logger.info(f"Виявлено детальний запит від {current_user_name}. Пропоную використати /go.")
+        original_query = message.text.replace(f"@{bot_info.username}", "").strip()
+        await message.reply(
+            f"🤔 {current_user_name}, це схоже на складне питання.\n"
+            f"Для найкращої відповіді, будь ласка, використай команду /go:\n"
+            f"<code>/go {html.escape(original_query)}</code>"
+        )
+        return
+
     if not (is_reply_to_bot or is_trigger_present):
         return
 
@@ -1038,19 +1058,15 @@ async def handle_trigger_messages(message: Message, bot: Bot):
 
         try:
             async with gpt_client as gpt:
-                # 💎 НОВИЙ ВИКЛИК, ЩО ВІДПОВІДАЄ НОВІЙ СИГНАТУРІ
                 reply_text = await gpt.generate_conversational_reply(
                     user_id=user_id,
                     chat_history=chat_history
                 )
             
             if reply_text and "<i>" not in reply_text:
-                # ❗️ FIX: Замінюємо <br> на \n перед відправкою
                 cleaned_reply_text = re.sub(r'<br\s*/?>', '\n', reply_text, flags=re.IGNORECASE)
-                
                 chat_history.append({"role": "assistant", "content": cleaned_reply_text})
                 
-                # Зберігаємо оновлену історію
                 if is_registered:
                     user_cache['chat_history'] = chat_history
                     await save_user_cache(user_id, user_cache)
