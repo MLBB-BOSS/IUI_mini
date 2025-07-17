@@ -537,12 +537,18 @@ class MLBBChatGPT:
         if context_vector.user_profile and context_vector.user_profile.get("nickname"):
             user_name_for_error_msg = html.escape(context_vector.user_profile["nickname"])
 
-        # 💎 НОВЕ: Динамічні параметри для кращої адаптації
+        # 💎 ОНОВЛЕНА ЛОГІКА: Динамічні параметри для кращої адаптації
         intent = context_vector.last_message_intent
         temperature = {"technical_help": 0.3, "emotional_support": 0.8, "celebration": 0.8, "casual_chat": 0.9, "neutral": 0.7}.get(intent, 0.7)
-        # ❗️ FIX: Збільшуємо ліміт для емоційних відповідей, залишаючи його низьким для чату
-        max_tokens = 80 if intent == "casual_chat" else 150
         
+        # Встановлюємо жорсткіший ліміт для коротких відповідей, і більший для емоційних
+        if intent == "casual_chat":
+            max_tokens = 80
+        elif intent in ["emotional_support", "celebration"]:
+            max_tokens = 120 # Трохи більше для емоцій, але не забагато
+        else:
+            max_tokens = 200 # Для нейтральних/інших запитів
+
         payload = {
             "model": self.TEXT_MODEL, 
             "messages": messages, 
