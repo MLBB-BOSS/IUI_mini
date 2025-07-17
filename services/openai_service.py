@@ -175,81 +175,6 @@ class MLBBChatGPT:
         if exc_type:
             self.class_logger.error(f"Помилка в GGenius Service (MLBBChatGPT) під час виходу з контексту: {exc_type} {exc_val}", exc_info=True)
 
-    def _beautify_response(self, text: str) -> str:
-        self.class_logger.debug(f"Beautify: Початковий текст (перші 100 символів): '{text[:100]}'")
-        
-        # --- Markdown to HTML Conversion ---
-        text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-        text = re.sub(r'_(.+?)_', r'<i>\1</i>', text)
-        text = re.sub(r'(?<!\*)\*(?!\s|\*)(.+?)(?<!\s|\*)\*(?!\*)', r'<i>\1</i>', text)
-        text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
-        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
-        
-        # --- ❗️ NEW: HTML Sanitization ---
-        # Спочатку замінюємо теги, що мають означати розрив рядка, на \n
-        sanitized_text = re.sub(r'</(li|p|div|ul|ol)>', '\n', text, flags=re.IGNORECASE)
-        # Потім видаляємо всі інші непідтримувані теги
-        sanitized_text = re.sub(r'<(/?)(ul|ol|li|p|div|span)\b[^>]*>', '', sanitized_text, flags=re.IGNORECASE)
-
-        if text != sanitized_text:
-            self.class_logger.warning(f"Beautify: Очищено непідтримувані HTML теги. Оригінал: '{text[:100]}...', Результат: '{sanitized_text[:100]}...'")
-            text = sanitized_text
-
-        # --- Formatting and Structuring ---
-        text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
-        header_emojis = {
-            "карти": "🗺️", "об'єктів": "🛡️", "тактика": "⚔️", "позиція": "📍", "комунікація": "💬",
-            "героя": "🦸", "героїв": "🦸‍♂️🦸‍♀️", "фарм": "💰", "ротація": "🔄", "командна гра": "🤝",
-            "комбінації": "🤝", "синергія": "✨", "ранк": "🏆", "стратегі": "🎯", "мета": "🔥",
-            "поточна мета": "📊", "навички": "📈", "тайминг": "⏰", "контроль": "🎮", "пуш": "⬆️",
-            "поради": "💡", "ключові поради": "🔑", "предмет": "💎", "збірка": "🛠️",
-            "аналіз": "📊", "статистика": "📈", "оновлення": "⚙️", "баланс": "⚖️", "скріншот": "📸",
-            "унікальність": "🌟", "можливості": "🚀", "фішка": "🎯", "прикол": "😂", "інсайт": "💡",
-            "висновок": "🏁", "запитання": "❓", "відповідь": "💬", "порада": "💡"
-        }
-
-        def replace_header(match: re.Match) -> str:
-            header_text_raw = match.group(1).strip(": ")
-            header_text = header_text_raw.capitalize() 
-            best_emoji = "💡" 
-            priority_keys = ["скріншот", "унікальність", "можливості", "фішка", "прикол", "інсайт", "висновок", "запитання", "відповідь", "порада"]
-            
-            found_specific = False
-            for key in priority_keys:
-                if key in header_text_raw.lower(): 
-                    best_emoji = header_emojis.get(key, best_emoji)
-                    found_specific = True
-                    break
-            if not found_specific:
-                for key_general, emj in header_emojis.items():
-                    if key_general in header_text_raw.lower():
-                        best_emoji = emj
-                        break
-            return f"\n\n{best_emoji} <b>{header_text}</b>" 
-
-        text = re.sub(r"^(?:#|\#{2}|\#{3})\s*(.+)", replace_header, text, flags=re.MULTILINE)
-        text = re.sub(r"^\s*[\-\*]\s+", "• ", text, flags=re.MULTILINE) 
-        text = re.sub(r"^\s*•\s+[\-\*]\s+", "  ◦ ", text, flags=re.MULTILINE) 
-        text = re.sub(r"\n{3,}", "\n\n", text) 
-        
-        tags_to_balance = ["b", "i", "code"]
-        for tag in tags_to_balance:
-            open_tag_pattern = re.compile(re.escape(f"<{tag}>"))
-            close_tag_pattern = re.compile(re.escape(f"</{tag}>"))
-            open_tags = [m.start() for m in open_tag_pattern.finditer(text)]
-            close_tags = [m.start() for m in close_tag_pattern.finditer(text)]
-            open_count = len(open_tags)
-            close_count = len(close_tags)
-
-            if open_count > close_count:
-                missing_tags_count = open_count - close_count
-                text += f"</{tag}>" * missing_tags_count
-                self.class_logger.warning(f"Beautify: Додано {missing_tags_count} незакритих тегів '</{tag}>' в кінці тексту.")
-            elif close_count > open_count:
-                 self.class_logger.warning(f"Beautify: Виявлено {close_count - open_count} зайвих закриваючих тегів '</{tag}>'. Залишено без змін.")
-        self.class_logger.debug(f"Beautify: Текст після обробки (перші 100 символів): '{text[:100]}'")
-        return text.strip()
-
     async def _execute_openai_request(self, session: ClientSession, payload: dict[str, Any], user_name_for_error_msg: str) -> str:
         try:
             async with session.post(
@@ -271,7 +196,8 @@ class MLBBChatGPT:
                 if payload.get("model") == self.TEXT_MODEL and "Контекст:" in payload["messages"][0].get("content", ""):
                     content = _filter_cringy_phrases(content)
                 
-                return self._beautify_response(content)
+                # ❗️ ВІДПОВІДЬ ПОВЕРТАЄТЬСЯ "СИРОЮ" - БЕЗ ФОРМАТУВАННЯ
+                return content.strip()
 
         except aiohttp.ClientConnectionError as e:
             self.class_logger.error(f"OpenAI API помилка з'єднання: {e}", exc_info=True)
@@ -527,6 +453,7 @@ class MLBBChatGPT:
                 self.class_logger.debug("Тимчасову сесію для опису статистики закрито.")
     
     # 💎 ОНОВЛЕНИЙ МЕТОД ГЕНЕРАЦІЇ РОЗМОВНОЇ ВІДПОВІДІ
+    # Метод є точкою входу до "Адаптивної Діалогової Системи" (ADS)
     async def generate_conversational_reply(
         self,
         user_id: int,
@@ -777,7 +704,8 @@ class MLBBChatGPT:
                         sources_list_str = "\n\n<b>Джерела:</b>\n" + "\n".join(sources_list)
 
                 final_response = clean_text + sources_list_str
-                return self._beautify_response(final_response)
+                # ❗️ ВИКЛИК ЗАСТАРІЛОЇ ФУНКЦІЇ ВИДАЛЕНО, ПОВЕРТАЄМО "СИРИЙ" ТЕКСТ
+                return final_response
 
         except Exception as e:
             self.class_logger.exception(f"Критична помилка в get_web_search_response для {user_name_escaped}: {e}")
