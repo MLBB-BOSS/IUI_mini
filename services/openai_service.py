@@ -177,13 +177,26 @@ class MLBBChatGPT:
 
     def _beautify_response(self, text: str) -> str:
         self.class_logger.debug(f"Beautify: Початковий текст (перші 100 символів): '{text[:100]}'")
+        
+        # --- Markdown to HTML Conversion ---
         text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
         text = re.sub(r'_(.+?)_', r'<i>\1</i>', text)
         text = re.sub(r'(?<!\*)\*(?!\s|\*)(.+?)(?<!\s|\*)\*(?!\*)', r'<i>\1</i>', text)
         text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
         text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
-        text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+        
+        # --- ❗️ NEW: HTML Sanitization ---
+        # Спочатку замінюємо теги, що мають означати розрив рядка, на \n
+        sanitized_text = re.sub(r'</(li|p|div|ul|ol)>', '\n', text, flags=re.IGNORECASE)
+        # Потім видаляємо всі інші непідтримувані теги
+        sanitized_text = re.sub(r'<(/?)(ul|ol|li|p|div|span)\b[^>]*>', '', sanitized_text, flags=re.IGNORECASE)
 
+        if text != sanitized_text:
+            self.class_logger.warning(f"Beautify: Очищено непідтримувані HTML теги. Оригінал: '{text[:100]}...', Результат: '{sanitized_text[:100]}...'")
+            text = sanitized_text
+
+        # --- Formatting and Structuring ---
+        text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
         header_emojis = {
             "карти": "🗺️", "об'єктів": "🛡️", "тактика": "⚔️", "позиція": "📍", "комунікація": "💬",
             "героя": "🦸", "героїв": "🦸‍♂️🦸‍♀️", "фарм": "💰", "ротація": "🔄", "командна гра": "🤝",
