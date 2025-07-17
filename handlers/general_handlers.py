@@ -997,10 +997,10 @@ async def handle_trigger_messages(message: Message, bot: Bot):
     is_explicit_mention = f"@{bot_info.username.lower()}" in text_lower
     is_name_mention = any(re.search(r'\b' + name + r'\b', text_lower) for name in BOT_NAMES)
 
-    matched_trigger_mood = next((mood for trigger, mood in CONVERSATIONAL_TRIGGERS.items() if re.search(r'\b' + re.escape(trigger) + r'\b', text_lower)), None)
-    if is_reply_to_bot and not matched_trigger_mood:
-        matched_trigger_mood = "Користувач відповів на твоє повідомлення. Підтримай розмову."
-    if not matched_trigger_mood: return
+    # Перевірка наявності будь-якого тригера для активації
+    is_trigger_present = next((True for trigger in CONVERSATIONAL_TRIGGERS if re.search(r'\b' + re.escape(trigger) + r'\b', text_lower)), False)
+    if not (is_reply_to_bot or is_trigger_present):
+        return
 
     should_respond = False
     if is_explicit_mention or is_reply_to_bot or is_name_mention:
@@ -1024,51 +1024,31 @@ async def handle_trigger_messages(message: Message, bot: Bot):
             )
             return
 
-        full_profile_for_prompt = None
+        # Визначаємо, яку історію використовувати
         if is_registered:
             chat_history = user_cache.get('chat_history') if user_cache.get('chat_history') is not None else []
-            
-            full_profile_for_prompt = user_cache.copy()
-            
-            favorite_heroes = []
-            for i in range(1, 4):
-                hero_name = user_cache.get(f'hero{i}_name')
-                if hero_name:
-                    favorite_heroes.append(hero_name)
-            if favorite_heroes:
-                full_profile_for_prompt['favorite_heroes_list'] = favorite_heroes
-            
-            current_rank = user_cache.get('current_rank', '').lower()
-            if 'міфіч' in current_rank:
-                full_profile_for_prompt['skill_level'] = 'high'
-            elif 'легенд' in current_rank or 'епік' in current_rank:
-                full_profile_for_prompt['skill_level'] = 'medium'
-            else:
-                full_profile_for_prompt['skill_level'] = 'developing'
-            logger.info(f"Збагачено контекст для {current_user_name}: рівень '{full_profile_for_prompt.get('skill_level', 'N/A')}', герої: {full_profile_for_prompt.get('favorite_heroes_list', [])}")
-
         else: 
             session = await load_session(user_id)
             chat_history = session.chat_history
-            full_profile_for_prompt = None
 
+        # Оновлюємо історію
         chat_history.append({"role": "user", "content": message.text})
         if len(chat_history) > MAX_CHAT_HISTORY_LENGTH:
             chat_history = chat_history[-MAX_CHAT_HISTORY_LENGTH:]
 
         try:
             async with gpt_client as gpt:
+                # 💎 НОВИЙ ВИКЛИК, ЩО ВІДПОВІДАЄ НОВІЙ СИГНАТУРІ
                 reply_text = await gpt.generate_conversational_reply(
-                    user_name=current_user_name,
-                    chat_history=chat_history,
-                    trigger_mood=matched_trigger_mood,
-                    user_profile_data=full_profile_for_prompt
+                    user_id=user_id,
+                    chat_history=chat_history
                 )
             
             if reply_text and "<i>" not in reply_text:
                 chat_history.append({"role": "assistant", "content": reply_text})
                 
-                if is_registered and 'user_cache' in locals():
+                # Зберігаємо оновлену історію
+                if is_registered:
                     user_cache['chat_history'] = chat_history
                     await save_user_cache(user_id, user_cache)
                 else:
