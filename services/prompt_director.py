@@ -25,7 +25,6 @@ class PromptDirector:
     def _select_format_instruction(self, intent: Intent) -> str | None:
         """Обирає інструкцію форматування на основі наміру."""
         formats = self.library.get("formats", {})
-        # ❗️ НОВА ЛОГІКА: Використовуємо ultra_brief для максимальної стислості
         if intent in ["emotional_support", "celebration", "casual_chat", "ambiguous_request"]:
             return formats.get("ultra_brief")
         if intent == "technical_help":
@@ -45,13 +44,14 @@ class PromptDirector:
         logger.info(f"PromptDirector: Початок збірки промпту для користувача {context.user_id}...")
         prompt_parts: List[str] = []
 
-        # 1. Вибір базової персони
-        # Для запиту завжди використовуємо 'buddy', щоб звучало природно
-        persona_key = "analyst" if context.last_message_intent == "technical_help" else "buddy"
-        persona_prompt = self.library.get("personas", {}).get(persona_key)
+        # 1. ❗️ ЗАВЖДИ ВИКОРИСТОВУЄМО ЄДИНУ ПЕРСОНУ
+        persona_prompt = self.library.get("personas", {}).get("main_persona")
         if persona_prompt:
             prompt_parts.append(persona_prompt)
-            logger.debug(f"  [1] Обрано персону: '{persona_key}'")
+            logger.debug("  [1] Обрано єдину персону: 'main_persona'")
+        else:
+            logger.warning("  [1] Увага: 'main_persona' не знайдено в бібліотеці промптів!")
+
 
         # 2. Додавання деталізації наміру
         intent_prompt = self.library.get("intents", {}).get(context.last_message_intent)
@@ -59,7 +59,7 @@ class PromptDirector:
             prompt_parts.append(intent_prompt)
             logger.debug(f"  [2] Додано намір: '{context.last_message_intent}'")
 
-        # 3. Додавання даних профілю та статусу користувача (ПЕРЕД інструкцією формату)
+        # 3. Додавання даних профілю та статусу користувача
         if context.user_profile and context.last_message_intent != 'ambiguous_request':
             profile_parts = []
             nickname = context.user_profile.get('nickname')
@@ -69,7 +69,7 @@ class PromptDirector:
             
             if profile_parts:
                 prompt_parts.append("Це контекст про користувача: " + " ".join(profile_parts))
-                logger.debug(f"  [3] Додано контекст профілю.")
+                logger.debug("  [3] Додано контекст профілю.")
             
             status_modifier = self.library.get("modifiers", {}).get("user_status", {}).get("is_registered")
             if status_modifier: prompt_parts.append(status_modifier)
@@ -77,14 +77,14 @@ class PromptDirector:
             status_modifier = self.library.get("modifiers", {}).get("user_status", {}).get("is_new")
             if status_modifier: prompt_parts.append(status_modifier)
 
-        # 4. Додавання модифікатора часу доби (ПЕРЕД інструкцією формату)
+        # 4. Додавання модифікатора часу доби
         if context.last_message_intent != 'ambiguous_request':
             time_modifier = self.library.get("modifiers", {}).get("time_of_day", {}).get(context.time_of_day)
             if time_modifier:
                 prompt_parts.append(time_modifier)
                 logger.debug(f"  [4] Додано модифікатор часу доби: '{context.time_of_day}'")
         
-        # 5. 💎 ОНОВЛЕНО: Додавання інструкції по формату В КІНЦІ, для найвищого пріоритету
+        # 5. Додавання інструкції по формату
         format_instruction = self._select_format_instruction(context.last_message_intent)
         if format_instruction:
             prompt_parts.append(format_instruction)
