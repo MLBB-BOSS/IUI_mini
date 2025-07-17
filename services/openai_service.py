@@ -539,8 +539,9 @@ class MLBBChatGPT:
 
         # 💎 НОВЕ: Динамічні параметри для кращої адаптації
         intent = context_vector.last_message_intent
-        temperature = {"technical_help": 0.3, "emotional_support": 0.6, "casual_chat": 0.9, "neutral": 0.7}.get(intent, 0.7)
-        max_tokens = 80 if intent == "casual_chat" else 250  # Обмежуємо токени для чату
+        temperature = {"technical_help": 0.3, "emotional_support": 0.8, "celebration": 0.8, "casual_chat": 0.9, "neutral": 0.7}.get(intent, 0.7)
+        # ❗️ FIX: Збільшуємо ліміт для емоційних відповідей, залишаючи його низьким для чату
+        max_tokens = 80 if intent == "casual_chat" else 150
         
         payload = {
             "model": self.TEXT_MODEL, 
