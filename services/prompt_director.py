@@ -24,14 +24,15 @@ class PromptDirector:
 
     def _select_persona(self, intent: Intent) -> str:
         """Обирає спеціалізовану персону на основі наміру."""
-        if intent in ["technical_help", "ambiguous_request"]:
+        if intent in ["technical_help"]: # Видаляємо ambiguous_request звідси
             return "analyst"
         return "buddy"
 
     def _select_format_instruction(self, intent: Intent) -> str | None:
         """Обирає інструкцію форматування на основі наміру."""
         formats = self.library.get("formats", {})
-        if intent in ["emotional_support", "celebration", "casual_chat", "ambiguous_request"]:
+        # Для ambiguous_request формат вже вбудований у сам промпт
+        if intent in ["emotional_support", "celebration", "casual_chat"]:
             return formats.get("ultra_brief")
         if intent == "technical_help":
             return formats.get("detailed")
@@ -51,6 +52,21 @@ class PromptDirector:
             logger.debug("  [1] Застосовано базовий шар: 'base_persona'")
         else:
             logger.warning("  [1] Увага: 'base_persona' не знайдено в бібліотеці!")
+
+        # ❗️ ПРІОРИТЕТНИЙ РЕЖИМ ДЛЯ НЕОДНОЗНАЧНИХ ЗАПИТІВ
+        if context.last_message_intent == "ambiguous_request":
+            logger.info("  [!] Активовано пріоритетний режим: 'ambiguous_request'")
+            ambiguous_prompt = self.library.get("intents", {}).get("ambiguous_request")
+            if ambiguous_prompt:
+                prompt_parts.append(ambiguous_prompt)
+            else:
+                logger.error("  [!] Не знайдено промпт для 'ambiguous_request'!")
+            
+            final_prompt = "\n\n".join(prompt_parts)
+            logger.info(f"PromptDirector: Промпт для {context.user_id} зібрано в пріоритетному режимі.")
+            return final_prompt
+
+        # --- Стандартний потік для всіх інших намірів ---
 
         # 2. СПЕЦІАЛІЗОВАНИЙ ШАР: Обираємо функціональну роль
         persona_key = self._select_persona(context.last_message_intent)
