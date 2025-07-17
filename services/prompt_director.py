@@ -24,11 +24,14 @@ class PromptDirector:
 
     def _select_format_instruction(self, intent: Intent) -> str | None:
         """Обирає інструкцію форматування на основі наміру."""
+        formats = self.library.get("formats", {})
         if intent == "casual_chat":
-            return self.library.get("formats", {}).get("brief")
-        # Для технічної допомоги повертаємо інструкцію для детальної відповіді
+            return formats.get("brief")
+        # ❗️ НОВА ЛОГІКА: Використовуємо supportive_brief для емоційних намірів
+        if intent in ["emotional_support", "celebration"]:
+            return formats.get("supportive_brief")
         if intent == "technical_help":
-            return self.library.get("formats", {}).get("detailed")
+            return formats.get("detailed")
         return None
 
     def build_prompt(self, context: ContextVector) -> str:
@@ -57,11 +60,11 @@ class PromptDirector:
             prompt_parts.append(intent_prompt)
             logger.debug(f"  [2] Додано намір: '{context.last_message_intent}'")
 
-        # 3. 💎 НОВЕ: Додавання інструкції по формату/довжині
+        # 3. 💎 ОНОВЛЕНО: Додавання інструкції по формату/довжині
         format_instruction = self._select_format_instruction(context.last_message_intent)
         if format_instruction:
             prompt_parts.append(format_instruction)
-            logger.debug(f"  [3] Додано інструкцію по формату.")
+            logger.debug(f"  [3] Додано інструкцію по формату для наміру '{context.last_message_intent}'.")
 
         # 4. Додавання даних профілю та статусу користувача
         if context.user_profile:
