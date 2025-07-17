@@ -1058,14 +1058,15 @@ async def handle_trigger_messages(message: Message, bot: Bot):
 
         try:
             async with gpt_client as gpt:
+                # ❗️ FIX: Зберігаємо результат роботи санітайзера
                 reply_text = await gpt.generate_conversational_reply(
                     user_id=user_id,
                     chat_history=chat_history
                 )
             
-            if reply_text and "<i>" not in reply_text:
-                cleaned_reply_text = re.sub(r'<br\s*/?>', '\n', reply_text, flags=re.IGNORECASE)
-                chat_history.append({"role": "assistant", "content": cleaned_reply_text})
+            if reply_text:
+                # ❗️ FIX: Додаємо в історію та зберігаємо в кеш саме очищену відповідь
+                chat_history.append({"role": "assistant", "content": reply_text})
                 
                 if is_registered:
                     user_cache['chat_history'] = chat_history
@@ -1074,7 +1075,7 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                     session.chat_history = chat_history
                     await save_session(user_id, session)
 
-                await message.reply(cleaned_reply_text)
+                await message.reply(reply_text)
         except Exception as e:
             logger.exception(f"Помилка генерації адаптивної відповіді: {e}")
 
