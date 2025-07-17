@@ -44,6 +44,8 @@ from config import (
 # Імпортуємо сервіси та утиліти
 from services.openai_service import MLBBChatGPT
 from utils.message_utils import send_message_in_chunks
+# ❗️ НОВИЙ ІМПОРТ НАШОГО ФОРМАТЕРА
+from utils.formatter import format_bot_response
 from keyboards.inline_keyboards import (
     create_party_confirmation_keyboard,
     create_role_selection_keyboard,
@@ -1068,6 +1070,9 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                 # ❗️ FIX: Додаємо в історію та зберігаємо в кеш саме очищену відповідь
                 chat_history.append({"role": "assistant", "content": reply_text})
                 
+                # ❗️ ОНОВЛЕНА ЛОГІКА: Використання нового форматера
+                formatted_message = format_bot_response(reply_text, content_type="default")
+                
                 if is_registered:
                     user_cache['chat_history'] = chat_history
                     await save_user_cache(user_id, user_cache)
@@ -1075,7 +1080,7 @@ async def handle_trigger_messages(message: Message, bot: Bot):
                     session.chat_history = chat_history
                     await save_session(user_id, session)
 
-                await message.reply(reply_text)
+                await message.reply(formatted_message)
         except Exception as e:
             logger.exception(f"Помилка генерації адаптивної відповіді: {e}")
 
@@ -1099,8 +1104,12 @@ async def error_handler(event: types.ErrorEvent, bot: Bot):
         error_message_text = f"Упс, {user_name}, проблема з Telegram API 📡 Спробуй ще раз."
     
     if chat_id:
-        try: await bot.send_message(chat_id, error_message_text, parse_mode=None)
-        except TelegramAPIError as e: logger.error(f"Не вдалося надіслати повідомлення про помилку в чат {chat_id}: {e}")
+        try:
+            # ❗️ ОНОВЛЕНА ЛОГІКА: Повідомлення про помилки також проходять через форматер
+            formatted_error = format_bot_response(error_message_text, content_type="error")
+            await bot.send_message(chat_id, formatted_error, parse_mode=ParseMode.HTML)
+        except TelegramAPIError as e:
+            logger.error(f"Не вдалося надіслати повідомлення про помилку в чат {chat_id}: {e}")
 
 # === РЕЄСТРАЦІЯ ОБРОБНИКІВ ===
 def register_general_handlers(dp: Dispatcher):
