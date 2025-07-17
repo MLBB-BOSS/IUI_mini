@@ -539,11 +539,11 @@ class MLBBChatGPT:
 
         # 💎 ОНОВЛЕНА ЛОГІКА: Динамічні параметри для кращої адаптації
         intent = context_vector.last_message_intent
-        temperature = {"technical_help": 0.4, "emotional_support": 0.75, "celebration": 0.8, "casual_chat": 0.9, "neutral": 0.7}.get(intent, 0.7)
+        temperature = {"technical_help": 0.4, "emotional_support": 0.75, "celebration": 0.8, "casual_chat": 0.9, "neutral": 0.7, "ambiguous_request": 0.6}.get(intent, 0.7)
         
         # ❗️ Радикально зменшуємо max_tokens для коротких відповідей
-        if intent in ["emotional_support", "celebration", "casual_chat"]:
-            max_tokens = 60  # Жорсткий ліміт для 1-3 речень
+        if intent in ["emotional_support", "celebration", "casual_chat", "ambiguous_request"]:
+            max_tokens = 60  # Жорсткий ліміт для 1-2 речень
         elif intent == "technical_help":
             max_tokens = 400 # Дозволяємо більше для технічних пояснень
         else:
