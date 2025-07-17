@@ -9,8 +9,8 @@ import html
 import re
 from typing import Literal
 
-# Перейменовано для кращої семантики
-ResponseType = Literal["default", "success", "error", "joke", "technical", "tip"]
+# Повертаємо початкову назву типу
+ContentType = Literal["default", "success", "error", "joke", "technical", "tip"]
 
 # Словник для заголовків та емодзі за типами контенту
 RESPONSE_TEMPLATES = {
@@ -27,13 +27,11 @@ def _sanitize_html(text: str) -> str:
     Очищає текст від непідтримуваних Telegram HTML-тегів.
     Замінює <br> на новий рядок.
     """
-    # Заміна <br> та <br/> на символ нового рядка
-    sanitized_text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
-    return sanitized_text.strip()
+    return re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE).strip()
 
 def format_bot_response(
     text: str,
-    response_type: ResponseType = "default",
+    content_type: ContentType = "default", # ❗️ Повернули назву 'content_type'
     tip: str | None = None
 ) -> str:
     """
@@ -42,18 +40,18 @@ def format_bot_response(
 
     Args:
         text: Основний текст повідомлення.
-        response_type: Тип контенту для вибору стилю відповіді.
+        content_type: Тип контенту для вибору стилю відповіді.
         tip: Необов'язкова порада, що буде додана в кінці.
 
     Returns:
         Повністю відформатоване повідомлення у HTML або простому тексті.
     """
-    # ШВИДКЕ РІШЕННЯ: Для звичайних розмовних відповідей повертаємо текст без обгортки
-    if response_type in ["default", "joke", "success"]:
+    # Для звичайних розмовних відповідей повертаємо текст без обгортки
+    if content_type in ["default", "joke", "success"]:
         return _sanitize_html(text)
 
     # Для інших типів (error, technical, tip) залишаємо структурований вигляд
-    template = RESPONSE_TEMPLATES.get(response_type, RESPONSE_TEMPLATES["default"])
+    template = RESPONSE_TEMPLATES.get(content_type, RESPONSE_TEMPLATES["default"])
     
     header = f"{template['emoji']} <b>{template['title']}</b>"
     safe_text = _sanitize_html(text)
