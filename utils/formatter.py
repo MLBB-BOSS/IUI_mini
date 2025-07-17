@@ -6,6 +6,7 @@ utils/formatter.py
 Компонент "Адаптивної Діалогової Системи" (ADS).
 """
 import html
+import re
 from typing import Literal
 
 ContentType = Literal["default", "success", "error", "joke", "technical", "tip"]
@@ -38,6 +39,30 @@ RESPONSE_TEMPLATES = {
     }
 }
 
+def _sanitize_html(text: str) -> str:
+    """
+    Очищає текст від непідтримуваних Telegram HTML-тегів.
+    Замінює <br> на новий рядок та видаляє інші невалідні теги.
+    """
+    # Заміна тегів для перенесення рядка
+    sanitized_text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    
+    # Видалення непідтримуваних тегів, що можуть використовуватися для структурування (ul, li, p, div)
+    # Замінюємо закриваючі теги на новий рядок для кращої читабельності
+    sanitized_text = re.sub(r'</(li|p|div|ul|ol)>', '\n', sanitized_text, flags=re.IGNORECASE)
+    # Видаляємо всі інші форми цих тегів
+    sanitized_text = re.sub(r'<(/?)(ul|ol|li|p|div|span)\b[^>]*>', '', sanitized_text, flags=re.IGNORECASE)
+
+    # Балансування основних тегів (b, i, code), якщо вони не закриті
+    tags_to_balance = ["b", "i", "code"]
+    for tag in tags_to_balance:
+        open_tags = len(re.findall(f'<{tag}>', sanitized_text, re.IGNORECASE))
+        close_tags = len(re.findall(f'</{tag}>', sanitized_text, re.IGNORECASE))
+        if open_tags > close_tags:
+            sanitized_text += f'</{tag}>' * (open_tags - close_tags)
+            
+    return sanitized_text.strip()
+
 def format_bot_response(
     text: str,
     content_type: ContentType = "default",
@@ -57,16 +82,12 @@ def format_bot_response(
     template = RESPONSE_TEMPLATES.get(content_type, RESPONSE_TEMPLATES["default"])
     
     header = f"{template['emoji']} <b>{template['title']}</b>"
-    separator = "━━━━━━━━━━━━━━━━━━━━━"
     
-    # Екрануємо основний текст, щоб уникнути конфліктів тегів,
-    # але зберігаємо наші власні теги <b>, <i>, <code>
-    # Це спрощена версія, для складних випадків може знадобитися більш надійний парсер
-    safe_text = text.strip()
+    # Спочатку очищаємо HTML, потім форматуємо
+    safe_text = _sanitize_html(text)
 
     parts = [
-        f"<blockquote>{header}",
-        separator,
+        header,
         "",
         safe_text
     ]
@@ -76,7 +97,5 @@ def format_bot_response(
             "",
             f"💡 <i>Порада: {html.escape(tip)}</i>"
         ])
-
-    parts.append("</blockquote>")
     
     return "\n".join(parts)
