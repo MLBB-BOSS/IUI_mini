@@ -25,13 +25,13 @@ class PromptDirector:
     def _select_format_instruction(self, intent: Intent) -> str | None:
         """Обирає інструкцію форматування на основі наміру."""
         formats = self.library.get("formats", {})
-        if intent == "casual_chat":
-            return formats.get("brief")
-        # ❗️ НОВА ЛОГІКА: Використовуємо supportive_brief для емоційних намірів
-        if intent in ["emotional_support", "celebration"]:
-            return formats.get("supportive_brief")
+        # ❗️ НОВА ЛОГІКА: Використовуємо ultra_brief для максимальної стислості
+        if intent in ["emotional_support", "celebration", "casual_chat"]:
+            return formats.get("ultra_brief")
         if intent == "technical_help":
             return formats.get("detailed")
+        # Для neutral та інших випадків можна не додавати інструкцію,
+        # щоб модель сама вирішувала довжину.
         return None
 
     def build_prompt(self, context: ContextVector) -> str:
@@ -60,13 +60,7 @@ class PromptDirector:
             prompt_parts.append(intent_prompt)
             logger.debug(f"  [2] Додано намір: '{context.last_message_intent}'")
 
-        # 3. 💎 ОНОВЛЕНО: Додавання інструкції по формату/довжині
-        format_instruction = self._select_format_instruction(context.last_message_intent)
-        if format_instruction:
-            prompt_parts.append(format_instruction)
-            logger.debug(f"  [3] Додано інструкцію по формату для наміру '{context.last_message_intent}'.")
-
-        # 4. Додавання даних профілю та статусу користувача
+        # 3. Додавання даних профілю та статусу користувача (ПЕРЕД інструкцією формату)
         if context.user_profile:
             profile_parts = []
             nickname = context.user_profile.get('nickname')
@@ -76,7 +70,7 @@ class PromptDirector:
             
             if profile_parts:
                 prompt_parts.append("Це контекст про користувача: " + " ".join(profile_parts))
-                logger.debug(f"  [4] Додано контекст профілю.")
+                logger.debug(f"  [3] Додано контекст профілю.")
             
             status_modifier = self.library.get("modifiers", {}).get("user_status", {}).get("is_registered")
             if status_modifier: prompt_parts.append(status_modifier)
@@ -84,12 +78,18 @@ class PromptDirector:
             status_modifier = self.library.get("modifiers", {}).get("user_status", {}).get("is_new")
             if status_modifier: prompt_parts.append(status_modifier)
 
-        # 5. Додавання модифікатора часу доби
+        # 4. Додавання модифікатора часу доби (ПЕРЕД інструкцією формату)
         time_modifier = self.library.get("modifiers", {}).get("time_of_day", {}).get(context.time_of_day)
         if time_modifier:
             prompt_parts.append(time_modifier)
-            logger.debug(f"  [5] Додано модифікатор часу доби: '{context.time_of_day}'")
+            logger.debug(f"  [4] Додано модифікатор часу доби: '{context.time_of_day}'")
         
+        # 5. 💎 ОНОВЛЕНО: Додавання інструкції по формату В КІНЦІ, для найвищого пріоритету
+        format_instruction = self._select_format_instruction(context.last_message_intent)
+        if format_instruction:
+            prompt_parts.append(format_instruction)
+            logger.debug(f"  [5] Додано ФІНАЛЬНУ інструкцію по формату для наміру '{context.last_message_intent}'.")
+
         final_prompt = "\n\n".join(prompt_parts)
         logger.info(f"PromptDirector: Промпт для {context.user_id} успішно зібрано. Довжина: {len(final_prompt)} символів.")
         
