@@ -9,6 +9,7 @@ import html
 import re
 from typing import Literal
 
+# Перейменовано для кращої семантики
 ResponseType = Literal["default", "success", "error", "joke", "technical", "tip"]
 
 # Словник для заголовків та емодзі за типами контенту
@@ -26,7 +27,9 @@ def _sanitize_html(text: str) -> str:
     Очищає текст від непідтримуваних Telegram HTML-тегів.
     Замінює <br> на новий рядок.
     """
-    return re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE).strip()
+    # Заміна <br> та <br/> на символ нового рядка
+    sanitized_text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    return sanitized_text.strip()
 
 def format_bot_response(
     text: str,
@@ -36,8 +39,16 @@ def format_bot_response(
     """
     Форматує будь-який текст у стандартний вигляд відповіді бота.
     Для типів 'default', 'joke', 'success' повертає "сирий" текст для природного спілкування.
+
+    Args:
+        text: Основний текст повідомлення.
+        response_type: Тип контенту для вибору стилю відповіді.
+        tip: Необов'язкова порада, що буде додана в кінці.
+
+    Returns:
+        Повністю відформатоване повідомлення у HTML або простому тексті.
     """
-    # ❗️ ШВИДКЕ РІШЕННЯ: Для звичайних розмовних відповідей повертаємо текст без обгортки
+    # ШВИДКЕ РІШЕННЯ: Для звичайних розмовних відповідей повертаємо текст без обгортки
     if response_type in ["default", "joke", "success"]:
         return _sanitize_html(text)
 
