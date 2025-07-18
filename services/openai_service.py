@@ -128,7 +128,6 @@ UNIVERSAL_VISION_PROMPT_TEMPLATE = """
 Дай живу, людську реакцію як справжній член MLBB-спільноти!
 """
 
-# ❗️ ОНОВЛЕНИЙ ПРОМПТ ДЛЯ ПОШУКОВОЇ СИСТЕМИ v4
 WEB_SEARCH_PROMPT_TEMPLATE = """
 Ти — GGenius, твій персональний AI-наставник та стратегічний аналітик у світі Mobile Legends. Ти "свій пацан", який завжди на вайбі.
 
@@ -140,29 +139,15 @@ WEB_SEARCH_PROMPT_TEMPLATE = """
 - Запит: "{user_query}"
 
 **КРИТИЧНІ ІНСТРУКЦІЇ:**
-1.  **ЗАЛІЗНИЙ ФОКУС НА MLBB:** Твоя єдина сфера інтересів — це світ Mobile Legends.
-    - **Якщо запит стосується MLBB** (герої, предмети, кіберспорт, оновлення), дай пряму та детальну відповідь.
-    - **Якщо запит НЕ стосується MLBB** (погода, політика, загальні новини), **ввічливо поясни свою спеціалізацію**. Скажи, що ти експерт саме з Mobile Legends і не можеш надати точну інформацію на інші теми. Запропонуй допомогу з питаннями по грі.
-2.  **СТИЛЬ GGENIUS:** Говори як досвідчений геймер — впевнено, з гумором, використовуючи ігровий сленг ("катка", "імба", "нерф", "мета"). Додавай доречні емодзі (🔥, 🧠, 🏆, 💡).
-3.  **МАКСИМАЛЬНА СТИСЛІСТЬ:** Твоя відповідь має бути дуже короткою, приблизно **1000 символів**. Фокусуйся на найголовнішому. Не пиши довгих полотен тексту.
-4.  **БЕЗ ДЖЕРЕЛ (ЗА ЗАМОВЧУВАННЯМ):** **НЕ** додавай список джерел або посилання у свою відповідь. Виняток: якщо запит користувача прямо містить слова "посилання", "джерело", "сайт", "source", "link".
-5.  **ТІЛЬКИ HTML:** Використовуй **виключно HTML-теги** для форматування: `<b>` для акцентів, `<i>` для порад, `<code>` для назв. **ЗАБОРОНЕНО** використовувати Markdown (`**`, `[]()`).
-6.  **МОВА:** Відповідай українською.
+1.  **СТИЛЬ GGENIUS:** Говори як досвідчений геймер — впевнено, з гумором, використовуючи ігровий сленг ("катка", "імба", "нерф", "мета"). Додавай доречні емодзі (🔥, 🧠, 🏆, 💡).
+2.  **МАКСИМАЛЬНА ДОВЖИНА:** Твоя відповідь має бути дуже стислою, приблизно **1000 символів**. Фокусуйся на найголовнішому. Не пиши довгих полотен тексту.
+3.  **БЕЗ ДЖЕРЕЛ:** **НЕ** додавай посилання або список джерел у свою відповідь. Просто дай інформацію. Виняток: якщо користувач прямо попросив посилання.
+4.  **ФОРМАТУВАННЯ:** Використовуй HTML-теги для структурування: `<b>` для акцентів, `<i>` для порад, `<code>` для назв.
+5.  **МОВА:** Відповідай українською.
 
 Давай, видай базу по запиту! 🔥
 """
 
-def _sanitize_search_response(text: str) -> str:
-    """
-    Примусово конвертує Markdown у відповіді пошуку в HTML
-    і екранує потенційно небезпечні символи.
-    """
-    # Конвертація Markdown bold/italic в HTML
-    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-    text = re.sub(r'_(.*?)_', r'<i>\1</i>', text)
-    # Конвертація Markdown посилань в HTML
-    text = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2">\1</a>', text)
-    return text
 
 class MLBBChatGPT:
     TEXT_MODEL = "gpt-4.1" 
@@ -211,6 +196,7 @@ class MLBBChatGPT:
                 if payload.get("model") == self.TEXT_MODEL and "Контекст:" in payload["messages"][0].get("content", ""):
                     content = _filter_cringy_phrases(content)
                 
+                # ❗️ ВІДПОВІДЬ ПОВЕРТАЄТЬСЯ "СИРОЮ" - БЕЗ ФОРМАТУВАННЯ
                 return content.strip()
 
         except aiohttp.ClientConnectionError as e:
@@ -231,6 +217,7 @@ class MLBBChatGPT:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит до GGenius (/go) від '{user_name_escaped}': '{user_query[:100]}...'")
         
+        # Створюємо простий системний промпт для сумісності
         system_prompt = (
             "Ти — GGenius, твій персональний AI-наставник та стратегічний аналітик у світі Mobile Legends. "
             "Говори як досвідчений геймер — впевнено, з гумором, іноді з легкою іронією. "
@@ -255,8 +242,7 @@ class MLBBChatGPT:
             current_session = ClientSession(timeout=ClientTimeout(total=120), headers={"Authorization": f"Bearer {self.api_key}"}) 
             temp_session_created = True
         try:
-            raw_response = await self._execute_openai_request(current_session, payload, user_name_escaped)
-            return _sanitize_search_response(raw_response)
+            return await self._execute_openai_request(current_session, payload, user_name_escaped)
         finally:
             if temp_session_created and current_session and not current_session.closed:
                 await current_session.close()
@@ -466,6 +452,8 @@ class MLBBChatGPT:
                 await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для опису статистики закрито.")
     
+    # 💎 ОНОВЛЕНИЙ МЕТОД ГЕНЕРАЦІЇ РОЗМОВНОЇ ВІДПОВІДІ
+    # Метод є точкою входу до "Адаптивної Діалогової Системи" (ADS)
     async def generate_conversational_reply(
         self,
         user_id: int,
@@ -476,23 +464,30 @@ class MLBBChatGPT:
         """
         self.class_logger.info(f"Запит на розмовну відповідь для user_id '{user_id}' через нову систему.")
 
+        # 1. Збираємо повний вектор контексту
         context_vector = await gather_context(user_id, chat_history)
+
+        # 2. Будуємо динамічний системний промпт
         system_prompt = prompt_director.build_prompt(context_vector)
+        
+        # 3. Готуємо повідомлення для API
         messages = [{"role": "system", "content": system_prompt}] + chat_history
         
         user_name_for_error_msg = "друже"
         if context_vector.user_profile and context_vector.user_profile.get("nickname"):
             user_name_for_error_msg = html.escape(context_vector.user_profile["nickname"])
 
+        # 💎 ОНОВЛЕНА ЛОГІКА: Динамічні параметри для кращої адаптації
         intent = context_vector.last_message_intent
         temperature = {"technical_help": 0.4, "emotional_support": 0.75, "celebration": 0.8, "casual_chat": 0.9, "neutral": 0.7, "ambiguous_request": 0.6}.get(intent, 0.7)
         
+        # ❗️ Радикально зменшуємо max_tokens для коротких відповідей
         if intent in ["emotional_support", "celebration", "casual_chat", "ambiguous_request"]:
-            max_tokens = 60
+            max_tokens = 60  # Жорсткий ліміт для 1-2 речень
         elif intent == "technical_help":
-            max_tokens = 400
+            max_tokens = 400 # Дозволяємо більше для технічних пояснень
         else:
-            max_tokens = 150
+            max_tokens = 150 # Для нейтральних/інших запитів
 
         payload = {
             "model": self.TEXT_MODEL, 
@@ -512,8 +507,7 @@ class MLBBChatGPT:
             current_session = ClientSession(timeout=ClientTimeout(total=60), headers={"Authorization": f"Bearer {self.api_key}"})
             temp_session_created = True
         try:
-            raw_response = await self._execute_description_request(current_session, payload, user_name_for_error_msg)
-            return _sanitize_search_response(raw_response)
+            return await self._execute_description_request(current_session, payload, user_name_for_error_msg)
         finally:
             if temp_session_created and current_session and not current_session.closed:
                 await current_session.close()
@@ -690,33 +684,28 @@ class MLBBChatGPT:
                     self.class_logger.warning(f"Web Search API повернув порожню відповідь для запиту: '{user_query}'")
                     return f"На жаль, {user_name_escaped}, не вдалося знайти інформацію за твоїм запитом."
 
-                # ❗️ ЗАСТОСОВУЄМО САНІТАЙЗЕР ДО ВІДПОВІДІ
-                clean_text = _sanitize_search_response(message_content)
+                annotations = choice.get("message", {}).get("tool_calls", [{}])[0].get("function",{}).get("arguments",{}).get("citations", [])
+                
+                clean_text = re.sub(r'【\d+†source】', '', message_content).strip()
                 
                 sources_list_str = ""
-                if any(word in user_query.lower() for word in ["посилання", "сайт", "ресурс", "source", "link"]):
-                    tool_calls = choice.get("message", {}).get("tool_calls", [])
-                    annotations = []
-                    if tool_calls and "function" in tool_calls[0] and "arguments" in tool_calls[0]["function"]:
-                        try:
-                            args = json.loads(tool_calls[0]["function"]["arguments"])
-                            annotations = args.get("citations", [])
-                        except (json.JSONDecodeError, KeyError) as e:
-                            self.class_logger.warning(f"Не вдалося розпарсити цитати з tool_calls: {e}")
+                if annotations and any(word in user_query.lower() for word in ["посилання", "сайт", "ресурс", "source", "link"]):
+                    unique_sources = {}
+                    for anno in annotations:
+                        url = anno.get('url')
+                        if url and url not in unique_sources:
+                             unique_sources[url] = anno.get('title', url.split('/')[2])
 
-                    if annotations:
-                        unique_sources = {}
-                        for anno in annotations:
-                            url = anno.get('url')
-                            if url and url not in unique_sources:
-                                unique_sources[url] = anno.get('title', url.split('/')[2])
+                    if unique_sources:
+                        sources_list = []
+                        for i, (url, title) in enumerate(unique_sources.items(), 1):
+                            sources_list.append(f"{i}. <a href='{html.escape(url)}'>{html.escape(title)}</a>")
+                        
+                        sources_list_str = "\n\n<b>Джерела:</b>\n" + "\n".join(sources_list)
 
-                        if unique_sources:
-                            sources_list = [f'{i}. <a href="{html.escape(url)}">{html.escape(title)}</a>' 
-                                            for i, (url, title) in enumerate(unique_sources.items(), 1)]
-                            sources_list_str = "\n\n<b>Джерела:</b>\n" + "\n".join(sources_list)
-
-                return clean_text + sources_list_str
+                final_response = clean_text + sources_list_str
+                # ❗️ ВИКЛИК ЗАСТАРІЛОЇ ФУНКЦІЇ ВИДАЛЕНО, ПОВЕРТАЄМО "СИРИЙ" ТЕКСТ
+                return final_response
 
         except Exception as e:
             self.class_logger.exception(f"Критична помилка в get_web_search_response для {user_name_escaped}: {e}")
