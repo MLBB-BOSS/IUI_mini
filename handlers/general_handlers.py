@@ -765,6 +765,10 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
 
     if not response_text:
         response_text = f"Вибач, {user_name_escaped}, не вдалося отримати відповідь. Спробуй пізніше."
+    else:
+        # ❗️ НОВЕ: Замінюємо Markdown посилання на статичний текст
+        link_pattern = re.compile(r'\(\[.*?\]\(https?://\S+\)\)')
+        response_text = link_pattern.sub("🔗 Посилання", response_text)
 
     admin_info = ""
     # ❗️ FIX: Явне перетворення типів для надійного порівняння
