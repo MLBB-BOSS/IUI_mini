@@ -649,10 +649,9 @@ class MLBBChatGPT:
         payload = {
             "model": self.SEARCH_MODEL,
             "messages": [{"role": "system", "content": prompt}],
-            "max_tokens": 1500, 
-            "temperature": 0.5,
+            "max_tokens": 1500,
         }
-        self.class_logger.debug(f"Параметри для Web Search: {payload['model']=}, {payload['temperature']=}")
+        self.class_logger.debug(f"Параметри для Web Search: {payload['model']=}")
 
         current_session = self.session
         temp_session_created = False
