@@ -485,9 +485,9 @@ class MLBBChatGPT:
         if intent in ["emotional_support", "celebration", "casual_chat", "ambiguous_request"]:
             max_tokens = 60  # Жорсткий ліміт для 1-2 речень
         elif intent == "technical_help":
-            max_tokens = 400 # Дозволяємо більше для технічних пояснень
+            max_tokens = 600 # Дозволяємо більше для технічних пояснень
         else:
-            max_tokens = 150 # Для нейтральних/інших запитів
+            max_tokens = 250 # Для нейтральних/інших запитів
 
         payload = {
             "model": self.TEXT_MODEL, 
