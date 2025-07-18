@@ -732,24 +732,6 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
     if not user: return
     user_name_escaped = get_user_display_name(user)
     user_id = user.id
-
-    # --- 🚀 НОВА ЛОГІКА ОБМЕЖЕННЯ ЧАСТОТИ ЗАПИТІВ 🚀 ---
-    current_time = time.time()
-    
-    # Адмін ігнорує обмеження
-    # ❗️ FIX: Явне перетворення типів для надійного порівняння
-    if int(user_id) != int(ADMIN_USER_ID):
-        last_search_time = search_cooldowns.get(user_id, 0)
-        time_elapsed = current_time - last_search_time
-        
-        if time_elapsed < SEARCH_COOLDOWN_SECONDS:
-            time_left = round(SEARCH_COOLDOWN_SECONDS - time_elapsed)
-            logger.warning(f"Користувач {user_name_escaped} (ID: {user_id}) перевищив ліміт /search. Залишилось {time_left} сек.")
-            await message.reply(
-                f"⏳ Забагато запитів, {user_name_escaped}. "
-                f"Наступний пошук буде доступний через <b>{time_left} секунд</b>."
-            )
-            return
     
     user_query = message.text.replace("/search", "", 1).strip() if message.text else ""
 
@@ -758,10 +740,6 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
     if not user_query:
         await message.reply(f"Привіт, <b>{user_name_escaped}</b>! 🔎\nНапиши запит після <code>/search</code>, наприклад:\n<code>/search останні зміни балансу героїв</code>", parse_mode=ParseMode.HTML)
         return
-
-    # Оновлюємо час останнього запиту для користувача (тільки якщо запит валідний)
-    if int(user_id) != int(ADMIN_USER_ID):
-        search_cooldowns[user_id] = current_time
 
     thinking_msg = await message.reply(f"🛰️ {user_name_escaped}, шукаю найсвіжішу інформацію в Інтернеті...")
     start_time = time.time()
@@ -776,7 +754,8 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
         response_text = f"Вибач, {user_name_escaped}, не вдалося отримати відповідь. Спробуй пізніше."
 
     admin_info = ""
-    if user_id == ADMIN_USER_ID:
+    # ❗️ FIX: Явне перетворення типів для надійного порівняння
+    if int(user_id) == int(ADMIN_USER_ID):
         admin_info = f"\n\n<i>⏱ {processing_time:.2f}с | OpenAI ({gpt_client.SEARCH_MODEL})</i>"
     
     full_response_to_send = f"{response_text}{admin_info}"
