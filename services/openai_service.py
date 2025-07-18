@@ -128,6 +128,7 @@ UNIVERSAL_VISION_PROMPT_TEMPLATE = """
 Дай живу, людську реакцію як справжній член MLBB-спільноти!
 """
 
+# 🚀 НОВИЙ ШАБЛОН ПРОМПТУ ДЛЯ ПОШУКУ
 WEB_SEARCH_PROMPT_TEMPLATE = """
 Ти — GGenius, твій персональний AI-наставник та стратегічний аналітик у світі Mobile Legends. Ти "свій пацан", який завжди на вайбі.
 
@@ -152,6 +153,7 @@ WEB_SEARCH_PROMPT_TEMPLATE = """
 class MLBBChatGPT:
     TEXT_MODEL = "gpt-4.1" 
     VISION_MODEL = "gpt-4.1"
+    # 🚀 НОВА КОНСТАНТА ДЛЯ ПОШУКОВОЇ МОДЕЛІ
     SEARCH_MODEL = "gpt-4o-mini-search-preview"
 
     def __init__(self, api_key: str) -> None:
@@ -196,7 +198,6 @@ class MLBBChatGPT:
                 if payload.get("model") == self.TEXT_MODEL and "Контекст:" in payload["messages"][0].get("content", ""):
                     content = _filter_cringy_phrases(content)
                 
-                # ❗️ ВІДПОВІДЬ ПОВЕРТАЄТЬСЯ "СИРОЮ" - БЕЗ ФОРМАТУВАННЯ
                 return content.strip()
 
         except aiohttp.ClientConnectionError as e:
@@ -217,7 +218,6 @@ class MLBBChatGPT:
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит до GGenius (/go) від '{user_name_escaped}': '{user_query[:100]}...'")
         
-        # Створюємо простий системний промпт для сумісності
         system_prompt = (
             "Ти — GGenius, твій персональний AI-наставник та стратегічний аналітик у світі Mobile Legends. "
             "Говори як досвідчений геймер — впевнено, з гумором, іноді з легкою іронією. "
@@ -452,8 +452,6 @@ class MLBBChatGPT:
                 await current_session.close()
                 self.class_logger.debug("Тимчасову сесію для опису статистики закрито.")
     
-    # 💎 ОНОВЛЕНИЙ МЕТОД ГЕНЕРАЦІЇ РОЗМОВНОЇ ВІДПОВІДІ
-    # Метод є точкою входу до "Адаптивної Діалогової Системи" (ADS)
     async def generate_conversational_reply(
         self,
         user_id: int,
@@ -463,31 +461,23 @@ class MLBBChatGPT:
         Генерує розмовну відповідь, використовуючи нову динамічну систему промптів.
         """
         self.class_logger.info(f"Запит на розмовну відповідь для user_id '{user_id}' через нову систему.")
-
-        # 1. Збираємо повний вектор контексту
         context_vector = await gather_context(user_id, chat_history)
-
-        # 2. Будуємо динамічний системний промпт
         system_prompt = prompt_director.build_prompt(context_vector)
-        
-        # 3. Готуємо повідомлення для API
         messages = [{"role": "system", "content": system_prompt}] + chat_history
         
         user_name_for_error_msg = "друже"
         if context_vector.user_profile and context_vector.user_profile.get("nickname"):
             user_name_for_error_msg = html.escape(context_vector.user_profile["nickname"])
 
-        # 💎 ОНОВЛЕНА ЛОГІКА: Динамічні параметри для кращої адаптації
         intent = context_vector.last_message_intent
         temperature = {"technical_help": 0.4, "emotional_support": 0.75, "celebration": 0.8, "casual_chat": 0.9, "neutral": 0.7, "ambiguous_request": 0.6}.get(intent, 0.7)
         
-        # ❗️ Радикально зменшуємо max_tokens для коротких відповідей
         if intent in ["emotional_support", "celebration", "casual_chat", "ambiguous_request"]:
-            max_tokens = 60  # Жорсткий ліміт для 1-2 речень
+            max_tokens = 60
         elif intent == "technical_help":
-            max_tokens = 400 # Дозволяємо більше для технічних пояснень
+            max_tokens = 400
         else:
-            max_tokens = 150 # Для нейтральних/інших запитів
+            max_tokens = 150
 
         payload = {
             "model": self.TEXT_MODEL, 
@@ -646,9 +636,10 @@ class MLBBChatGPT:
                 await current_session.close()
                 self.class_logger.debug(f"Тимчасову сесію для analyze_user_profile закрито.")
 
+    # 🚀 ПОВНІСТЮ ОНОВЛЕНИЙ МЕТОД ДЛЯ ПОШУКУ
     async def get_web_search_response(self, user_name: str, user_query: str) -> str:
         """
-        Виконує запит до спеціалізованої пошукової моделі OpenAI та форматує відповідь з цитатами.
+        Виконує запит до спеціалізованої пошукової моделі OpenAI та форматує відповідь.
         """
         user_name_escaped = html.escape(user_name)
         self.class_logger.info(f"Запит до Web Search (/search) від '{user_name_escaped}': '{user_query[:100]}...'")
@@ -657,10 +648,11 @@ class MLBBChatGPT:
         
         payload = {
             "model": self.SEARCH_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "system", "content": prompt}],
             "max_tokens": 1500, 
+            "temperature": 0.5,
         }
-        self.class_logger.debug(f"Параметри для Web Search: {payload['model']=}, {payload['max_tokens']=}")
+        self.class_logger.debug(f"Параметри для Web Search: {payload['model']=}, {payload['temperature']=}")
 
         current_session = self.session
         temp_session_created = False
@@ -670,43 +662,8 @@ class MLBBChatGPT:
             temp_session_created = True
         
         try:
-            async with current_session.post("https://api.openai.com/v1/chat/completions", json=payload) as response:
-                response_data = await response.json()
-                if response.status != 200:
-                    error_details = response_data.get("error", {}).get("message", str(response_data))
-                    self.class_logger.error(f"Web Search API HTTP помилка: {response.status} - {error_details}")
-                    return f"Вибач, {user_name_escaped}, сервіс пошуку тимчасово недоступний (код: {response.status})."
-
-                choice = response_data.get("choices", [{}])[0]
-                message_content = choice.get("message", {}).get("content")
-
-                if not message_content:
-                    self.class_logger.warning(f"Web Search API повернув порожню відповідь для запиту: '{user_query}'")
-                    return f"На жаль, {user_name_escaped}, не вдалося знайти інформацію за твоїм запитом."
-
-                annotations = choice.get("message", {}).get("tool_calls", [{}])[0].get("function",{}).get("arguments",{}).get("citations", [])
-                
-                clean_text = re.sub(r'【\d+†source】', '', message_content).strip()
-                
-                sources_list_str = ""
-                if annotations and any(word in user_query.lower() for word in ["посилання", "сайт", "ресурс", "source", "link"]):
-                    unique_sources = {}
-                    for anno in annotations:
-                        url = anno.get('url')
-                        if url and url not in unique_sources:
-                             unique_sources[url] = anno.get('title', url.split('/')[2])
-
-                    if unique_sources:
-                        sources_list = []
-                        for i, (url, title) in enumerate(unique_sources.items(), 1):
-                            sources_list.append(f"{i}. <a href='{html.escape(url)}'>{html.escape(title)}</a>")
-                        
-                        sources_list_str = "\n\n<b>Джерела:</b>\n" + "\n".join(sources_list)
-
-                final_response = clean_text + sources_list_str
-                # ❗️ ВИКЛИК ЗАСТАРІЛОЇ ФУНКЦІЇ ВИДАЛЕНО, ПОВЕРТАЄМО "СИРИЙ" ТЕКСТ
-                return final_response
-
+            # Використовуємо _execute_openai_request, оскільки він вже має обробку помилок
+            return await self._execute_openai_request(current_session, payload, user_name_escaped)
         except Exception as e:
             self.class_logger.exception(f"Критична помилка в get_web_search_response для {user_name_escaped}: {e}")
             return f"Щось пішло не так під час пошуку, {user_name_escaped}. Спробуй пізніше."
