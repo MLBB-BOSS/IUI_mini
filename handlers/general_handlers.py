@@ -733,6 +733,16 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
     user_name_escaped = get_user_display_name(user)
     user_id = user.id
     
+    # 🚀 ЛОГІКА КУЛДАУНУ
+    current_time = time.time()
+    last_search_time = search_cooldowns.get(user_id, 0)
+    
+    if (current_time - last_search_time) < SEARCH_COOLDOWN_SECONDS:
+        seconds_left = int(SEARCH_COOLDOWN_SECONDS - (current_time - last_search_time))
+        await message.reply(f"⏳ Зачекай, будь ласка, ще {seconds_left} сек. перед наступним пошуком.")
+        logger.warning(f"Користувач {user_name_escaped} (ID: {user_id}) намагається використати /search занадто часто.")
+        return
+
     user_query = message.text.replace("/search", "", 1).strip() if message.text else ""
 
     logger.info(f"Користувач {user_name_escaped} (ID: {user_id}) зробив пошуковий запит: '{user_query}'")
@@ -746,6 +756,9 @@ async def cmd_search(message: Message, state: FSMContext, bot: Bot):
     
     async with gpt_client as gpt:
         response_text = await gpt.get_web_search_response(user_name_escaped, user_query)
+    
+    # 🚀 ОНОВЛЮЄМО ЧАС ОСТАННЬОГО ПОШУКУ
+    search_cooldowns[user_id] = time.time()
     
     processing_time = time.time() - start_time
     logger.info(f"Час обробки /search для '{user_query}': {processing_time:.2f}с")
