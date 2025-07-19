@@ -88,6 +88,7 @@ def is_party_request_message(message: Message) -> bool:
 def get_lobby_message_text(lobby_data: dict, joining_user_name: str | None = None) -> str:
     """Створює розширений та візуально привабливий текст для лобі-повідомлення."""
     leader_name = html.escape(lobby_data['leader_name'])
+    leader_id = lobby_data['leader_id']
     game_mode = lobby_data.get('game_mode', 'Ranked')
     party_size = lobby_data.get('party_size', 5)
 
@@ -98,25 +99,27 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: str | None = Non
 
     sorted_players = sorted(lobby_data['players'].items(), key=lambda item: ALL_ROLES.index(item[1]['role']))
     
-    # ❗️ ОНОВЛЕНО: Додаємо ранг до відображення гравця
     players_list = []
-    for _, player_info in sorted_players:
+    for player_id, player_info in sorted_players:
         player_name = html.escape(player_info['name'])
+        player_mention = f"<a href='tg://user?id={player_id}'>{player_name}</a>"
         player_role = player_info['role']
         player_rank = html.escape(player_info.get('rank', 'невідомий'))
         players_list.append(
-            f"  {role_emoji_map.get(player_role, '🔹')} <b>{player_role}:</b> {player_name} (<i>{player_rank}</i>)"
+            f"  {role_emoji_map.get(player_role, '🔹')} <b>{player_role}:</b> {player_mention} (<i>{player_rank}</i>)"
         )
     
     taken_roles = [player_info['role'] for _, player_info in sorted_players]
     available_slots_count = party_size - len(players_list)
     progress_bar = "🟢" * len(players_list) + "⚪" * available_slots_count
 
+    leader_mention = f"<a href='tg://user?id={leader_id}'>{leader_name}</a>"
+
     text_parts = [
         f"<b>{mode_display}</b>",
         f"<b>🧑‍🤝‍🧑 ЗБІР КОМАНДИ</b>",
         "─────────────────",
-        f"👑 <b>Лідер:</b> {leader_name}",
+        f"👑 <b>Лідер:</b> {leader_mention}",
         f"📊 <b>Прогрес:</b> {progress_bar} ({len(players_list)}/{party_size})",
     ]
 
@@ -137,7 +140,6 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: str | None = Non
         
         text_parts.append("\n💬 <i>Натисни кнопку, щоб приєднатися!</i>")
     else:
-        # Цей блок більше не використовується, оскільки є функція notify_and_close_full_lobby
         text_parts.append("\n\n✅ <b>КОМАНДА ГОТОВА! ПОГНАЛИ! 🚀</b>")
         
     return f"<blockquote>" + "\n".join(text_parts) + "</blockquote>"
