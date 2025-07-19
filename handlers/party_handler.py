@@ -118,7 +118,7 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: str | None = Non
     text_parts = [
         f"<b>{mode_display}</b>",
         f"<b>🧑‍🤝‍🧑 ЗБІР КОМАНДИ</b>",
-        "─────────────────",
+        "───────────────",
         f"👑 <b>Лідер:</b> {leader_mention}",
         f"📊 <b>Прогрес:</b> {progress_bar} ({len(players_list)}/{party_size})",
     ]
@@ -179,7 +179,7 @@ async def notify_and_close_full_lobby(bot: Bot, lobby_id: int, lobby_data: dict[
         "",
         "Склад зібрано, погнали підкорювати ранги! 🚀",
         "",
-        "👥 <b>УЧАСНИКИ:</b>",
+        "🧑‍🤝‍🧑 <b>УЧАСНИКИ:</b>",
         *participants_list,
         "",
         "<i>P.S. Лідер, не забудь додати всіх у друзі та створити ігрове лобі.</i>"
@@ -490,7 +490,7 @@ async def step_back_to_party_size(callback: CallbackQuery, state: FSMContext):
         
     await state.set_state(PartyCreationFSM.waiting_for_party_size)
     await callback.message.edit_text(
-        "👥 <b>Крок 2/3: Розмір команди</b>\n\n"
+        "🧑‍🤝‍🧑 <b>Крок 2/3: Розмір команди</b>\n\n"
         "Тепер вибери, скільки гравців ти шукаєш:", 
         reply_markup=create_party_size_keyboard()
     )
