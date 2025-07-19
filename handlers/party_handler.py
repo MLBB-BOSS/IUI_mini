@@ -214,7 +214,7 @@ async def notify_and_close_full_lobby(bot: Bot, lobby_id: int, lobby_data: dict[
         f"🔗 <b><a href='{chat_link}'>Повернутися в чат</a></b>, щоб зв'язатися з командою.",
         "Успішної гри! ⭐"
     ]
-    dm_text = "\n".join(dm_parts)
+    dm_text = "<blockquote>" + "\n".join(dm_parts) + "</blockquote>"
 
     # Розсилка особистих повідомлень
     for player_id in players.keys():
