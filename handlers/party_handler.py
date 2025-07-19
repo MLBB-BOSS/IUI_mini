@@ -143,7 +143,7 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: str | None = Non
     return f"<blockquote>" + "\n".join(text_parts) + "</blockquote>"
 
 
-# === ❗️ НОВА ФУНКЦІЯ СПОВІЩЕННЯ ===
+# === ❗️ ОНОВЛЕНА ФУНКЦІЯ СПОВІЩЕННЯ ===
 async def notify_and_close_full_lobby(bot: Bot, lobby_id: int, lobby_data: dict[str, Any]):
     """
     Сповіщає учасників про повний збір, закриває лобі та видаляє його з активних.
@@ -153,16 +153,34 @@ async def notify_and_close_full_lobby(bot: Bot, lobby_id: int, lobby_data: dict[
     chat_id = lobby_data["chat_id"]
     players = lobby_data.get("players", {})
     
-    mentions = []
-    for player_id, player_info in players.items():
-        mentions.append(f"<a href='tg://user?id={player_id}'>{html.escape(player_info['name'])}</a>")
+    role_emoji_map = {"EXP": "⚔️", "ЛІС": "🌳", "МІД": "🧙", "АДК": "🏹", "РОУМ": "🛡️"}
     
-    final_text = (
-        f"✅ <b>КОМАНДА ГОТОВА!</b>\n\n"
-        f"Склад зібрано, погнали підкорювати ранги! 🚀\n\n"
-        f"Учасники: {', '.join(mentions)}\n\n"
-        f"<i>P.S. Лідер, не забудь додати всіх у друзі та створити ігрове лобі.</i>"
-    )
+    # Сортуємо гравців за роллю для красивого виводу
+    sorted_players = sorted(players.items(), key=lambda item: ALL_ROLES.index(item[1]['role']))
+    
+    # Формуємо список учасників з ролями
+    participants_list = []
+    for player_id, player_info in sorted_players:
+        mention = f"<a href='tg://user?id={player_id}'>{html.escape(player_info['name'])}</a>"
+        role = player_info['role']
+        rank = html.escape(player_info.get('rank', 'невідомий'))
+        emoji = role_emoji_map.get(role, '🔹')
+        participants_list.append(
+            f"  {emoji} <b>{role}:</b> {mention} (<i>{rank}</i>)"
+        )
+    
+    final_text_parts = [
+        "✅ <b>КОМАНДА ГОТОВА!</b>",
+        "",
+        "Склад зібрано, погнали підкорювати ранги! 🚀",
+        "",
+        "👥 <b>УЧАСНИКИ:</b>",
+        *participants_list,
+        "",
+        "<i>P.S. Лідер, не забудь додати всіх у друзі та створити ігрове лобі.</i>"
+    ]
+    
+    final_text = "<blockquote>" + "\n".join(final_text_parts) + "</blockquote>"
 
     try:
         await bot.edit_message_text(
@@ -184,7 +202,7 @@ async def notify_and_close_full_lobby(bot: Bot, lobby_id: int, lobby_data: dict[
     )
     for player_id in players.keys():
         try:
-            await bot.send_message(player_id, dm_text)
+            await bot.send_message(player_id, dm_text, parse_mode=ParseMode.HTML)
             await asyncio.sleep(0.1) # Невеликий таймаут, щоб уникнути спам-фільтрів
         except TelegramAPIError as e:
             logger.warning(f"Не вдалося надіслати особисте повідомлення гравцю {player_id} з лобі {lobby_id}: {e}")
