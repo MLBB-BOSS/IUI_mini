@@ -151,6 +151,8 @@ async def notify_and_close_full_lobby(bot: Bot, lobby_id: int, lobby_data: dict[
     logger.info(f"Команда для лобі {lobby_id} повністю зібрана. Розсилаю сповіщення.")
     
     chat_id = lobby_data["chat_id"]
+    chat_title = lobby_data.get("chat_title", "цьому чаті")
+    chat_username = lobby_data.get("chat_username")
     players = lobby_data.get("players", {})
     
     role_emoji_map = {"EXP": "⚔️", "ЛІС": "🌳", "МІД": "🧙", "АДК": "🏹", "РОУМ": "🛡️"}
@@ -169,7 +171,8 @@ async def notify_and_close_full_lobby(bot: Bot, lobby_id: int, lobby_data: dict[
             f"  {emoji} <b>{role}:</b> {mention} (<i>{rank}</i>)"
         )
     
-    final_text_parts = [
+    # Формуємо повідомлення для групового чату
+    group_message_parts = [
         "✅ <b>КОМАНДА ГОТОВА!</b>",
         "",
         "Склад зібрано, погнали підкорювати ранги! 🚀",
@@ -179,12 +182,11 @@ async def notify_and_close_full_lobby(bot: Bot, lobby_id: int, lobby_data: dict[
         "",
         "<i>P.S. Лідер, не забудь додати всіх у друзі та створити ігрове лобі.</i>"
     ]
-    
-    final_text = "<blockquote>" + "\n".join(final_text_parts) + "</blockquote>"
+    group_message_text = "<blockquote>" + "\n".join(group_message_parts) + "</blockquote>"
 
     try:
         await bot.edit_message_text(
-            text=final_text,
+            text=group_message_text,
             chat_id=chat_id,
             message_id=lobby_id,
             reply_markup=None,
@@ -193,16 +195,31 @@ async def notify_and_close_full_lobby(bot: Bot, lobby_id: int, lobby_data: dict[
     except TelegramAPIError as e:
         logger.error(f"Не вдалося оновити фінальне повідомлення для лобі {lobby_id}: {e}")
 
+    # Формуємо посилання на чат
+    if chat_username:
+        chat_link = f"https://t.me/{chat_username}"
+    else:
+        # Для приватних чатів посилання на повідомлення є більш надійним
+        # Використовуємо -100 префікс для ID супергруп
+        supergroup_chat_id = str(chat_id).replace("-100", "")
+        chat_link = f"https://t.me/c/{supergroup_chat_id}/{lobby_id}"
+
+    # Формуємо особисте повідомлення
+    dm_parts = [
+        f"🔥 <b>Паті в чаті «<a href='{chat_link}'>{html.escape(chat_title)}</a>» повністю зібрано!</b>",
+        "",
+        "👥 <b>ВАША КОМАНДА:</b>",
+        *participants_list,
+        "",
+        f"🔗 <b><a href='{chat_link}'>Повернутися в чат</a></b>, щоб зв'язатися з командою.",
+        "Успішної гри! ⭐"
+    ]
+    dm_text = "\n".join(dm_parts)
+
     # Розсилка особистих повідомлень
-    dm_text = (
-        f"🔥 Паті, до якого ти приєднався, повністю зібрано!\n\n"
-        f"Лідер: {html.escape(lobby_data['leader_name'])}\n"
-        f"Режим: {lobby_data['game_mode']}\n\n"
-        f"Повертайся в чат, щоб зв'язатися з командою. Успішної гри!"
-    )
     for player_id in players.keys():
         try:
-            await bot.send_message(player_id, dm_text, parse_mode=ParseMode.HTML)
+            await bot.send_message(player_id, dm_text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
             await asyncio.sleep(0.1) # Невеликий таймаут, щоб уникнути спам-фільтрів
         except TelegramAPIError as e:
             logger.warning(f"Не вдалося надіслати особисте повідомлення гравцю {player_id} з лобі {lobby_id}: {e}")
@@ -386,6 +403,7 @@ async def confirm_required_roles_and_create_lobby(callback: CallbackQuery, state
 async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bot):
     if not callback.message: return
     user = callback.from_user
+    chat = callback.message.chat
     state_data = await state.get_data()
     
     user_name = get_user_display_name(callback)
@@ -400,7 +418,9 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
         "leader_id": user.id,
         "leader_name": user_name,
         "players": {user.id: {"name": user_name, "role": leader_role, "rank": user_rank}},
-        "chat_id": callback.message.chat.id,
+        "chat_id": chat.id,
+        "chat_title": chat.title,
+        "chat_username": chat.username,
         "state": "open",
         "joining_user": None,
         "game_mode": state_data.get("game_mode", "Ranked"),
