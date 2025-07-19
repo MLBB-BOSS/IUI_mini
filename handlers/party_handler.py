@@ -314,7 +314,7 @@ async def prompt_for_party_size(callback: CallbackQuery, state: FSMContext):
     await state.update_data(game_mode=game_mode)
     await state.set_state(PartyCreationFSM.waiting_for_party_size)
     await callback.message.edit_text(
-        "👥 <b>Крок 2/3: Розмір команди</b>\n\n"
+        "🧑‍🤝‍🧑 <b>Крок 2/3: Розмір команди</b>\n\n"
         "Тепер вибери, скільки гравців ти шукаєш:", 
         reply_markup=create_party_size_keyboard()
     )
