@@ -53,15 +53,19 @@ class PromptDirector:
         else:
             logger.warning("  [1] Увага: 'base_persona' не знайдено в бібліотеці!")
 
-        # 2. СТИЛІСТИЧНИЙ ШАР: Інтегруємо гід, якщо він існує
+        # 2. СТИЛІСТИЧНИЙ ШАР: Інтегруємо гід, якщо він існує та валідний
         style_guide = self.library.get("style_guide")
-        if style_guide and isinstance(style_guide, dict):
+        # ❗️ НОВА ВАЛІДАЦІЯ
+        if style_guide and isinstance(style_guide, dict) and all(k in style_guide for k in ["slang_dictionary", "common_topics", "instruction"]):
             try:
                 style_guide_text = yaml.dump(style_guide, allow_unicode=True, sort_keys=False, indent=2)
                 prompt_parts.append(f"Ось твій гід по стилю спілкування, заснований на реальних чатах гравців. Використовуй його як основу для свого тону та лексики:\n\n---\n{style_guide_text}\n---")
                 logger.debug("  [2] Застосовано 'Стилістичний Гід' з бібліотеки.")
             except Exception as e:
                 logger.error(f"Не вдалося серіалізувати style_guide в YAML: {e}")
+        elif style_guide:
+            logger.warning("  [2] 'Стилістичний Гід' знайдено, але він має невірну структуру. Пропускається.")
+
 
         # 3. ПРІОРИТЕТНИЙ РЕЖИМ ДЛЯ НЕОДНОЗНАЧНИХ ЗАПИТІВ
         if context.last_message_intent == "ambiguous_request":
