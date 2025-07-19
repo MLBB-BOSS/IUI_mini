@@ -24,9 +24,11 @@ from handlers.general_handlers import (
     error_handler as general_error_handler,
     cmd_go
 )
+# ❗️ НОВІ ІМПОРТИ
+from handlers.party_handler import register_party_handlers
 from handlers.vision_handlers import register_vision_handlers
 from handlers.registration_handler import register_registration_handlers
-from handlers.user_settings_handler import register_settings_handlers  # ❗️ НОВИЙ ІМПОРТ
+from handlers.user_settings_handler import register_settings_handlers
 from games.reaction.handlers import register_reaction_handlers
 
 
@@ -86,7 +88,7 @@ async def sanitize_database():
 
 async def main() -> None:
     """Головна функція запуску бота."""
-    bot_version = "v4.3.0 (DB Schema Fix)"
+    bot_version = "v4.4.0 (Party Refactor)"
     logger.info(f"🚀 Запуск MLBB IUI mini {bot_version}... (PID: {os.getpid()})")
 
     await sanitize_database()
@@ -98,10 +100,11 @@ async def main() -> None:
     await set_bot_commands(bot)
 
     # --- РЕЄСТРАЦІЯ ВСІХ РОУТЕРІВ ---
-    # ❗️ ВАЖЛИВО: Реєструємо специфічні роутери (ігри, реєстрація) ПЕРЕД загальними.
+    # ❗️ ВАЖЛИВО: Реєструємо специфічні роутери (паті, ігри, реєстрація) ПЕРЕД загальними.
+    register_party_handlers(dp)
     register_reaction_handlers(dp)
     register_registration_handlers(dp)
-    register_settings_handlers(dp) # ❗️ РЕЄСТРАЦІЯ НОВИХ ОБРОБНИКІВ
+    register_settings_handlers(dp)
     register_vision_handlers(dp, cmd_go_handler_func=cmd_go)
     
     # Загальний роутер, що містить "жадібні" обробники, реєструємо в останню чергу.
@@ -127,8 +130,7 @@ async def main() -> None:
                     f"🆔 @{bot_info.username}",
                     f"⏰ {launch_time_kyiv}",
                     "✨ <b>Зміни:</b>",
-                    "  • Виправлено збій БД (UndefinedTableError).",
-                    "  • Додано модель та міграцію для reaction_scores.",
+                    "  • Рефакторинг: логіку паті винесено в `party_handler`.",
                     "🟢 Готовий до роботи!"
                 ]
                 admin_message = "\n".join(admin_message_lines)
