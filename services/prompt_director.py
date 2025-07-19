@@ -2,6 +2,7 @@
 Директор Промптів: "мозок" системи, що конструює системні промпти
 на основі контексту.
 """
+import yaml
 from typing import Any, Dict, List
 
 from config import logger
@@ -24,14 +25,13 @@ class PromptDirector:
 
     def _select_persona(self, intent: Intent) -> str:
         """Обирає спеціалізовану персону на основі наміру."""
-        if intent in ["technical_help"]: # Видаляємо ambiguous_request звідси
+        if intent in ["technical_help"]:
             return "analyst"
         return "buddy"
 
     def _select_format_instruction(self, intent: Intent) -> str | None:
         """Обирає інструкцію форматування на основі наміру."""
         formats = self.library.get("formats", {})
-        # Для ambiguous_request формат вже вбудований у сам промпт
         if intent in ["emotional_support", "celebration", "casual_chat"]:
             return formats.get("ultra_brief")
         if intent == "technical_help":
@@ -53,7 +53,17 @@ class PromptDirector:
         else:
             logger.warning("  [1] Увага: 'base_persona' не знайдено в бібліотеці!")
 
-        # ❗️ ПРІОРИТЕТНИЙ РЕЖИМ ДЛЯ НЕОДНОЗНАЧНИХ ЗАПИТІВ
+        # 2. СТИЛІСТИЧНИЙ ШАР: Інтегруємо гід, якщо він існує
+        style_guide = self.library.get("style_guide")
+        if style_guide and isinstance(style_guide, dict):
+            try:
+                style_guide_text = yaml.dump(style_guide, allow_unicode=True, sort_keys=False, indent=2)
+                prompt_parts.append(f"Ось твій гід по стилю спілкування, заснований на реальних чатах гравців. Використовуй його як основу для свого тону та лексики:\n\n---\n{style_guide_text}\n---")
+                logger.debug("  [2] Застосовано 'Стилістичний Гід' з бібліотеки.")
+            except Exception as e:
+                logger.error(f"Не вдалося серіалізувати style_guide в YAML: {e}")
+
+        # 3. ПРІОРИТЕТНИЙ РЕЖИМ ДЛЯ НЕОДНОЗНАЧНИХ ЗАПИТІВ
         if context.last_message_intent == "ambiguous_request":
             logger.info("  [!] Активовано пріоритетний режим: 'ambiguous_request'")
             ambiguous_prompt = self.library.get("intents", {}).get("ambiguous_request")
@@ -68,18 +78,18 @@ class PromptDirector:
 
         # --- Стандартний потік для всіх інших намірів ---
 
-        # 2. СПЕЦІАЛІЗОВАНИЙ ШАР: Обираємо функціональну роль
+        # 4. СПЕЦІАЛІЗОВАНИЙ ШАР: Обираємо функціональну роль
         persona_key = self._select_persona(context.last_message_intent)
         specialist_persona_prompt = self.library.get("personas", {}).get(persona_key)
         if specialist_persona_prompt:
             prompt_parts.append(specialist_persona_prompt)
-            logger.debug(f"  [2] Застосовано спеціалізований шар: '{persona_key}'")
+            logger.debug(f"  [4] Застосовано спеціалізований шар: '{persona_key}'")
 
-        # 3. КОНТЕКСТНИЙ ШАР: Додаємо решту деталей
+        # 5. КОНТЕКСТНИЙ ШАР: Додаємо решту деталей
         intent_prompt = self.library.get("intents", {}).get(context.last_message_intent)
         if intent_prompt:
             prompt_parts.append(intent_prompt)
-            logger.debug(f"  [3] Додано намір: '{context.last_message_intent}'")
+            logger.debug(f"  [5] Додано намір: '{context.last_message_intent}'")
 
         if context.user_profile:
             profile_parts = []
@@ -89,13 +99,13 @@ class PromptDirector:
             if rank: profile_parts.append(f"Його поточний ранг: {rank}.")
             if profile_parts:
                 prompt_parts.append("Це контекст про користувача: " + " ".join(profile_parts))
-                logger.debug("  [4] Додано контекст профілю.")
+                logger.debug("  [6] Додано контекст профілю.")
 
-        # 4. ФІНАЛЬНИЙ ШАР: Інструкції по формату
+        # 6. ФІНАЛЬНИЙ ШАР: Інструкції по формату
         format_instruction = self._select_format_instruction(context.last_message_intent)
         if format_instruction:
             prompt_parts.append(format_instruction)
-            logger.debug(f"  [5] Додано інструкцію по формату для наміру '{context.last_message_intent}'.")
+            logger.debug(f"  [7] Додано інструкцію по формату для наміру '{context.last_message_intent}'.")
 
         final_prompt = "\n\n".join(prompt_parts)
         logger.info(f"PromptDirector: Промпт для {context.user_id} успішно зібрано. Довжина: {len(final_prompt)} символів.")
