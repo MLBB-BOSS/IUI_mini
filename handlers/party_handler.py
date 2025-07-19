@@ -7,10 +7,13 @@
 - Створення та оновлення інтерактивного повідомлення-лобі.
 - Обробки дій гравців: приєднання, вихід, вибір ролі.
 - Управління лобі лідером: закриття.
+- ❗️ НОВЕ: Інтеграція рангів гравців та сповіщення про повний збір.
 """
+import asyncio
 import html
 import logging
 import re
+from typing import Any
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ParseMode
@@ -19,7 +22,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import CallbackQuery, Message
 
-from database.crud import get_user_settings
+# ❗️ НОВІ ІМПОРТИ
+from database.crud import get_user_settings, get_user_by_telegram_id
 from keyboards.inline_keyboards import (
     ALL_ROLES,
     create_game_mode_keyboard,
@@ -61,6 +65,14 @@ def get_user_display_name(user: Message | CallbackQuery) -> str:
         return html.escape(from_user.username.strip())
     return "друже"
 
+async def _get_user_rank(user_id: int) -> str:
+    """Отримує ранг користувача з БД, якщо він зареєстрований."""
+    user_data = await get_user_by_telegram_id(user_id)
+    if user_data and user_data.get("current_rank"):
+        return user_data["current_rank"]
+    return "невідомий"
+
+
 def is_party_request_message(message: Message) -> bool:
     """Перевіряє, чи є повідомлення запитом на створення паті."""
     if not message.text:
@@ -85,10 +97,16 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: str | None = Non
     role_emoji_map = {"EXP": "⚔️", "ЛІС": "🌳", "МІД": "🧙", "АДК": "🏹", "РОУМ": "🛡️"}
 
     sorted_players = sorted(lobby_data['players'].items(), key=lambda item: ALL_ROLES.index(item[1]['role']))
-    players_list = [
-        f"  {role_emoji_map.get(player_info['role'], '🔹')} <b>{player_info['role']}:</b> {html.escape(player_info['name'])}"
-        for _, player_info in sorted_players
-    ]
+    
+    # ❗️ ОНОВЛЕНО: Додаємо ранг до відображення гравця
+    players_list = []
+    for _, player_info in sorted_players:
+        player_name = html.escape(player_info['name'])
+        player_role = player_info['role']
+        player_rank = html.escape(player_info.get('rank', 'невідомий'))
+        players_list.append(
+            f"  {role_emoji_map.get(player_role, '🔹')} <b>{player_role}:</b> {player_name} (<i>{player_rank}</i>)"
+        )
     
     taken_roles = [player_info['role'] for _, player_info in sorted_players]
     available_slots_count = party_size - len(players_list)
@@ -119,9 +137,62 @@ def get_lobby_message_text(lobby_data: dict, joining_user_name: str | None = Non
         
         text_parts.append("\n💬 <i>Натисни кнопку, щоб приєднатися!</i>")
     else:
+        # Цей блок більше не використовується, оскільки є функція notify_and_close_full_lobby
         text_parts.append("\n\n✅ <b>КОМАНДА ГОТОВА! ПОГНАЛИ! 🚀</b>")
         
     return f"<blockquote>" + "\n".join(text_parts) + "</blockquote>"
+
+
+# === ❗️ НОВА ФУНКЦІЯ СПОВІЩЕННЯ ===
+async def notify_and_close_full_lobby(bot: Bot, lobby_id: int, lobby_data: dict[str, Any]):
+    """
+    Сповіщає учасників про повний збір, закриває лобі та видаляє його з активних.
+    """
+    logger.info(f"Команда для лобі {lobby_id} повністю зібрана. Розсилаю сповіщення.")
+    
+    chat_id = lobby_data["chat_id"]
+    players = lobby_data.get("players", {})
+    
+    mentions = []
+    for player_id, player_info in players.items():
+        mentions.append(f"<a href='tg://user?id={player_id}'>{html.escape(player_info['name'])}</a>")
+    
+    final_text = (
+        f"✅ <b>КОМАНДА ГОТОВА!</b>\n\n"
+        f"Склад зібрано, погнали підкорювати ранги! 🚀\n\n"
+        f"Учасники: {', '.join(mentions)}\n\n"
+        f"<i>P.S. Лідер, не забудь додати всіх у друзі та створити ігрове лобі.</i>"
+    )
+
+    try:
+        await bot.edit_message_text(
+            text=final_text,
+            chat_id=chat_id,
+            message_id=lobby_id,
+            reply_markup=None,
+            parse_mode=ParseMode.HTML
+        )
+    except TelegramAPIError as e:
+        logger.error(f"Не вдалося оновити фінальне повідомлення для лобі {lobby_id}: {e}")
+
+    # Розсилка особистих повідомлень
+    dm_text = (
+        f"🔥 Паті, до якого ти приєднався, повністю зібрано!\n\n"
+        f"Лідер: {html.escape(lobby_data['leader_name'])}\n"
+        f"Режим: {lobby_data['game_mode']}\n\n"
+        f"Повертайся в чат, щоб зв'язатися з командою. Успішної гри!"
+    )
+    for player_id in players.keys():
+        try:
+            await bot.send_message(player_id, dm_text)
+            await asyncio.sleep(0.1) # Невеликий таймаут, щоб уникнути спам-фільтрів
+        except TelegramAPIError as e:
+            logger.warning(f"Не вдалося надіслати особисте повідомлення гравцю {player_id} з лобі {lobby_id}: {e}")
+            
+    # Видаляємо лобі з активних
+    if lobby_id in active_lobbies:
+        del active_lobbies[lobby_id]
+        logger.info(f"Лобі {lobby_id} успішно закрито та видалено з пам'яті.")
 
 
 # === ЛОГІКА СТВОРЕННЯ ПАТІ (FSM) ===
@@ -300,6 +371,8 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
     state_data = await state.get_data()
     
     user_name = get_user_display_name(callback)
+    # ❗️ Отримуємо ранг лідера
+    user_rank = await _get_user_rank(user.id)
     lobby_id = callback.message.message_id
     
     leader_role = state_data.get("leader_role")
@@ -308,7 +381,7 @@ async def create_party_lobby(callback: CallbackQuery, state: FSMContext, bot: Bo
     lobby_data = {
         "leader_id": user.id,
         "leader_name": user_name,
-        "players": {user.id: {"name": user_name, "role": leader_role}},
+        "players": {user.id: {"name": user_name, "role": leader_role, "rank": user_rank}},
         "chat_id": callback.message.chat.id,
         "state": "open",
         "joining_user": None,
@@ -461,21 +534,28 @@ async def handle_join_role_selection(callback: CallbackQuery, bot: Bot):
         return
 
     user_name = get_user_display_name(callback)
-    lobby_data["players"][user.id] = {"name": user_name, "role": selected_role}
+    # ❗️ Отримуємо ранг гравця, що приєднався
+    user_rank = await _get_user_rank(user.id)
+    lobby_data["players"][user.id] = {"name": user_name, "role": selected_role, "rank": user_rank}
     lobby_data["state"] = "open" 
     lobby_data["joining_user"] = None
     
-    new_text = get_lobby_message_text(lobby_data)
-    new_keyboard = create_lobby_keyboard(lobby_id, lobby_data)
-    
-    await bot.edit_message_text(
-        text=new_text,
-        chat_id=lobby_data["chat_id"],
-        message_id=lobby_id,
-        reply_markup=new_keyboard,
-        parse_mode=ParseMode.HTML
-    )
-    await callback.answer(f"Ти приєднався до паті з роллю: {selected_role}!", show_alert=True)
+    # ❗️ Перевіряємо, чи заповнилося лобі
+    if len(lobby_data["players"]) >= lobby_data.get("party_size", 5):
+        await notify_and_close_full_lobby(bot, lobby_id, lobby_data)
+        await callback.answer(f"Ти приєднався до паті! Команда зібрана!", show_alert=True)
+    else:
+        new_text = get_lobby_message_text(lobby_data)
+        new_keyboard = create_lobby_keyboard(lobby_id, lobby_data)
+        
+        await bot.edit_message_text(
+            text=new_text,
+            chat_id=lobby_data["chat_id"],
+            message_id=lobby_id,
+            reply_markup=new_keyboard,
+            parse_mode=ParseMode.HTML
+        )
+        await callback.answer(f"Ти приєднався до паті з роллю: {selected_role}!", show_alert=True)
 
 @party_router.callback_query(F.data.startswith("party_leave:"))
 async def handle_leave_lobby(callback: CallbackQuery, bot: Bot):
