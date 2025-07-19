@@ -206,7 +206,7 @@ async def notify_and_close_full_lobby(bot: Bot, lobby_id: int, lobby_data: dict[
 
     # Формуємо особисте повідомлення
     dm_parts = [
-        f"📝 <b><a href='{chat_link}'>{html.escape(chat_title)}</a></b>",
+        f"<b><a href='{chat_link}'>{html.escape(chat_title)}</a></b>",
         "✅ <b>Паті зібрано!</b>",
         "",
         "🧑‍🤝‍🧑 <b>ВАША КОМАНДА:</b>",
